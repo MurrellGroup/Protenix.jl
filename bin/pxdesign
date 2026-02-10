@@ -1,0 +1,25 @@
+#!/usr/bin/env julia
+
+repo_root = normpath(joinpath(@__DIR__, ".."))
+depot = joinpath(repo_root, ".julia_depot")
+mkpath(depot)
+
+# Keep execution sandbox-local by default.
+if !haskey(ENV, "JULIA_DEPOT_PATH")
+    ENV["JULIA_DEPOT_PATH"] = depot
+end
+if !haskey(ENV, "JULIAUP_DEPOT_PATH")
+    ENV["JULIAUP_DEPOT_PATH"] = depot
+end
+
+# Julia reads DEPOT_PATH at startup, so enforce it here before package loading.
+if isempty(Base.DEPOT_PATH) || Base.DEPOT_PATH[1] != depot
+    Base.DEPOT_PATH = vcat([depot], Base.DEPOT_PATH)
+end
+
+import Pkg
+Pkg.activate(repo_root; io = devnull)
+
+using PXDesign
+
+PXDesign.main()

@@ -1,0 +1,9 @@
+.julia_depot/
+.julia_config/
+Manifest.toml
+output/
+.venv_pyref/
+.pydeps/
+.external/
+weights_raw/
+release_data/

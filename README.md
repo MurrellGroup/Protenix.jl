@@ -1,0 +1,124 @@
+# PXDesign.jl
+
+Infer-only Julia port of PXDesign.
+
+## Status
+
+- Implemented:
+  - package scaffold and `bin/pxdesign` CLI (`infer`, `check-input`)
+  - YAML/JSON input normalization (with Python PyYAML compatibility shim)
+  - native mmCIF/PDB atom parsing + chain/crop filtering
+  - condition+binder feature bundle assembly
+  - diffusion scheduler/sampler parity primitives
+  - typed model scaffolding modules:
+    - embedders (`RelativePositionEncoding`, `ConditionTemplateEmbedder`)
+    - primitives (`LinearNoBias`, `LayerNormNoOffset`, `AdaptiveLayerNorm`, `Transition`)
+    - transformer blocks (`AttentionPairBias`, `ConditionedTransitionBlock`, `DiffusionTransformer`)
+    - atom attention stack (`AtomAttentionEncoder`, `AtomAttentionDecoder`) with shared cross-attention blocks
+    - design condition embedder (`InputFeatureEmbedderDesign`, `DesignConditionEmbedder`)
+    - diffusion conditioning + diffusion module scaffold
+    - raw weight loading for design + diffusion module trees
+  - infer scaffold that writes real CIF predictions and PXDesign-compatible output tree
+  - numeric parity harness for raw snapshot bundles:
+    - `PXDesign.Model.tensor_parity_report`
+    - `PXDesign.Model.compare_raw_weight_dirs`
+    - `scripts/compare_parity_raw.jl`
+- In progress:
+  - exact Python model architecture port (`pxdesign/model/*.py`)
+  - committed Python reference snapshot artifacts for CI parity gating
+  - full confidence heads/output parity
+
+## Quick Start
+
+```bash
+cd /Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl
+JULIA_DEPOT_PATH=$PWD/.julia_depot JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+  ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. bin/pxdesign infer \
+  -i /path/to/input.json \
+  -o ./output \
+  --set sample_diffusion.N_sample=2 \
+  --set sample_diffusion.N_step=10
+```
+
+Validate YAML inputs:
+
+```bash
+JULIA_DEPOT_PATH=$PWD/.julia_depot JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+  ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. bin/pxdesign check-input --yaml /path/to/input.yaml
+```
+
+Default config sets `download_cache=false` so infer runs without network. Enable PXDesign cache download explicitly with:
+
+```bash
+--set download_cache=true
+```
+
+Enable typed model-scaffold denoiser path:
+
+```bash
+--set model_scaffold.enabled=true
+```
+
+Checkpoint conversion bridge (for future exact weight loading):
+
+```bash
+python3 scripts/export_checkpoint_raw.py \
+  --checkpoint /path/to/pxdesign_v0.1.0.pt \
+  --outdir ./weights_raw \
+  --cast-float32
+```
+
+Then load in Julia via `PXDesign.Model.load_raw_weights("./weights_raw")`.
+
+To avoid manual scaffold shape mismatches, infer model dimensions directly from raw weights (diffusion + design embedder):
+
+```bash
+--set model_scaffold.enabled=true \
+--set model_scaffold.auto_dims_from_weights=true \
+--set raw_weights_dir=./weights_raw
+```
+
+Enforce strict key coverage (all expected keys present, no unexpected keys in the loaded model subtrees):
+
+```bash
+--set strict_weight_load=true
+```
+
+With `strict_weight_load=true` and both model scaffold + design condition embedder enabled, key coverage is validated against the full infer-only checkpoint tree.
+
+Use chunked diffusion sampling (matches Python runner structure for large `N_sample`) via:
+
+```bash
+--set infer_setting.sample_diffusion_chunk_size=10
+```
+
+Compare raw snapshot bundles for numeric parity:
+
+```bash
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+  bin/pxdesign parity-check ./reference_raw ./actual_raw --atol 1e-5 --rtol 1e-4
+```
+
+Run a tiny end-to-end CPU smoke with strict real raw weights (`N_sample=1`, `N_step=2`):
+
+```bash
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+  scripts/run_e2e_cpu_smoke.jl
+```
+
+State-dict assignment helpers are in:
+
+- `PXDesign.Model.load_condition_template_embedder!`
+- `PXDesign.Model.load_design_condition_embedder!`
+- `PXDesign.Model.load_relative_position_encoding!`
+- `PXDesign.Model.load_diffusion_conditioning!`
+- `PXDesign.Model.load_diffusion_transformer!`
+- `PXDesign.Model.load_diffusion_module!`
+
+## Port Plan
+
+See:
+
+- `docs/PORTING_PLAN.md`
+- `docs/INFER_ONLY_AUDIT.md`
+- `docs/MODEL_PORT_MAP.md`
