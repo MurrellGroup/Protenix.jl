@@ -1,0 +1,117 @@
+#!/usr/bin/env julia
+
+using LinearAlgebra
+using Statistics
+using Random
+using PXDesign
+
+function _nested_dims(x)
+    dims = Int[]
+    cur = x
+    while cur isa AbstractVector
+        push!(dims, length(cur))
+        isempty(cur) && break
+        cur = cur[1]
+    end
+    return dims
+end
+
+function _to_array_f32(x)
+    x isa AbstractVector || return Float32(x)
+    dims = _nested_dims(x)
+    out = Array{Float32}(undef, Tuple(dims)...)
+    idx = Int[]
+    function walk(y)
+        if y isa AbstractVector
+            for (i, z) in enumerate(y)
+                push!(idx, i)
+                walk(z)
+                pop!(idx)
+            end
+        else
+            out[Tuple(idx)...] = Float32(y)
+        end
+    end
+    walk(x)
+    return out
+end
+
+function _to_array_i(x)
+    x isa AbstractVector || return Int(x)
+    dims = _nested_dims(x)
+    out = Array{Int}(undef, Tuple(dims)...)
+    idx = Int[]
+    function walk(y)
+        if y isa AbstractVector
+            for (i, z) in enumerate(y)
+                push!(idx, i)
+                walk(z)
+                pop!(idx)
+            end
+        else
+            out[Tuple(idx)...] = Int(round(Float64(y)))
+        end
+    end
+    walk(x)
+    return out
+end
+
+function _report(name::AbstractString, py, jl)
+    a = Float32.(py)
+    b = Float32.(jl)
+    size(a) == size(b) || error("$name shape mismatch: py=$(size(a)) jl=$(size(b))")
+    d = abs.(a .- b)
+    rel = d ./ max.(abs.(a), 1f-6)
+    println(name)
+    println("  py_norm=", norm(a))
+    println("  jl_norm=", norm(b))
+    println("  max_abs=", maximum(d), " mean_abs=", mean(d), " max_rel=", maximum(rel))
+end
+
+function main()
+    path = get(ENV, "MSA_DIAG", "/tmp/py_msa_diag.json")
+    raw = PXDesign.JSONLite.parse_json(read(path, String))
+
+    z_in = _to_array_f32(raw["z_in"])
+    s_inputs = _to_array_f32(raw["s_inputs"])
+    msa = _to_array_i(raw["msa"])
+    has_del = _to_array_f32(raw["has_deletion"])
+    del_val = _to_array_f32(raw["deletion_value"])
+    m0_py = _to_array_f32(raw["m0"])
+    opm_py = _to_array_f32(raw["opm"])
+    z1_py = _to_array_f32(raw["z1"])
+    z2_py = _to_array_f32(raw["z2"])
+    z_out_py = _to_array_f32(raw["z_out"])
+
+    w = PXDesign.Model.load_safetensors_weights(joinpath(pwd(), "weights_safetensors_protenix_mini_default_v0.5.0"))
+    m = PXDesign.ProtenixMini.build_protenix_mini_model(w)
+    PXDesign.ProtenixMini.load_protenix_mini_model!(m, w; strict = true)
+
+    feat = Dict{String,Any}(
+        "msa" => msa,
+        "has_deletion" => has_del,
+        "deletion_value" => del_val,
+    )
+
+    msa_oh = PXDesign.ProtenixMini.one_hot_int(msa, 32)
+    msa_feat = cat(
+        msa_oh,
+        reshape(has_del, size(has_del, 1), size(has_del, 2), 1),
+        reshape(del_val, size(del_val, 1), size(del_val, 2), 1);
+        dims = 3,
+    )
+    m0_jl = m.msa_module.linear_no_bias_m(msa_feat)
+    m0_jl .+= reshape(m.msa_module.linear_no_bias_s(s_inputs), 1, size(s_inputs, 1), m.msa_module.c_m)
+    opm_jl = m.msa_module.blocks[1].outer_product_mean_msa(m0_jl)
+    z1_jl = z_in + opm_jl
+    _, z2_jl = m.msa_module.blocks[1].pair_stack(nothing, z1_jl; pair_mask = nothing)
+    z_out_jl = m.msa_module(feat, z_in, s_inputs; pair_mask = nothing, rng = MersenneTwister(0))
+
+    _report("msa.m0", m0_py, m0_jl)
+    _report("msa.opm", opm_py, opm_jl)
+    _report("msa.z1", z1_py, z1_jl)
+    _report("msa.z2", z2_py, z2_jl)
+    _report("msa.z_out", z_out_py, z_out_jl)
+end
+
+main()

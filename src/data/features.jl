@@ -3,12 +3,13 @@ module Features
 using Random
 
 import ...Schema: InputTask
+import ...Schema: GenerationSpec
 import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELEMS, STD_RESIDUES_PROTENIX
 import ..Tokenizer: AtomRecord, Token, TokenArray, centre_atom_indices, tokenize_atoms
 import ..Design: canonical_resname_for_atom, restype_onehot_encoded
 import ..Structure: load_structure_atoms
 
-export build_design_backbone_atoms, build_basic_feature_bundle
+export build_design_backbone_atoms, build_basic_feature_bundle, build_feature_bundle_from_atoms
 
 const CCDRefEntry = NamedTuple{
     (:atom_map, :coords, :charge, :mask),
@@ -84,6 +85,17 @@ function _atom_to_token_index(tokens::TokenArray, n_atom::Int)
         end
     end
     any(==( -1), out) && error("Atom-to-token mapping is incomplete.")
+    return out
+end
+
+function _atom_to_tokatom_index(tokens::TokenArray, n_atom::Int)
+    out = fill(-1, n_atom)
+    for tok in tokens
+        for (tok_atom_idx, atom_idx) in enumerate(tok.atom_indices)
+            out[atom_idx] = tok_atom_idx - 1
+        end
+    end
+    any(==( -1), out) && error("Atom-to-tokatom mapping is incomplete.")
     return out
 end
 
@@ -496,6 +508,7 @@ function _basic_atom_features(
         "ref_pos" => ref_pos,
         "ref_mask" => ref_mask,
         "ref_charge" => ref_charge,
+        "atom_to_tokatom_idx" => _atom_to_tokatom_index(tokens, n),
         "token_bonds" => zeros(Int, n_token, n_token),
     )
 end
@@ -632,6 +645,32 @@ function build_basic_feature_bundle(task::InputTask; rng::AbstractRNG = Random.d
 
     return Dict(
         "task_name" => task.name,
+        "atoms" => atoms,
+        "tokens" => tokens,
+        "input_feature_dict" => feat,
+        "dims" => dims,
+    )
+end
+
+function build_feature_bundle_from_atoms(
+    atoms::Vector{AtomRecord};
+    task_name::AbstractString = "custom",
+    hotspots::Dict{String, Vector{Int}} = Dict{String, Vector{Int}}(),
+    rng::AbstractRNG = Random.default_rng(),
+)
+    tokens = tokenize_atoms(atoms)
+    task = InputTask(
+        String(task_name),
+        "",
+        String[],
+        Dict{String, String}(),
+        hotspots,
+        Dict{String, Dict{String, Any}}(),
+        GenerationSpec[],
+    )
+    feat, dims = _build_feature_dict(atoms, tokens, task, rng)
+    return Dict(
+        "task_name" => String(task_name),
         "atoms" => atoms,
         "tokens" => tokens,
         "input_feature_dict" => feat,

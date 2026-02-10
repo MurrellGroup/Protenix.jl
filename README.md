@@ -27,6 +27,9 @@ Infer-only Julia port of PXDesign.
   - exact Python model architecture port (`pxdesign/model/*.py`)
   - committed Python reference snapshot artifacts for CI parity gating
   - full confidence heads/output parity
+  - ESM2 integration for Protenix-mini ESM/ISM variants:
+    - wire `esm_token_embedding` production from our Julia ESM2/ESMFold port
+    - load/use `input_embedder.linear_esm.weight` for `protenix_mini_esm_v0.5.0` and `protenix_mini_ism_v0.5.0`
 
 ## Quick Start
 
@@ -120,6 +123,53 @@ Compare raw snapshot bundles for numeric parity:
 ```bash
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
   bin/pxdesign parity-check ./reference_raw ./actual_raw --atol 1e-5 --rtol 1e-4
+```
+
+Compare a raw bundle directly against a safetensors bundle:
+
+```bash
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+  scripts/check_raw_vs_safetensors_parity.jl ./weights_raw ./weights_safetensors
+```
+
+Prepare Protenix-Mini safetensors and run parity + coverage audits in one command:
+
+```bash
+scripts/prepare_protenix_mini_safetensors.sh
+```
+
+This writes audit reports under:
+
+- `output/protenix_mini_audit/`
+
+See detailed status and coverage numbers in:
+
+- `docs/PROTENIX_MINI_PORT_STATUS.md`
+
+Prepare Protenix-Base v0.5.0 safetensors and run conversion + coverage audits:
+
+```bash
+scripts/prepare_protenix_base_safetensors.sh
+```
+
+See status/details in:
+
+- `docs/PROTENIX_BASE_PORT_STATUS.md`
+
+Run Julia-only Protenix-Mini sequence folding:
+
+```bash
+JULIA_DEPOT_PATH=$PWD/.julia_depot JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+scripts/fold_sequence_protenix_mini.jl "ACDEFGHIKLMNPQRSTVWY"
+```
+
+Run Julia-only Protenix-Base v0.5.0 sequence folding:
+
+```bash
+JULIA_DEPOT_PATH=$PWD/.julia_depot JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+scripts/fold_sequence_protenix_base.jl "ACDEFGHIKLMNPQRSTVWY"
 ```
 
 Run a tiny end-to-end CPU smoke with strict real raw weights (`N_sample=1`, `N_step=2`):

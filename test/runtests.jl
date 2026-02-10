@@ -16,6 +16,77 @@ function _as_string_dict_test(x)
     return x
 end
 
+@testset "ProtenixBase sequence wrappers" begin
+    atoms = PXDesign.ProtenixBase.build_sequence_atoms("ACD")
+    @test !isempty(atoms)
+    @test atoms[1].chain_id == "A0"
+
+    bundle = PXDesign.ProtenixBase.build_sequence_feature_bundle("ACD")
+    @test bundle["task_name"] == "protenix_base_sequence"
+    @test haskey(bundle, "input_feature_dict")
+    @test haskey(bundle, "dims")
+    @test bundle["dims"]["N_token"] == 3
+end
+
+@testset "Cache zero-byte checkpoint refresh" begin
+    mktempdir() do d
+        src_dir = joinpath(d, "src")
+        mkpath(src_dir)
+        src_components = joinpath(src_dir, "components.v20240608.cif")
+        src_rdkit = joinpath(src_dir, "components.v20240608.cif.rdkit_mol.pkl")
+        src_cluster = joinpath(src_dir, "clusters-by-entity-40.txt")
+        src_ckpt = joinpath(src_dir, "mock_model.pt")
+        write(src_components, "components")
+        write(src_rdkit, "rdkit")
+        write(src_cluster, "cluster")
+        write(src_ckpt, "checkpoint_payload")
+
+        data_dir = joinpath(d, "data")
+        ckpt_dir = joinpath(d, "checkpoint")
+        mkpath(data_dir)
+        mkpath(ckpt_dir)
+        target_components = joinpath(data_dir, "components.v20240608.cif")
+        target_rdkit = joinpath(data_dir, "components.v20240608.cif.rdkit_mol.pkl")
+        target_cluster = joinpath(data_dir, "clusters-by-entity-40.txt")
+        target_ckpt = joinpath(ckpt_dir, "mock_model.pt")
+
+        write(target_components, "")
+        write(target_rdkit, "")
+        write(target_cluster, "")
+        write(target_ckpt, "")
+
+        cfg = Dict{String, Any}(
+            "data" => Dict(
+                "ccd_components_file" => target_components,
+                "ccd_components_rdkit_mol_file" => target_rdkit,
+                "pdb_cluster_file" => target_cluster,
+            ),
+            "load_checkpoint_dir" => ckpt_dir,
+            "model_name" => "mock_model",
+        )
+
+        urls = Dict(
+            "ccd_components_file" => "file://$(abspath(src_components))",
+            "ccd_components_rdkit_mol_file" => "file://$(abspath(src_rdkit))",
+            "pdb_cluster_file" => "file://$(abspath(src_cluster))",
+            "mock_model" => "file://$(abspath(src_ckpt))",
+        )
+
+        PXDesign.Cache.ensure_inference_cache!(
+            cfg;
+            urls = urls,
+            include_protenix_checkpoints = false,
+            dry_run = false,
+            io = devnull,
+        )
+
+        @test read(target_components, String) == "components"
+        @test read(target_rdkit, String) == "rdkit"
+        @test read(target_cluster, String) == "cluster"
+        @test read(target_ckpt, String) == "checkpoint_payload"
+    end
+end
+
 @testset "JSONLite" begin
     payload = """
     {
@@ -155,6 +226,8 @@ ATOM 8 O O . TYR A 1 2 ? 4.900 2.300 0.200 1.00 11.00 ? 2 TYR A O 1
         @test feat["hotspot"][2] == 1f0
         @test feat["conditional_templ_mask"][1, 1] == 1
         @test feat["conditional_templ_mask"][3, 3] == 0
+        @test length(feat["atom_to_tokatom_idx"]) == dims["N_atom"]
+        @test minimum(feat["atom_to_tokatom_idx"]) == 0
     end
 end
 
@@ -165,6 +238,26 @@ end
     onehot = PXDesign.Data.restype_onehot_encoded(cano)
     @test size(onehot) == (2, 36)
     @test onehot[1, PXDesign.Data.STD_RESIDUES_WITH_GAP["xpb"] + 1] == 1f0
+end
+
+@testset "ProtenixMini sequence features" begin
+    atoms = PXDesign.build_sequence_atoms("ACD"; chain_id = "A0")
+    @test !isempty(atoms)
+    @test count(a -> a.atom_name == "CA", atoms) == 3
+    @test count(a -> a.atom_name == "OXT", atoms) == 1
+
+    bundle = PXDesign.build_sequence_feature_bundle("ACD"; chain_id = "A0")
+    feat = bundle["input_feature_dict"]
+    dims = bundle["dims"]
+    @test dims["N_token"] == 3
+    @test size(feat["restype"]) == (3, 32)
+    @test size(feat["profile"]) == (3, 32)
+    @test size(feat["msa"]) == (1, 3)
+    @test size(feat["has_deletion"]) == (1, 3)
+    @test size(feat["deletion_value"]) == (1, 3)
+    @test length(feat["deletion_mean"]) == 3
+    @test length(feat["atom_to_tokatom_idx"]) == dims["N_atom"]
+    @test length(feat["distogram_rep_atom_mask"]) == dims["N_atom"]
 end
 
 @testset "Inputs YAML native parser" begin

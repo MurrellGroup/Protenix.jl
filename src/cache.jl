@@ -12,8 +12,13 @@ end
 
 function maybe_download(url::AbstractString, target::AbstractString; dry_run::Bool = false, io::IO = stdout)
     if isfile(target)
-        println(io, "[cache] hit: $(abspath(target))")
-        return target
+        sz = filesize(target)
+        if sz > 0
+            println(io, "[cache] hit: $(abspath(target))")
+            return target
+        end
+        println(io, "[cache] stale zero-byte file, re-downloading: $(abspath(target))")
+        dry_run || rm(target; force = true)
     end
 
     ensure_parent_dir(target)
