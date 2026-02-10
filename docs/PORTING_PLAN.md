@@ -169,7 +169,7 @@ Reuse criteria:
 
 ## Known Deltas (Tracked)
 
-1. YAML parsing currently uses a temporary compatibility shim through `python3 + PyYAML` to match `yaml.safe_load` behavior while keeping Julia core modules dependency-light.
+1. YAML parsing is now native Julia via `YAML.jl`; parity checks against `python3 + PyYAML` are kept in tests when available.
 2. Non-dry-run infer uses the typed diffusion forward path with condition atoms clamped to template coordinates to preserve scaffold constraints.
 3. Feature generation consumes structure-derived atoms from mmCIF/PDB, but does not yet include full Python `Featurizer`/CCD feature coverage.
 4. Numeric parity harness is implemented, but reference snapshot artifacts are not yet checked into this repo.

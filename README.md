@@ -6,7 +6,7 @@ Infer-only Julia port of PXDesign.
 
 - Implemented:
   - package scaffold and `bin/pxdesign` CLI (`infer`, `check-input`)
-  - YAML/JSON input normalization (with Python PyYAML compatibility shim)
+  - YAML/JSON input normalization (native Julia via `YAML.jl`)
   - native mmCIF/PDB atom parsing + chain/crop filtering
   - condition+binder feature bundle assembly
   - diffusion scheduler/sampler parity primitives
@@ -47,6 +47,13 @@ JULIA_DEPOT_PATH=$PWD/.julia_depot JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
   ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. bin/pxdesign check-input --yaml /path/to/input.yaml
 ```
 
+Optional parser parity check against `python3 + PyYAML` (for supported PXDesign YAML subset):
+
+```bash
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+  scripts/check_yaml_parity.jl /path/to/input.yaml
+```
+
 Default config sets `download_cache=false` so infer runs without network. Enable PXDesign cache download explicitly with:
 
 ```bash
@@ -70,12 +77,28 @@ python3 scripts/export_checkpoint_raw.py \
 
 Then load in Julia via `PXDesign.Model.load_raw_weights("./weights_raw")`.
 
+Or convert raw weights to safetensors (single file or shards):
+
+```bash
+python3 scripts/convert_raw_to_safetensors.py \
+  --raw-dir ./weights_raw \
+  --out-dir ./weights_safetensors
+```
+
 To avoid manual scaffold shape mismatches, infer model dimensions directly from raw weights (diffusion + design embedder):
 
 ```bash
 --set model_scaffold.enabled=true \
 --set model_scaffold.auto_dims_from_weights=true \
 --set raw_weights_dir=./weights_raw
+```
+
+The same scaffold path can load safetensors weights:
+
+```bash
+--set model_scaffold.enabled=true \
+--set model_scaffold.auto_dims_from_weights=true \
+--set safetensors_weights_path=./weights_safetensors
 ```
 
 Enforce strict key coverage (all expected keys present, no unexpected keys in the loaded model subtrees):
@@ -104,6 +127,13 @@ Run a tiny end-to-end CPU smoke with strict real raw weights (`N_sample=1`, `N_s
 ```bash
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
   scripts/run_e2e_cpu_smoke.jl
+```
+
+Run the same tiny CPU smoke through safetensors (writes to a stable repo path under `output/safetensors_smoke`):
+
+```bash
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+  scripts/run_e2e_safetensors_smoke.jl
 ```
 
 State-dict assignment helpers are in:

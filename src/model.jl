@@ -10,6 +10,7 @@ include("model/atom_attention.jl")
 include("model/design_condition_embedder.jl")
 include("model/diffusion_module.jl")
 include("model/raw_weights.jl")
+include("model/safetensors_weights.jl")
 include("model/parity.jl")
 include("model/state_load.jl")
 include("model/scheduler.jl")
@@ -37,6 +38,7 @@ using .TransformerBlocks:
 using .AtomAttentionModule: AtomAttentionEncoder, AtomAttentionDecoder
 using .DiffusionModuleModule: DiffusionModule
 using .RawWeights: RawWeightEntry, load_raw_manifest, load_raw_weights
+using .SafeTensorWeights: load_safetensors_weights
 using .ParityHarness:
     TensorParityStats,
     TensorParityReport,
@@ -70,6 +72,7 @@ export AttentionPairBias, DiffusionTransformerBlock, DiffusionTransformer
 export AtomAttentionEncoder, AtomAttentionDecoder
 export DiffusionModule
 export RawWeightEntry, load_raw_manifest, load_raw_weights
+export load_safetensors_weights
 export TensorParityStats, TensorParityReport, tensor_parity_report, compare_raw_weight_dirs
 export load_condition_template_embedder!,
     load_design_condition_embedder!,

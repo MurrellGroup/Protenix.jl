@@ -3,6 +3,19 @@ using Statistics
 using Random
 using PXDesign
 
+function _as_string_dict_test(x)
+    if x isa AbstractDict
+        out = Dict{String, Any}()
+        for (k, v) in x
+            out[String(k)] = _as_string_dict_test(v)
+        end
+        return out
+    elseif x isa AbstractVector
+        return Any[_as_string_dict_test(v) for v in x]
+    end
+    return x
+end
+
 @testset "JSONLite" begin
     payload = """
     {
@@ -154,53 +167,129 @@ end
     @test onehot[1, PXDesign.Data.STD_RESIDUES_WITH_GAP["xpb"] + 1] == 1f0
 end
 
-@testset "Inputs YAML parity shim" begin
-    has_pyyaml = success(
-        pipeline(`python3 -c "import yaml; print('ok')"`, stdout = devnull, stderr = devnull),
-    )
+@testset "Inputs YAML native parser" begin
+    mktempdir() do d
+        target_cif = joinpath(d, "target.cif")
+        write(target_cif, "data_demo\n#\n")
 
-    if !has_pyyaml
-        @test_skip "Skipping YAML tests: python3 + PyYAML unavailable in environment"
-    else
-        mktempdir() do d
-            target_cif = joinpath(d, "target.cif")
-            write(target_cif, "data_demo\n#\n")
+        msa_dir = joinpath(d, "msa")
+        mkpath(msa_dir)
+        write(joinpath(msa_dir, "pairing.a3m"), ">a\nAA\n")
+        write(joinpath(msa_dir, "non_pairing.a3m"), ">a\nAA\n")
 
-            msa_dir = joinpath(d, "msa")
-            mkpath(msa_dir)
-            write(joinpath(msa_dir, "pairing.a3m"), ">a\nAA\n")
-            write(joinpath(msa_dir, "non_pairing.a3m"), ">a\nAA\n")
-
-            yaml_path = joinpath(d, "input.yaml")
-            write(
-                yaml_path,
-                """
+        yaml_path = joinpath(d, "input.yaml")
+        write(
+            yaml_path,
+            """
 task_name: demo_task
 binder_length: 80
 target:
   file: $target_cif
   chains:
     A:
-      crop: ["1-10", "20-30"]
+      crop:
+        - "1-10"
+        - "20-30"
       hotspots: [2, 5]
       msa: $msa_dir
 """,
+        )
+
+        cfg = PXDesign.Inputs.load_yaml_config(yaml_path)
+        @test cfg["task_name"] == "demo_task"
+        @test cfg["binder_length"] == 80
+        @test cfg["target"]["chains"]["A"]["crop"] == Any["1-10", "20-30"]
+        @test cfg["target"]["chains"]["A"]["hotspots"] == Any[2, 5]
+
+        yaml_anchor_path = joinpath(d, "input_anchor.yaml")
+        write(
+            yaml_anchor_path,
+            """
+defaults: &chain_defaults
+  crop: ["1-10", "20-30"]
+  msa: $msa_dir
+task_name: anchor_task
+binder_length: 48
+target:
+  file: $target_cif
+  chains:
+    A:
+      <<: *chain_defaults
+      hotspots: [3, 9]
+""",
+        )
+        cfg_anchor = PXDesign.Inputs.load_yaml_config(yaml_anchor_path)
+        @test cfg_anchor["target"]["chains"]["A"]["crop"] == Any["1-10", "20-30"]
+        @test cfg_anchor["target"]["chains"]["A"]["msa"] == msa_dir
+        @test cfg_anchor["target"]["chains"]["A"]["hotspots"] == Any[3, 9]
+
+        tasks = PXDesign.Inputs.parse_yaml_to_json(yaml_path)
+        @test length(tasks) == 1
+        t = tasks[1]
+        @test t["name"] == "demo_task"
+        @test t["generation"][1]["length"] == 80
+        @test t["condition"]["filter"]["chain_id"][1] == "A"
+        @test t["condition"]["filter"]["crop"]["A"] == "1-10,20-30"
+        @test t["hotspot"]["A"][1] == 2
+
+        out_dir = joinpath(d, "out")
+        mkpath(out_dir)
+        converted = PXDesign.Inputs.process_input_file(yaml_path; out_dir = out_dir)
+        @test endswith(converted, ".json")
+        @test isfile(converted)
+
+        yml_path = joinpath(d, "input_nt.yml")
+        write(
+            yml_path,
+            """
+task_name: no_target_demo
+binder_length: 12
+""",
+        )
+        tasks_nt = PXDesign.Inputs.parse_yaml_to_json(yml_path)
+        @test length(tasks_nt) == 1
+        @test tasks_nt[1]["name"] == "no_target_demo"
+        @test tasks_nt[1]["generation"][1]["length"] == 12
+        @test !haskey(tasks_nt[1], "condition")
+    end
+end
+
+@testset "Inputs YAML vs PyYAML parity (supported subset)" begin
+    has_pyyaml = success(
+        pipeline(`python3 -c "import yaml; print('ok')"`, stdout = devnull, stderr = devnull),
+    )
+    if !has_pyyaml
+        @test_skip "Skipping YAML/PyYAML parity check: python3 + PyYAML unavailable in environment"
+    else
+        mktempdir() do d
+            yaml_path = joinpath(d, "subset.yaml")
+            write(
+                yaml_path,
+                """
+task_name: parity_demo
+binder_length: 64
+target:
+  file: /tmp/target.cif
+  chains:
+    A:
+      crop: ["1-10", "20-30"]
+      hotspots: [2, 5]
+      msa: /tmp/msa
+    B: all
+flags:
+  enabled: true
+  weight: 1.5
+  label: "demo"
+""",
             )
 
-            tasks = PXDesign.Inputs.parse_yaml_to_json(yaml_path)
-            @test length(tasks) == 1
-            t = tasks[1]
-            @test t["name"] == "demo_task"
-            @test t["generation"][1]["length"] == 80
-            @test t["condition"]["filter"]["chain_id"][1] == "A"
-            @test t["condition"]["filter"]["crop"]["A"] == "1-10,20-30"
-            @test t["hotspot"]["A"][1] == 2
-
-            out_dir = joinpath(d, "out")
-            mkpath(out_dir)
-            converted = PXDesign.Inputs.process_input_file(yaml_path; out_dir = out_dir)
-            @test endswith(converted, ".json")
-            @test isfile(converted)
+            julia_cfg = PXDesign.Inputs.load_yaml_config(yaml_path)
+            py_json = read(
+                `python3 -c "import json, yaml, sys; print(json.dumps(yaml.safe_load(open(sys.argv[1], 'r')), sort_keys=True))" $yaml_path`,
+                String,
+            )
+            py_cfg = _as_string_dict_test(PXDesign.JSONLite.parse_json(py_json))
+            @test julia_cfg == py_cfg
         end
     end
 end
@@ -595,10 +684,11 @@ end
         t0 = Float32[1 2 3; 4 5 6]
         t1 = reshape(Float32[10, 20, 30, 40], 2, 2)
         open(joinpath(d, "tensor_000000.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(t0)))
+            # Raw checkpoint export uses NumPy/PyTorch C-order flattening.
+            write(io, reinterpret(UInt8, vec(permutedims(t0))))
         end
         open(joinpath(d, "tensor_000001.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(t1)))
+            write(io, reinterpret(UInt8, vec(permutedims(t1))))
         end
         write(
             joinpath(d, "manifest.json"),

@@ -59,6 +59,12 @@ Use the pinned Julia binary directly in sandbox to avoid launcher network checks
 - preferred: `~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia`
 - avoid plain `julia` launcher for run/test loops (it may try to refresh juliaup metadata and fail in sandbox).
 
+## Julia Package Installs
+
+1. Default flow: run `Pkg.add(...)` in the project environment inside sandbox first.
+2. If package install fails due to sandbox/network restrictions, escalate once and batch installs.
+3. Do not escalate preemptively for package installs that may work in sandbox.
+
 ## Execution Discipline
 
 1. Work autonomously: keep coding through implementation and validation loops without pausing for status updates.

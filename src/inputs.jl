@@ -1,11 +1,13 @@
 module Inputs
 
+using YAML
+
 import ..JSONLite: parse_json, write_json
 
-export parse_yaml_to_json, load_input_tasks, process_input_file, snapshot_input
+export parse_yaml_to_json, load_input_tasks, process_input_file, snapshot_input, load_yaml_config
 
 function _as_string_dict(x)
-    if x isa Dict
+    if x isa AbstractDict
         out = Dict{String, Any}()
         for (k, v) in x
             out[String(k)] = _as_string_dict(v)
@@ -18,36 +20,11 @@ function _as_string_dict(x)
     end
 end
 
-function _load_yaml_via_python(yaml_path::AbstractString)
-    # Temporary YAML compatibility shim:
-    # keep Julia core self-contained while matching Python safe_load semantics.
-    pycode = """
-import json, sys
-try:
-    import yaml
-except Exception as e:
-    print(f"Unable to import PyYAML: {e}", file=sys.stderr)
-    sys.exit(3)
-path = sys.argv[1]
-with open(path, "r") as f:
-    try:
-        cfg = yaml.safe_load(f)
-    except Exception as e:
-        print(f"YAML parse failed: {e}", file=sys.stderr)
-        sys.exit(4)
-print(json.dumps(cfg))
-"""
-    cmd = `python3 -c $pycode $yaml_path`
-    json_text = try
-        read(cmd, String)
-    catch e
-        error(
-            "Failed to parse YAML via python3/PyYAML for $yaml_path. " *
-            "Provide JSON input or ensure python3 + PyYAML are available. Original error: $e",
-        )
-    end
-    parsed = parse_json(json_text)
-    parsed isa Dict || error("YAML top-level must be a mapping/object.")
+function load_yaml_config(yaml_path::AbstractString)
+    yaml_abspath = abspath(yaml_path)
+    isfile(yaml_abspath) || error("YAML config file not found: $yaml_abspath")
+    parsed = YAML.load_file(yaml_abspath)
+    parsed isa AbstractDict || error("YAML top-level must be a mapping/object.")
     return _as_string_dict(parsed)
 end
 
@@ -56,7 +33,7 @@ function _normalize_chain_props(props)
         return Dict{String, Any}()
     elseif props isa AbstractString
         return lowercase(strip(props)) in ("all", "full") ? Dict{String, Any}() : Dict{String, Any}()
-    elseif props isa Dict
+    elseif props isa AbstractDict
         return _as_string_dict(props)
     end
     error("Invalid chain config value: expected mapping/null/'all', got $(typeof(props))")
@@ -69,15 +46,29 @@ function _parse_yaml_cfg_to_tasks(cfg::Dict{String, Any}, yaml_path::AbstractStr
     haskey(cfg, "binder_length") || error("Missing required field: 'binder_length'")
     binder_length = Int(cfg["binder_length"])
 
-    target_cfg = haskey(cfg, "target") ? cfg["target"] : Dict{String, Any}()
-    target_cfg isa Dict || error("Field 'target' must be a mapping")
+    target_cfg = get(cfg, "target", nothing)
+    if target_cfg === nothing
+        return Any[
+            Dict{String, Any}(
+                "name" => task_name,
+                "generation" => Any[
+                    Dict{String, Any}(
+                        "type" => "protein",
+                        "length" => binder_length,
+                        "count" => 1,
+                    ),
+                ],
+            ),
+        ]
+    end
+    target_cfg isa AbstractDict || error("Field 'target' must be a mapping")
     haskey(target_cfg, "file") || error("Missing required field: 'target.file'")
 
     target_file_path = String(target_cfg["file"])
     isfile(target_file_path) || error("Target structure file not found: $target_file_path")
 
     chains_cfg = get(target_cfg, "chains", nothing)
-    chains_cfg isa Dict || error("Missing required field: 'target.chains'")
+    chains_cfg isa AbstractDict || error("Missing required field: 'target.chains'")
     isempty(chains_cfg) && error("Missing required field: 'target.chains'")
 
     chain_ids = String[]
@@ -145,11 +136,8 @@ function _parse_yaml_cfg_to_tasks(cfg::Dict{String, Any}, yaml_path::AbstractStr
 end
 
 function parse_yaml_to_json(yaml_path::AbstractString, json_path::Union{Nothing, AbstractString} = nothing)
-    yaml_abspath = abspath(yaml_path)
-    isfile(yaml_abspath) || error("YAML config file not found: $yaml_abspath")
-
-    cfg = _load_yaml_via_python(yaml_abspath)
-    tasks = _parse_yaml_cfg_to_tasks(cfg, yaml_abspath)
+    cfg = load_yaml_config(yaml_path)
+    tasks = _parse_yaml_cfg_to_tasks(cfg, yaml_path)
 
     if json_path !== nothing
         mkpath(dirname(json_path))
@@ -175,22 +163,22 @@ function load_input_tasks(input_path::AbstractString)
     if ext == ".json"
         parsed = parse_json(read(path, String))
         return _normalize_loaded_json(parsed, path)
-    elseif ext == ".yaml"
+    elseif ext == ".yaml" || ext == ".yml"
         return parse_yaml_to_json(path, nothing)
     end
 
-    error("Unsupported input file format: $ext. Supported formats are: JSON, YAML.")
+    error("Unsupported input file format: $ext. Supported formats are: JSON, YAML (.yaml/.yml).")
 end
 
 function process_input_file(input_path::AbstractString; out_dir::Union{Nothing, AbstractString} = nothing)
     path = abspath(input_path)
     isfile(path) || error("Input file not found: $path")
     ext = lowercase(splitext(path)[2])
-    if !(ext in (".json", ".yaml"))
-        error("Unsupported input file format: $ext. Supported formats are: JSON, YAML.")
+    if !(ext in (".json", ".yaml", ".yml"))
+        error("Unsupported input file format: $ext. Supported formats are: JSON, YAML (.yaml/.yml).")
     end
 
-    if ext == ".yaml"
+    if ext == ".yaml" || ext == ".yml"
         base = splitext(basename(path))[1]
         target_dir = out_dir === nothing ? dirname(path) : String(out_dir)
         json_path = joinpath(target_dir, "$base.json")

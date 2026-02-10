@@ -58,6 +58,7 @@ function default_config(; project_root::AbstractString = pwd())
         "use_msa" => true,
         "download_cache" => false,
         "raw_weights_dir" => "",
+        "safetensors_weights_path" => "",
         "strict_weight_load" => false,
         "use_fast_ln" => true,
         "use_deepspeed_evo_attention" => false,

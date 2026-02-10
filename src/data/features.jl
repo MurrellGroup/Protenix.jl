@@ -123,15 +123,29 @@ function _distogram_rep_atom_indices(atoms::Vector{AtomRecord}, tokens::TokenArr
     idxs = Vector{Int}(undef, length(tokens))
     for (tok_i, tok) in enumerate(tokens)
         first_atom = atoms[tok.atom_indices[1]]
-        preferred = if first_atom.mol_type == "protein"
-            (first_atom.res_name == "GLY" || first_atom.res_name == "xpb") ? "CA" : "CB"
+        atom_idx = tok.atom_indices[1]
+        if first_atom.mol_type == "protein"
+            primary = (first_atom.res_name == "GLY" || first_atom.res_name == "xpb") ? "CA" : "CB"
+            fallback = "CA"
+            pos_primary = findfirst(==(primary), tok.atom_names)
+            pos_fallback = findfirst(==(fallback), tok.atom_names)
+
+            if pos_primary !== nothing && atoms[tok.atom_indices[pos_primary]].is_resolved
+                atom_idx = tok.atom_indices[pos_primary]
+            elseif pos_fallback !== nothing && atoms[tok.atom_indices[pos_fallback]].is_resolved
+                atom_idx = tok.atom_indices[pos_fallback]
+            elseif pos_primary !== nothing
+                atom_idx = tok.atom_indices[pos_primary]
+            elseif pos_fallback !== nothing
+                atom_idx = tok.atom_indices[pos_fallback]
+            end
         elseif first_atom.mol_type == "dna" || first_atom.mol_type == "rna"
-            "C1'"
-        else
-            tok.atom_names[1]
+            pos = findfirst(==("C1'"), tok.atom_names)
+            if pos !== nothing
+                atom_idx = tok.atom_indices[pos]
+            end
         end
-        pos = findfirst(==(preferred), tok.atom_names)
-        idxs[tok_i] = pos === nothing ? tok.atom_indices[1] : tok.atom_indices[pos]
+        idxs[tok_i] = atom_idx
     end
     return idxs
 end
@@ -599,11 +613,15 @@ function build_basic_feature_bundle(task::InputTask; rng::AbstractRNG = Random.d
     binder_gen.type == "protein" || error("Only protein generation is supported right now.")
     binder_length = binder_gen.length
 
-    target_atoms = load_structure_atoms(
-        task.structure_file;
-        selected_chains = task.chain_ids,
-        crop = task.crop,
-    )
+    target_atoms = if isempty(strip(task.structure_file))
+        AtomRecord[]
+    else
+        load_structure_atoms(
+            task.structure_file;
+            selected_chains = task.chain_ids,
+            crop = task.crop,
+        )
+    end
     binder_chain_idx = length(task.chain_ids) + 1
     binder_chain = string(_chain_letters(binder_chain_idx), "0")
     binder_atoms = build_design_backbone_atoms(binder_length; chain_id = binder_chain)

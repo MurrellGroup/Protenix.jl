@@ -97,21 +97,28 @@ end
 function parse_task(raw)::InputTask
     d = _as_dict(raw, "task")
     haskey(d, "name") || error("Missing task.name")
-    haskey(d, "condition") || error("Missing task.condition")
     haskey(d, "generation") || error("Missing task.generation")
 
-    cond = _as_dict(d["condition"], "condition")
-    haskey(cond, "structure_file") || error("Missing condition.structure_file")
-    haskey(cond, "filter") || error("Missing condition.filter")
-    filt = _as_dict(cond["filter"], "condition.filter")
-    haskey(filt, "chain_id") || error("Missing condition.filter.chain_id")
-
     name = String(d["name"])
-    structure_file = String(cond["structure_file"])
-    chain_ids = _to_string_vector(filt["chain_id"], "condition.filter.chain_id")
-    crop = _parse_crop(get(filt, "crop", Dict{String, Any}()))
+    structure_file = ""
+    chain_ids = String[]
+    crop = Dict{String, String}()
+    msa = Dict{String, Dict{String, Any}}()
+
+    if haskey(d, "condition")
+        cond = _as_dict(d["condition"], "condition")
+        haskey(cond, "structure_file") || error("Missing condition.structure_file")
+        haskey(cond, "filter") || error("Missing condition.filter")
+        filt = _as_dict(cond["filter"], "condition.filter")
+        haskey(filt, "chain_id") || error("Missing condition.filter.chain_id")
+
+        structure_file = String(cond["structure_file"])
+        chain_ids = _to_string_vector(filt["chain_id"], "condition.filter.chain_id")
+        crop = _parse_crop(get(filt, "crop", Dict{String, Any}()))
+        msa = _parse_msa(get(cond, "msa", Dict{String, Any}()))
+    end
+
     hotspots = _parse_hotspots(get(d, "hotspot", Dict{String, Any}()))
-    msa = _parse_msa(get(cond, "msa", Dict{String, Any}()))
     generation = _parse_generation(d["generation"])
 
     return InputTask(name, structure_file, chain_ids, crop, hotspots, msa, generation)

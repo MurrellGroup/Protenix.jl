@@ -20,6 +20,7 @@ import ..Model:
     infer_model_scaffold_dims,
     load_design_condition_embedder!,
     load_raw_weights,
+    load_safetensors_weights,
     load_diffusion_module!
 import ..Output: dump_prediction_bundle
 import ..Schema: parse_tasks
@@ -208,15 +209,21 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
     model_inputs = nothing
     if use_model_scaffold
         raw_weights_dir = String(get(cfg, "raw_weights_dir", ""))
+        safetensors_weights_path = String(get(cfg, "safetensors_weights_path", ""))
         weights = nothing
-        if !isempty(raw_weights_dir)
+        if !isempty(raw_weights_dir) && !isempty(safetensors_weights_path)
+            error("Set only one of raw_weights_dir or safetensors_weights_path.")
+        end
+        if !isempty(safetensors_weights_path)
+            weights = load_safetensors_weights(safetensors_weights_path)
+        elseif !isempty(raw_weights_dir)
             weights = load_raw_weights(raw_weights_dir)
         end
 
         auto_dims_from_weights = Bool(get(model_scaffold_cfg, "auto_dims_from_weights", false))
         if auto_dims_from_weights
             weights === nothing && error(
-                "model_scaffold.auto_dims_from_weights=true requires raw_weights_dir to be set.",
+                "model_scaffold.auto_dims_from_weights=true requires raw_weights_dir or safetensors_weights_path to be set.",
             )
             inferred = infer_model_scaffold_dims(weights)
             c_token = inferred.c_token
