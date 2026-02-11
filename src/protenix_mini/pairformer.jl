@@ -3,6 +3,7 @@ module Pairformer
 using Random
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm, transition
+import ..Features: ProtenixFeatures
 import ..OpenFoldBlocks:
     PairAttentionNoS,
     TriangleMultiplication,
@@ -317,6 +318,50 @@ function _select_rows(x::AbstractArray, idx::Vector{Int}, dim::Int)
 end
 
 function (m::MSAModule)(
+    feat::ProtenixFeatures,
+    z::AbstractArray{<:Real,3},
+    s_inputs::AbstractMatrix{<:Real};
+    pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
+    rng::AbstractRNG = Random.default_rng(),
+)
+    m.n_blocks < 1 && return _as_f32_array(z)
+    feat.msa === nothing && return _as_f32_array(z)
+    feat.has_deletion === nothing && error("Missing 'has_deletion' for MSAModule")
+    feat.deletion_value === nothing && error("Missing 'deletion_value' for MSAModule")
+
+    msa_raw = feat.msa
+    size(msa_raw, 2) > 0 || return _as_f32_array(z)
+
+    n_msa = size(msa_raw, 1)
+    idx = sample_msa_indices(
+        n_msa;
+        cutoff = m.sample_cutoff,
+        lower_bound = m.sample_lower_bound,
+        strategy = m.sample_strategy,
+        rng = rng,
+    )
+    isempty(idx) && return _as_f32_array(z)
+
+    msa_sel = Int.(msa_raw[idx, :])
+    del_mask = _as_f32_array(feat.has_deletion[idx, :])
+    del_val = _as_f32_array(feat.deletion_value[idx, :])
+
+    msa_onehot = one_hot_int(msa_sel, 32)
+    msa_feat = cat(msa_onehot, reshape(del_mask, size(del_mask)..., 1), reshape(del_val, size(del_val)..., 1); dims = 3)
+
+    msa_emb = m.linear_no_bias_m(msa_feat)
+    s_proj = m.linear_no_bias_s(_as_f32_array(s_inputs))
+    msa_emb .+= reshape(s_proj, 1, size(s_proj, 1), size(s_proj, 2))
+
+    z_cur = _as_f32_copy(z)
+    msa_cur = msa_emb
+    for blk in m.blocks
+        msa_cur, z_cur = blk(msa_cur, z_cur; pair_mask = pair_mask)
+    end
+    return z_cur
+end
+
+function (m::MSAModule)(
     input_feature_dict::AbstractDict{<:AbstractString, <:Any},
     z::AbstractArray{<:Real,3},
     s_inputs::AbstractMatrix{<:Real};
@@ -394,6 +439,18 @@ function TemplateEmbedder(
 end
 
 function (m::TemplateEmbedder)(
+    feat::ProtenixFeatures,
+    z::AbstractArray{<:Real,3};
+    pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
+)
+    if m.n_blocks < 1 || feat.template_restype === nothing
+        return zeros(Float32, size(z))
+    end
+    # Mirrors Python implementation: template branch currently disabled.
+    return zeros(Float32, size(z))
+end
+
+function (m::TemplateEmbedder)(
     input_feature_dict::AbstractDict{<:AbstractString, <:Any},
     z::AbstractArray{<:Real,3};
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
@@ -453,6 +510,31 @@ function _one_hot_binned_sqdist(
             out[i, j, b] = (d > bins[b] && d < upper_bins[b]) ? 1f0 : 0f0
         end
     end
+    return out
+end
+
+function (m::NoisyStructureEmbedder)(
+    feat::ProtenixFeatures,
+    z::AbstractArray{<:Real,3},
+)
+    n = size(z, 1)
+    x = feat.struct_cb_coords === nothing ? zeros(Float32, n, 3) : feat.struct_cb_coords
+    mask = feat.struct_cb_mask === nothing ? falses(n) : feat.struct_cb_mask
+
+    pair_mask = zeros(Float32, n, n, 1)
+    @inbounds for i in 1:n, j in 1:n
+        pair_mask[i, j, 1] = (mask[i] && mask[j]) ? 1f0 : 0f0
+    end
+
+    d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask
+    d = cat(d, pair_mask; dims = 3)
+    d = m.linear_struct(d)
+
+    z_proj = m.linear_z(m.layernorm_z(z))
+    z_cat = cat(z_proj, d; dims = 3)
+    out = m.transition_out(z_cat)
+
+    any(mask) || (out .= 0f0)
     return out
 end
 

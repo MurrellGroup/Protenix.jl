@@ -268,6 +268,53 @@ end
     @test bundle["dims"]["N_token"] == 3
 end
 
+@testset "Protenix typed feature path parity" begin
+    bundle = PXDesign.ProtenixMini.build_sequence_feature_bundle(
+        "ACDE";
+        chain_id = "A0",
+        task_name = "typed_feature_smoke",
+        rng = MersenneTwister(123),
+    )
+    feat_dict = bundle["input_feature_dict"]
+    feat_typed = PXDesign.ProtenixMini.as_protenix_features(feat_dict)
+
+    @test feat_typed.restype isa Matrix{Float32}
+    @test feat_typed.profile isa Matrix{Float32}
+    @test feat_typed.token_bonds isa Matrix{Float32}
+    @test feat_typed.atom_to_token_idx isa Vector{Int}
+
+    pm = PXDesign.ProtenixMini.ProtenixMiniModel(
+        32,
+        32,
+        16,
+        8,
+        97;
+        c_atom = 16,
+        c_atompair = 8,
+        n_cycle = 1,
+        pairformer_blocks = 1,
+        msa_blocks = 1,
+        diffusion_transformer_blocks = 1,
+        diffusion_atom_encoder_blocks = 1,
+        diffusion_atom_decoder_blocks = 1,
+        confidence_max_atoms_per_token = 20,
+        sample_gamma0 = 0.0,
+        sample_gamma_min = 1.0,
+        sample_noise_scale_lambda = 1.0,
+        sample_step_scale_eta = 0.0,
+        sample_n_step = 1,
+        sample_n_sample = 1,
+        rng = MersenneTwister(456),
+    )
+
+    trunk_dict = PXDesign.ProtenixMini.get_pairformer_output(pm, feat_dict; n_cycle = 1, rng = MersenneTwister(789))
+    trunk_typed = PXDesign.ProtenixMini.get_pairformer_output(pm, feat_typed; n_cycle = 1, rng = MersenneTwister(789))
+
+    @test isapprox(trunk_typed.s_inputs, trunk_dict.s_inputs; atol = 1e-6, rtol = 1e-6)
+    @test isapprox(trunk_typed.s, trunk_dict.s; atol = 1e-6, rtol = 1e-6)
+    @test isapprox(trunk_typed.z, trunk_dict.z; atol = 1e-6, rtol = 1e-6)
+end
+
 @testset "Cache zero-byte checkpoint refresh" begin
     mktempdir() do d
         src_dir = joinpath(d, "src")

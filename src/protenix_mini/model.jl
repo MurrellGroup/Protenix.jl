@@ -3,10 +3,11 @@ module Model
 using Random
 
 import ..Primitives: LinearNoBias, LayerNorm
+import ..Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
 import ..Embedders: InputFeatureEmbedder, RelativePositionEncoding
 import ..Pairformer: TemplateEmbedder, NoisyStructureEmbedder, MSAModule, PairformerStack
 import ..Heads: DistogramHead, ConfidenceHead
-import ...Model: DiffusionModule, InferenceNoiseScheduler, sample_diffusion, as_relpos_input, as_atom_attention_input
+import ...Model: DiffusionModule, InferenceNoiseScheduler, sample_diffusion
 
 export ProtenixMiniModel, get_pairformer_output, run_inference
 
@@ -126,9 +127,9 @@ function ProtenixMiniModel(
     )
 end
 
-function _pair_mask(input_feature_dict::AbstractDict{<:AbstractString, <:Any})
-    if haskey(input_feature_dict, "token_mask")
-        m = _as_f32_array(input_feature_dict["token_mask"])
+function _pair_mask(feat::ProtenixFeatures)
+    if feat.token_mask !== nothing
+        m = feat.token_mask
         n = length(m)
         out = zeros(Float32, n, n)
         @inbounds for i in 1:n, j in 1:n
@@ -136,19 +137,19 @@ function _pair_mask(input_feature_dict::AbstractDict{<:AbstractString, <:Any})
         end
         return out
     end
-    n = length(input_feature_dict["token_index"])
+    n = length(feat.token_index)
     return ones(Float32, n, n)
 end
 
 function get_pairformer_output(
     model::ProtenixMiniModel,
-    input_feature_dict::AbstractDict{<:AbstractString, <:Any};
+    feat::ProtenixFeatures;
     n_cycle::Int = model.n_cycle,
     rng::AbstractRNG = Random.default_rng(),
 )
     n_cycle > 0 || error("n_cycle must be positive")
 
-    s_inputs = model.input_embedder(input_feature_dict)
+    s_inputs = model.input_embedder(feat)
     n_tok = size(s_inputs, 1)
 
     s_init = model.linear_no_bias_sinit(s_inputs)
@@ -156,24 +157,23 @@ function get_pairformer_output(
     z2 = model.linear_no_bias_zinit2(s_init)
     z_init = reshape(z1, n_tok, 1, size(z1, 2)) .+ reshape(z2, 1, n_tok, size(z2, 2))
 
-    z_init .+= model.relative_position_encoding(input_feature_dict)
+    z_init .+= model.relative_position_encoding(relpos_input(feat))
 
-    haskey(input_feature_dict, "token_bonds") || error("Missing token_bonds for ProtenixMini trunk")
-    token_bonds = _as_f32_array(input_feature_dict["token_bonds"])
+    token_bonds = feat.token_bonds
     size(token_bonds) == (n_tok, n_tok) || error("token_bonds shape mismatch")
     z_init .+= model.linear_no_bias_token_bond(reshape(token_bonds, n_tok, n_tok, 1))
 
     z = zeros(Float32, size(z_init))
     s = zeros(Float32, size(s_init))
-    pair_mask = _pair_mask(input_feature_dict)
+    pair_mask = _pair_mask(feat)
 
     for _ in 1:n_cycle
         z = z_init .+ model.linear_no_bias_z_cycle(model.layernorm_z_cycle(z))
         if model.noisy_structure_embedder !== nothing
-            z .+= model.noisy_structure_embedder(input_feature_dict, z)
+            z .+= model.noisy_structure_embedder(feat, z)
         end
-        z .+= model.template_embedder(input_feature_dict, z; pair_mask = pair_mask)
-        z = model.msa_module(input_feature_dict, z, s_inputs; pair_mask = pair_mask, rng = rng)
+        z .+= model.template_embedder(feat, z; pair_mask = pair_mask)
+        z = model.msa_module(feat, z, s_inputs; pair_mask = pair_mask, rng = rng)
         s = s_init .+ model.linear_no_bias_s(model.layernorm_s(s))
         s_new, z = model.pairformer_stack(s, z; pair_mask = pair_mask)
         s_new === nothing && error("PairformerStack returned no single-state output")
@@ -183,24 +183,32 @@ function get_pairformer_output(
     return (s_inputs = s_inputs, s = s, z = z)
 end
 
+function get_pairformer_output(
+    model::ProtenixMiniModel,
+    input_feature_dict::AbstractDict{<:AbstractString, <:Any};
+    n_cycle::Int = model.n_cycle,
+    rng::AbstractRNG = Random.default_rng(),
+)
+    return get_pairformer_output(model, as_protenix_features(input_feature_dict); n_cycle = n_cycle, rng = rng)
+end
+
 """
 Run full Protenix-mini inference loop (infer-only).
 Expected input features are Protenix-style tensors already prepared in Julia.
 """
 function run_inference(
     model::ProtenixMiniModel,
-    input_feature_dict::AbstractDict{<:AbstractString, <:Any};
+    feat::ProtenixFeatures;
     n_cycle::Int = model.n_cycle,
     n_step::Int = model.sample_n_step,
     n_sample::Int = model.sample_n_sample,
     rng::AbstractRNG = Random.default_rng(),
 )
-    trunk = get_pairformer_output(model, input_feature_dict; n_cycle = n_cycle, rng = rng)
+    trunk = get_pairformer_output(model, feat; n_cycle = n_cycle, rng = rng)
 
-    relpos = as_relpos_input(input_feature_dict)
-    atom_input = as_atom_attention_input(input_feature_dict)
-    haskey(input_feature_dict, "atom_to_token_idx") || error("Missing atom_to_token_idx")
-    atom_to_token_idx = Int.(input_feature_dict["atom_to_token_idx"])
+    relpos = relpos_input(feat)
+    atom_input = atom_attention_input(feat)
+    atom_to_token_idx = feat.atom_to_token_idx
     n_atom = length(atom_to_token_idx)
 
     noise_schedule = model.scheduler(n_step)
@@ -225,9 +233,9 @@ function run_inference(
     )
 
     distogram_logits = model.distogram_head(trunk.z)
-    pair_mask = _pair_mask(input_feature_dict)
+    pair_mask = _pair_mask(feat)
     plddt, pae, pde, resolved = model.confidence_head(
-        input_feature_dict = input_feature_dict,
+        input_feature_dict = feat,
         s_inputs = trunk.s_inputs,
         s_trunk = trunk.s,
         z_trunk = trunk.z,
@@ -245,6 +253,24 @@ function run_inference(
         pae = pae,
         pde = pde,
         resolved = resolved,
+    )
+end
+
+function run_inference(
+    model::ProtenixMiniModel,
+    input_feature_dict::AbstractDict{<:AbstractString, <:Any};
+    n_cycle::Int = model.n_cycle,
+    n_step::Int = model.sample_n_step,
+    n_sample::Int = model.sample_n_sample,
+    rng::AbstractRNG = Random.default_rng(),
+)
+    return run_inference(
+        model,
+        as_protenix_features(input_feature_dict);
+        n_cycle = n_cycle,
+        n_step = n_step,
+        n_sample = n_sample,
+        rng = rng,
     )
 end
 

@@ -3,6 +3,7 @@ module Heads
 using Random
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm
+import ..Features: ProtenixFeatures, as_protenix_features
 import ..Pairformer: PairformerStack
 import ..Utils: one_hot_interval, broadcast_token_to_atom, pairwise_distances
 
@@ -169,7 +170,7 @@ function _symmetrize_pair_lastdim(x::AbstractArray{<:Real,3})
 end
 
 function (m::ConfidenceHead)(;
-    input_feature_dict::AbstractDict{<:AbstractString, <:Any},
+    input_feature_dict,
     s_inputs::AbstractMatrix{<:Real},
     s_trunk::AbstractMatrix{<:Real},
     z_trunk::AbstractArray{<:Real,3},
@@ -187,16 +188,12 @@ function (m::ConfidenceHead)(;
         error("x_pred_coords must be rank-2 or rank-3")
     end
 
-    haskey(input_feature_dict, "distogram_rep_atom_mask") ||
-        error("Missing distogram_rep_atom_mask for ConfidenceHead")
-    haskey(input_feature_dict, "atom_to_token_idx") ||
-        error("Missing atom_to_token_idx for ConfidenceHead")
-    haskey(input_feature_dict, "atom_to_tokatom_idx") ||
-        error("Missing atom_to_tokatom_idx for ConfidenceHead")
+    features = input_feature_dict isa ProtenixFeatures ?
+        input_feature_dict : as_protenix_features(input_feature_dict)
 
-    rep_mask = Bool.(input_feature_dict["distogram_rep_atom_mask"])
-    atom_to_token_idx = Int.(input_feature_dict["atom_to_token_idx"])
-    atom_to_tokatom_idx = Int.(input_feature_dict["atom_to_tokatom_idx"])
+    rep_mask = features.distogram_rep_atom_mask
+    atom_to_token_idx = features.atom_to_token_idx
+    atom_to_tokatom_idx = features.atom_to_tokatom_idx
 
     n_tok = size(s_inputs, 1)
     size(s_inputs, 2) == m.c_s_inputs || error("s_inputs channel mismatch")

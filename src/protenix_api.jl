@@ -797,7 +797,7 @@ end
 
 function _run_model(
     loaded,
-    feature_dict::AbstractDict{<:AbstractString, <:Any};
+    feature_dict;
     cycle::Int,
     step::Int,
     sample::Int,
@@ -938,9 +938,10 @@ function predict_json(
                     bundle["input_feature_dict"],
                     "task '$task_name' in $(basename(json_path))",
                 )
+                typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
                 pred = _run_model(
                     loaded,
-                    bundle["input_feature_dict"];
+                    typed_feat;
                     cycle = params.cycle,
                     step = params.step,
                     sample = params.sample,
@@ -1020,9 +1021,10 @@ function predict_sequence(
             bundle["input_feature_dict"],
             "sequence task '$task_name'",
         )
+        typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
         pred = _run_model(
             loaded,
-            bundle["input_feature_dict"];
+            typed_feat;
             cycle = params.cycle,
             step = params.step,
             sample = params.sample,

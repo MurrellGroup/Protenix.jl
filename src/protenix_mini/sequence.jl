@@ -5,6 +5,7 @@ using Random
 import ...Data: AtomRecord, build_feature_bundle_from_atoms
 import ...Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS
 import ..Model: ProtenixMiniModel, run_inference
+import ..Features: as_protenix_features
 
 export build_sequence_atoms, build_sequence_feature_bundle, fold_sequence
 
@@ -140,7 +141,7 @@ function fold_sequence(
     )
     pred = run_inference(
         model,
-        bundle["input_feature_dict"];
+        as_protenix_features(bundle["input_feature_dict"]);
         n_cycle = n_cycle,
         n_step = n_step,
         n_sample = n_sample,

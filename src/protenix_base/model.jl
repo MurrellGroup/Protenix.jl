@@ -70,7 +70,7 @@ end
 
 function run_inference(
     model::ProtenixBaseModel,
-    input_feature_dict::AbstractDict{<:AbstractString,<:Any};
+    input_feature_dict;
     n_cycle::Int = model.n_cycle,
     n_step::Int = model.sample_n_step,
     n_sample::Int = model.sample_n_sample,

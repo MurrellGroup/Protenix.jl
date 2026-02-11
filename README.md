@@ -71,6 +71,17 @@ Detailed API coverage vs Python is documented in:
 
 Current Julia `predict` infer-JSON support is protein-chain focused. DNA/RNA/ligand/ion/covalent-bond/constraint entities are not yet wired in this path.
 
+### Typed Protenix Features (Julia-first runtime path)
+
+For model runtime, Protenix-mini/base now supports a typed feature container (`ProtenixFeatures`) so hot inference paths avoid `Dict{String,Any}` dispatch.
+`Dict` remains at I/O boundaries (JSON/YAML ingestion), then converts once:
+
+```julia
+bundle = PXDesign.ProtenixMini.build_sequence_feature_bundle("ACDEFG")
+feat = PXDesign.ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+pred = PXDesign.run_inference(PXDesign.ProtenixMiniModel(...), feat; n_cycle=1, n_step=5, n_sample=1)
+```
+
 ## Quick Start
 
 ```bash
