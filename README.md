@@ -5,7 +5,7 @@ Infer-only Julia port of PXDesign.
 ## Status
 
 - Implemented:
-  - package scaffold and `bin/pxdesign` CLI (`infer`, `check-input`)
+  - package scaffold and `bin/pxdesign` CLI (`infer`, `check-input`, `parity-check`, `predict`, `tojson`, `msa`)
   - YAML/JSON input normalization (native Julia via `YAML.jl`)
   - native mmCIF/PDB atom parsing + chain/crop filtering
   - condition+binder feature bundle assembly
@@ -30,6 +30,43 @@ Infer-only Julia port of PXDesign.
   - ESM2 integration for Protenix-mini ESM/ISM variants:
     - wire `esm_token_embedding` production from our Julia ESM2/ESMFold port
     - load/use `input_embedder.linear_esm.weight` for `protenix_mini_esm_v0.5.0` and `protenix_mini_ism_v0.5.0`
+
+### Protenix v0.5 ESM Notes
+
+- ESM is variant-dependent in Protenix v0.5:
+  - ESM enabled: `protenix_mini_esm_v0.5.0`, `protenix_mini_ism_v0.5.0`
+  - ESM disabled by default: `protenix_base_default_v0.5.0`, `protenix_base_constraint_v0.5.0`, `protenix_mini_default_v0.5.0`, `protenix_mini_tmpl_v0.5.0`, `protenix_tiny_default_v0.5.0`
+- `esm2-3b-ism` refers to an ISM-tuned ESM2 checkpoint (ISM = Implicit Structure Model in the upstream cited work).
+
+### Protenix v0.5 User API (Julia)
+
+Python-like Protenix commands are available via `bin/pxdesign`:
+
+```bash
+# JSON predict (single file or directory)
+bin/pxdesign predict --input /path/to/input.json --out_dir ./output \
+  --model_name protenix_base_default_v0.5.0 --seeds 101,102
+
+# Sequence-only predict
+bin/pxdesign predict --sequence ACDEFGHIKLMNPQRSTVWY --out_dir ./output \
+  --model_name protenix_mini_default_v0.5.0 --step 5 --sample 1
+
+# PDB/CIF -> infer JSON conversion
+bin/pxdesign tojson --input /path/to/structure.cif --out_dir ./output
+
+# Attach precomputed MSA path to an infer JSON
+bin/pxdesign msa --input /path/to/input.json \
+  --precomputed_msa_dir /path/to/msa_dir --out_dir ./output
+```
+
+`predict --use_msa true` now consumes precomputed A3Ms from JSON `proteinChain.msa.precomputed_msa_dir` (reads `non_pairing.a3m`, and `pairing.a3m` for multi-chain tasks). Julia still does not run online/local MSA search.
+For multi-chain assemblies, current Julia MSA merge is chain-wise (not yet full OpenFold species-pairing parity).
+
+Detailed API coverage vs Python is documented in:
+
+- `docs/PROTENIX_API_SURFACE_AUDIT.md`
+
+Current Julia `predict` infer-JSON support is protein-chain focused. DNA/RNA/ligand/ion/covalent-bond/constraint entities are not yet wired in this path.
 
 ## Quick Start
 
@@ -155,6 +192,7 @@ scripts/prepare_protenix_base_safetensors.sh
 See status/details in:
 
 - `docs/PROTENIX_BASE_PORT_STATUS.md`
+- `docs/PROTENIX_API_SURFACE_AUDIT.md`
 
 Run Julia-only Protenix-Mini sequence folding:
 
@@ -184,6 +222,34 @@ Run the same tiny CPU smoke through safetensors (writes to a stable repo path un
 ```bash
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
   scripts/run_e2e_safetensors_smoke.jl
+```
+
+### Sandbox-safe Julia runs
+
+When running inside sandboxed environments, prefer a writable local depot while still reading preinstalled packages:
+
+```bash
+JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
+JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/runtests.jl
+```
+
+### Frozen layer regression fixtures
+
+The test suite includes locked layer-level regression fixtures across PXDesign + Protenix-mini/v0.5 paths:
+
+```bash
+JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
+JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/layer_regression.jl
+```
+
+Fixture regeneration is intentionally guarded and requires explicit opt-in:
+
+```bash
+PXDESIGN_LAYER_FIXTURE_REGEN=do-not-set-this \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+scripts/generate_layer_regression_fixtures.jl
 ```
 
 State-dict assignment helpers are in:

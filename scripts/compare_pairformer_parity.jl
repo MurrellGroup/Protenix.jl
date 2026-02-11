@@ -49,13 +49,18 @@ end
 
 function main()
     path = get(ENV, "PAIRFORMER_DIAG", "/tmp/py_pairformer_diag.json")
+    weights_dir = get(
+        ENV,
+        "PAIRFORMER_WEIGHTS_DIR",
+        joinpath(pwd(), "weights_safetensors_protenix_mini_default_v0.5.0"),
+    )
     raw = PXDesign.JSONLite.parse_json(read(path, String))
     s_in = _to_array_f32(raw["s_in"])
     z_in = _to_array_f32(raw["z_in"])
     s_out_py = _to_array_f32(raw["s_out"])
     z_out_py = _to_array_f32(raw["z_out"])
 
-    w = PXDesign.Model.load_safetensors_weights(joinpath(pwd(), "weights_safetensors_protenix_mini_default_v0.5.0"))
+    w = PXDesign.Model.load_safetensors_weights(weights_dir)
     m = PXDesign.ProtenixMini.build_protenix_mini_model(w)
     PXDesign.ProtenixMini.load_protenix_mini_model!(m, w; strict = true)
 

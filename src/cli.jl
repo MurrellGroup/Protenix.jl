@@ -6,6 +6,11 @@ import ..Config: default_config, set_by_key!
 import ..Infer: run_infer
 import ..Inputs: parse_yaml_to_json
 import ..Model: compare_raw_weight_dirs
+import ..ProtenixAPI:
+    add_precomputed_msa_to_json,
+    convert_structure_to_infer_json,
+    predict_json,
+    predict_sequence
 
 export main
 
@@ -16,6 +21,10 @@ function _usage(io::IO = stdout)
     println(io, "  pxdesign infer -i <input.json|yaml|yml> -o <dump_dir> [options]")
     println(io, "  pxdesign check-input --yaml <input.yaml|input.yml>")
     println(io, "  pxdesign parity-check <reference_raw_dir> <actual_raw_dir> [options]")
+    println(io, "  pxdesign predict --input <json|json_dir> [options]")
+    println(io, "  pxdesign predict --sequence <AA_SEQUENCE> [options]")
+    println(io, "  pxdesign tojson --input <pdb|cif|dir> [options]")
+    println(io, "  pxdesign msa --input <json> --precomputed_msa_dir <dir> [options]")
     println(io, "")
     println(io, "Infer options:")
     println(io, "  --model_name <name>")
@@ -37,6 +46,34 @@ function _usage(io::IO = stdout)
     println(io, "  --atol <float>                  (default: 1e-5)")
     println(io, "  --rtol <float>                  (default: 1e-4)")
     println(io, "  --top <int>                     (default: 20)")
+    println(io, "")
+    println(io, "Predict options:")
+    println(io, "  --input <json|json_dir>")
+    println(io, "  --sequence <AA_SEQUENCE>")
+    println(io, "  --out_dir <dir>                 (default: ./output)")
+    println(io, "  --model_name <name>             (default: protenix_base_default_v0.5.0)")
+    println(io, "  --weights_path <dir>")
+    println(io, "  --seeds <i,j,k>                 (default: 101)")
+    println(io, "  --cycle <int>")
+    println(io, "  --step <int>")
+    println(io, "  --sample <int>")
+    println(io, "  --use_msa <true|false>")
+    println(io, "  --use_default_params <true|false>  (default: true)")
+    println(io, "  --strict <true|false>           (default: true)")
+    println(io, "  --task_name <name>              (sequence mode only)")
+    println(io, "  --chain_id <id>                 (sequence mode only)")
+    println(io, "")
+    println(io, "Tojson options:")
+    println(io, "  --input <pdb|cif|dir>")
+    println(io, "  --out_dir <dir>                 (default: ./output)")
+    println(io, "  --altloc <first>                (default: first)")
+    println(io, "  --assembly_id <id>              (currently unsupported)")
+    println(io, "")
+    println(io, "MSA options:")
+    println(io, "  --input <json>")
+    println(io, "  --precomputed_msa_dir <dir>")
+    println(io, "  --pairing_db <name>             (default: uniref100)")
+    println(io, "  --out_dir <dir>                 (default: ./output)")
 end
 
 function _parse_bool(s::AbstractString)
@@ -206,6 +243,251 @@ function _parse_parity_args(args::Vector{String})
     return parsed
 end
 
+function _parse_seeds_csv(raw::AbstractString)
+    parts = split(strip(raw), ',')
+    out = Int[]
+    for p in parts
+        s = strip(p)
+        isempty(s) && continue
+        push!(out, parse(Int, s))
+    end
+    isempty(out) && error("Expected at least one seed in --seeds")
+    return out
+end
+
+function _parse_predict_args(args::Vector{String})
+    parsed = Dict{String, Any}(
+        "out_dir" => "./output",
+        "model_name" => "protenix_base_default_v0.5.0",
+        "weights_path" => "",
+        "seeds" => [101],
+        "use_default_params" => true,
+        "strict" => true,
+        "task_name" => "protenix_sequence",
+        "chain_id" => "A0",
+    )
+
+    i = 1
+    while i <= length(args)
+        arg = args[i]
+        if arg == "--input"
+            value, i = _require_value(args, i, arg)
+            parsed["input"] = value
+        elseif arg == "--sequence"
+            value, i = _require_value(args, i, arg)
+            parsed["sequence"] = value
+        elseif arg == "--out_dir"
+            value, i = _require_value(args, i, arg)
+            parsed["out_dir"] = value
+        elseif arg == "--model_name"
+            value, i = _require_value(args, i, arg)
+            parsed["model_name"] = value
+        elseif arg == "--weights_path"
+            value, i = _require_value(args, i, arg)
+            parsed["weights_path"] = value
+        elseif arg == "--seeds"
+            value, i = _require_value(args, i, arg)
+            parsed["seeds"] = _parse_seeds_csv(value)
+        elseif arg == "--cycle"
+            value, i = _require_value(args, i, arg)
+            parsed["cycle"] = parse(Int, value)
+        elseif arg == "--step"
+            value, i = _require_value(args, i, arg)
+            parsed["step"] = parse(Int, value)
+        elseif arg == "--sample"
+            value, i = _require_value(args, i, arg)
+            parsed["sample"] = parse(Int, value)
+        elseif arg == "--use_msa"
+            value, i = _require_value(args, i, arg)
+            parsed["use_msa"] = _parse_bool(value)
+        elseif arg == "--use_default_params"
+            value, i = _require_value(args, i, arg)
+            parsed["use_default_params"] = _parse_bool(value)
+        elseif arg == "--strict"
+            value, i = _require_value(args, i, arg)
+            parsed["strict"] = _parse_bool(value)
+        elseif arg == "--task_name"
+            value, i = _require_value(args, i, arg)
+            parsed["task_name"] = value
+        elseif arg == "--chain_id"
+            value, i = _require_value(args, i, arg)
+            parsed["chain_id"] = value
+        elseif arg == "--help" || arg == "-h"
+            _usage()
+            return Dict{String, Any}("__help__" => true)
+        else
+            error("Unknown option: $arg")
+        end
+        i += 1
+    end
+
+    has_input = haskey(parsed, "input")
+    has_seq = haskey(parsed, "sequence")
+    (has_input || has_seq) || error("predict requires either --input or --sequence")
+    !(has_input && has_seq) || error("predict accepts only one of --input or --sequence")
+    return parsed
+end
+
+function _run_predict(parsed::Dict{String, Any})
+    common_kwargs = (
+        out_dir = parsed["out_dir"],
+        model_name = parsed["model_name"],
+        weights_path = parsed["weights_path"],
+        seeds = parsed["seeds"],
+        use_default_params = parsed["use_default_params"],
+        cycle = get(parsed, "cycle", nothing),
+        step = get(parsed, "step", nothing),
+        sample = get(parsed, "sample", nothing),
+        use_msa = get(parsed, "use_msa", nothing),
+        strict = parsed["strict"],
+    )
+
+    if haskey(parsed, "sequence")
+        records = predict_sequence(
+            parsed["sequence"];
+            out_dir = common_kwargs.out_dir,
+            model_name = common_kwargs.model_name,
+            weights_path = common_kwargs.weights_path,
+            task_name = parsed["task_name"],
+            chain_id = parsed["chain_id"],
+            seeds = common_kwargs.seeds,
+            use_default_params = common_kwargs.use_default_params,
+            cycle = common_kwargs.cycle,
+            step = common_kwargs.step,
+            sample = common_kwargs.sample,
+            use_msa = common_kwargs.use_msa,
+            strict = common_kwargs.strict,
+        )
+        for r in records
+            println("task_name=$(r.task_name) seed=$(r.seed)")
+            println("prediction_dir=$(r.prediction_dir)")
+            for p in r.cif_paths
+                println("cif_path=$(p)")
+            end
+        end
+        return
+    end
+
+    records = predict_json(
+        parsed["input"];
+        out_dir = common_kwargs.out_dir,
+        model_name = common_kwargs.model_name,
+        weights_path = common_kwargs.weights_path,
+        seeds = common_kwargs.seeds,
+        use_default_params = common_kwargs.use_default_params,
+        cycle = common_kwargs.cycle,
+        step = common_kwargs.step,
+        sample = common_kwargs.sample,
+        use_msa = common_kwargs.use_msa,
+        strict = common_kwargs.strict,
+    )
+    for r in records
+        println("input_json=$(r.input_json) task_name=$(r.task_name) seed=$(r.seed)")
+        println("prediction_dir=$(r.prediction_dir)")
+        for p in r.cif_paths
+            println("cif_path=$(p)")
+        end
+    end
+end
+
+function _parse_tojson_args(args::Vector{String})
+    parsed = Dict{String, Any}(
+        "out_dir" => "./output",
+        "altloc" => "first",
+    )
+    i = 1
+    while i <= length(args)
+        arg = args[i]
+        if arg == "--input"
+            value, i = _require_value(args, i, arg)
+            parsed["input"] = value
+        elseif arg == "--out_dir"
+            value, i = _require_value(args, i, arg)
+            parsed["out_dir"] = value
+        elseif arg == "--altloc"
+            value, i = _require_value(args, i, arg)
+            parsed["altloc"] = value
+        elseif arg == "--assembly_id"
+            value, i = _require_value(args, i, arg)
+            parsed["assembly_id"] = value
+        elseif arg == "--help" || arg == "-h"
+            _usage()
+            return Dict{String, Any}("__help__" => true)
+        else
+            error("Unknown option: $arg")
+        end
+        i += 1
+    end
+    haskey(parsed, "input") || error("tojson requires --input")
+    return parsed
+end
+
+function _run_tojson(parsed::Dict{String, Any})
+    out_paths = convert_structure_to_infer_json(
+        parsed["input"];
+        out_dir = parsed["out_dir"],
+        altloc = parsed["altloc"],
+        assembly_id = get(parsed, "assembly_id", nothing),
+    )
+    for p in out_paths
+        println("json_path=$(p)")
+    end
+end
+
+function _parse_msa_args(args::Vector{String})
+    parsed = Dict{String, Any}(
+        "out_dir" => "./output",
+        "pairing_db" => "uniref100",
+    )
+    i = 1
+    while i <= length(args)
+        arg = args[i]
+        if arg == "--input"
+            value, i = _require_value(args, i, arg)
+            parsed["input"] = value
+        elseif arg == "--precomputed_msa_dir"
+            value, i = _require_value(args, i, arg)
+            parsed["precomputed_msa_dir"] = value
+        elseif arg == "--pairing_db"
+            value, i = _require_value(args, i, arg)
+            parsed["pairing_db"] = value
+        elseif arg == "--out_dir"
+            value, i = _require_value(args, i, arg)
+            parsed["out_dir"] = value
+        elseif arg == "--help" || arg == "-h"
+            _usage()
+            return Dict{String, Any}("__help__" => true)
+        else
+            error("Unknown option: $arg")
+        end
+        i += 1
+    end
+    haskey(parsed, "input") || error("msa requires --input")
+    haskey(parsed, "precomputed_msa_dir") || error("msa requires --precomputed_msa_dir")
+    return parsed
+end
+
+function _run_msa(parsed::Dict{String, Any})
+    input_path = String(parsed["input"])
+    ext = lowercase(splitext(input_path)[2])
+    if ext == ".json"
+        out_path = add_precomputed_msa_to_json(
+            input_path;
+            out_dir = parsed["out_dir"],
+            precomputed_msa_dir = parsed["precomputed_msa_dir"],
+            pairing_db = parsed["pairing_db"],
+        )
+        println("updated_json=$(out_path)")
+        return
+    elseif ext in (".fasta", ".fa")
+        error(
+            "FASTA MSA search is not yet implemented in Julia. " *
+            "Provide --input <json> with --precomputed_msa_dir to attach existing MSA paths.",
+        )
+    end
+    error("msa currently supports JSON input only. Got: $input_path")
+end
+
 function _run_parity_check(parsed::Dict{String, Any}; io::IO = stdout)
     report = compare_raw_weight_dirs(
         parsed["reference_raw_dir"],
@@ -287,6 +569,21 @@ function main(argv::Vector{String} = copy(ARGS))
         parsed = _parse_parity_args(argv[2:end])
         haskey(parsed, "__help__") && return 0
         return _run_parity_check(parsed)
+    elseif cmd == "predict"
+        parsed = _parse_predict_args(argv[2:end])
+        haskey(parsed, "__help__") && return 0
+        _run_predict(parsed)
+        return 0
+    elseif cmd == "tojson"
+        parsed = _parse_tojson_args(argv[2:end])
+        haskey(parsed, "__help__") && return 0
+        _run_tojson(parsed)
+        return 0
+    elseif cmd == "msa"
+        parsed = _parse_msa_args(argv[2:end])
+        haskey(parsed, "__help__") && return 0
+        _run_msa(parsed)
+        return 0
     end
 
     error("Unknown command: $cmd")

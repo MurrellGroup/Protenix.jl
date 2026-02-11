@@ -21,7 +21,12 @@ end
 function (m::DistogramHead)(z::AbstractArray{<:Real,3})
     size(z, 3) == m.c_z || error("DistogramHead c_z mismatch")
     logits = m.linear(z)
-    return logits .+ permutedims(logits, (2, 1, 3))
+    n_i, n_j, n_b = size(logits)
+    out = similar(logits)
+    @inbounds for i in 1:n_i, j in 1:n_j, b in 1:n_b
+        out[i, j, b] = logits[i, j, b] + logits[j, i, b]
+    end
+    return out
 end
 
 struct ConfidenceHead
@@ -145,6 +150,15 @@ function _distance_augmented_z(
     return z
 end
 
+function _symmetrize_pair_lastdim(x::AbstractArray{<:Real,3})
+    n_i, n_j, n_c = size(x)
+    out = zeros(Float32, n_i, n_j, n_c)
+    @inbounds for i in 1:n_i, j in 1:n_j, c in 1:n_c
+        out[i, j, c] = Float32(x[i, j, c]) + Float32(x[j, i, c])
+    end
+    return out
+end
+
 function (m::ConfidenceHead)(;
     input_feature_dict::AbstractDict{<:AbstractString, <:Any},
     s_inputs::AbstractMatrix{<:Real},
@@ -207,7 +221,7 @@ function (m::ConfidenceHead)(;
         s_f = Float32.(s_i)
 
         pae = m.linear_no_bias_pae(m.pae_ln(z_f))
-        pde = m.linear_no_bias_pde(m.pde_ln(z_f .+ permutedims(z_f, (2, 1, 3))))
+        pde = m.linear_no_bias_pde(m.pde_ln(_symmetrize_pair_lastdim(z_f)))
 
         a_atom = broadcast_token_to_atom(s_f, atom_to_token_idx)
         plddt = _atom_head(m.plddt_ln(a_atom), atom_to_tokatom_idx, m.plddt_weight)

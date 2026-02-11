@@ -71,7 +71,7 @@ function PairformerBlock(
         TriangleMultiplication(c_z, c_hidden_mul; outgoing = true, rng = rng),
         TriangleMultiplication(c_z, c_hidden_mul; outgoing = false, rng = rng),
         TriangleAttention(c_z, c_hidden_pair_att * no_heads_pair, no_heads_pair; starting = true, rng = rng),
-        TriangleAttention(c_z, c_hidden_pair_att * no_heads_pair, no_heads_pair; starting = true, rng = rng),
+        TriangleAttention(c_z, c_hidden_pair_att * no_heads_pair, no_heads_pair; starting = false, rng = rng),
         TransitionBlock(c_z; n = 4, rng = rng),
         apb,
         st,
@@ -88,11 +88,7 @@ function (m::PairformerBlock)(
     z_f .+= m.tri_mul_out(z_f; mask = pair_mask)
     z_f .+= m.tri_mul_in(z_f; mask = pair_mask)
     z_f .+= m.tri_att_start(z_f; mask = pair_mask)
-
-    z_t = permutedims(z_f, (2, 1, 3))
-    mask_t = pair_mask === nothing ? nothing : permutedims(Float32.(pair_mask), (2, 1))
-    z_t .+= m.tri_att_end(z_t; mask = mask_t)
-    z_f = permutedims(z_t, (2, 1, 3))
+    z_f .+= m.tri_att_end(z_f; mask = pair_mask)
     z_f .+= m.pair_transition(z_f)
 
     if m.c_s > 0
@@ -183,26 +179,23 @@ function (m::MSAPairWeightedAveraging)(
     size(z) == (n_tok, n_tok, m.c_z) || error("MSAPairWeightedAveraging z shape mismatch")
 
     msa_ln = m.layernorm_m(msa)
-    v = m.linear_no_bias_mv(msa_ln)
-    v = reshape(v, n_msa, n_tok, m.n_heads, m.c)
+    v_lin = m.linear_no_bias_mv(msa_ln) # [N_msa, N_tok, H*C]
     b = m.linear_no_bias_z(m.layernorm_z(z)) # [N, N, H]
-    g = 1f0 ./ (1f0 .+ exp.(-m.linear_no_bias_mg(msa_ln)))
-    g = reshape(g, n_msa, n_tok, m.n_heads, m.c)
+    g_lin = 1f0 ./ (1f0 .+ exp.(-m.linear_no_bias_mg(msa_ln))) # [N_msa, N_tok, H*C]
 
     w = softmax_dim2(b) # softmax over second token dimension
 
-    wv = zeros(Float32, n_msa, n_tok, m.n_heads, m.c)
+    o_lin = zeros(Float32, n_msa, n_tok, m.n_heads * m.c)
     @inbounds for m_ix in 1:n_msa, i in 1:n_tok, h in 1:m.n_heads, c_ix in 1:m.c
-        s = 0f0
+        idx = (h - 1) * m.c + c_ix
+        acc = 0f0
         for j in 1:n_tok
-            s += w[i, j, h] * v[m_ix, j, h, c_ix]
+            acc += w[i, j, h] * v_lin[m_ix, j, idx]
         end
-        wv[m_ix, i, h, c_ix] = s
+        o_lin[m_ix, i, idx] = g_lin[m_ix, i, idx] * acc
     end
 
-    o = g .* wv
-    o = reshape(o, n_msa, n_tok, m.n_heads * m.c)
-    return m.linear_no_bias_out(o)
+    return m.linear_no_bias_out(o_lin)
 end
 
 struct MSAStack

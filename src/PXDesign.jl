@@ -11,6 +11,7 @@ include("model.jl")
 include("protenix_mini.jl")
 include("protenix_base.jl")
 include("output.jl")
+include("protenix_api.jl")
 include("infer.jl")
 include("cli.jl")
 
@@ -29,11 +30,30 @@ using .ProtenixBase:
     build_sequence_atoms as build_sequence_atoms_protenix_base,
     build_sequence_feature_bundle as build_sequence_feature_bundle_protenix_base,
     fold_sequence as fold_sequence_protenix_base
+using .ProtenixAPI:
+    ProtenixModelSpec,
+    MODEL_SPECS,
+    resolve_model_spec,
+    recommended_params,
+    default_weights_path,
+    predict_json,
+    predict_sequence,
+    convert_structure_to_infer_json,
+    add_precomputed_msa_to_json
 using .CLI: main
 
 export ProtenixMiniModel, run_inference, build_sequence_atoms, build_sequence_feature_bundle, fold_sequence
 export ProtenixBaseModel
 export infer_protenix_base_dims, build_protenix_base_model, load_protenix_base_model!
 export run_inference_protenix_base, build_sequence_atoms_protenix_base, build_sequence_feature_bundle_protenix_base, fold_sequence_protenix_base
+export ProtenixModelSpec,
+    MODEL_SPECS,
+    resolve_model_spec,
+    recommended_params,
+    default_weights_path,
+    predict_json,
+    predict_sequence,
+    convert_structure_to_infer_json,
+    add_precomputed_msa_to_json
 
 end # module PXDesign

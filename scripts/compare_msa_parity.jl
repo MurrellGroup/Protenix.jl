@@ -70,6 +70,11 @@ end
 
 function main()
     path = get(ENV, "MSA_DIAG", "/tmp/py_msa_diag.json")
+    weights_dir = get(
+        ENV,
+        "MSA_WEIGHTS_DIR",
+        joinpath(pwd(), "weights_safetensors_protenix_mini_default_v0.5.0"),
+    )
     raw = PXDesign.JSONLite.parse_json(read(path, String))
 
     z_in = _to_array_f32(raw["z_in"])
@@ -82,8 +87,12 @@ function main()
     z1_py = _to_array_f32(raw["z1"])
     z2_py = _to_array_f32(raw["z2"])
     z_out_py = _to_array_f32(raw["z_out"])
+    z_out_module_py = haskey(raw, "z_out_module") ? _to_array_f32(raw["z_out_module"]) : z_out_py
+    z_blocks_py = haskey(raw, "z_blocks") ? raw["z_blocks"] : Any[]
+    m_blocks_py = haskey(raw, "m_blocks") ? raw["m_blocks"] : Any[]
+    block_debug_py = haskey(raw, "block_debug") ? raw["block_debug"] : Any[]
 
-    w = PXDesign.Model.load_safetensors_weights(joinpath(pwd(), "weights_safetensors_protenix_mini_default_v0.5.0"))
+    w = PXDesign.Model.load_safetensors_weights(weights_dir)
     m = PXDesign.ProtenixMini.build_protenix_mini_model(w)
     PXDesign.ProtenixMini.load_protenix_mini_model!(m, w; strict = true)
 
@@ -105,12 +114,68 @@ function main()
     opm_jl = m.msa_module.blocks[1].outer_product_mean_msa(m0_jl)
     z1_jl = z_in + opm_jl
     _, z2_jl = m.msa_module.blocks[1].pair_stack(nothing, z1_jl; pair_mask = nothing)
+    msa_cur = m0_jl
+    z_cur = z_in
+    z_blocks_jl = Any[]
+    m_blocks_jl = Any[]
+    for (i_blk, blk) in enumerate(m.msa_module.blocks)
+        opm_blk_jl = blk.outer_product_mean_msa(msa_cur)
+        z_pre_pair_jl = z_cur + opm_blk_jl
+        m_pair_jl = nothing
+        m_after_pair_jl = nothing
+        m_trans_jl = nothing
+        m_after_trans_jl = nothing
+        if blk.msa_stack !== nothing
+            m_pair_jl = blk.msa_stack.msa_pair_weighted_averaging(msa_cur, z_pre_pair_jl)
+            m_after_pair_jl = msa_cur + m_pair_jl
+            m_trans_jl = blk.msa_stack.transition_m(m_after_pair_jl)
+            m_after_trans_jl = m_after_pair_jl + m_trans_jl
+        end
+        msa_cur, z_cur = blk(msa_cur, z_cur; pair_mask = nothing)
+        push!(m_blocks_jl, msa_cur)
+        push!(z_blocks_jl, z_cur)
+
+        if i_blk <= length(block_debug_py)
+            dbg = block_debug_py[i_blk]
+            if haskey(dbg, "opm")
+                _report("msa.block_$(i_blk).opm", _to_array_f32(dbg["opm"]), opm_blk_jl)
+            end
+            if haskey(dbg, "z_pre_pair")
+                _report("msa.block_$(i_blk).z_pre_pair", _to_array_f32(dbg["z_pre_pair"]), z_pre_pair_jl)
+            end
+            if m_pair_jl !== nothing && haskey(dbg, "m_pair") && dbg["m_pair"] !== nothing
+                _report("msa.block_$(i_blk).m_pair", _to_array_f32(dbg["m_pair"]), m_pair_jl)
+            end
+            if m_after_pair_jl !== nothing && haskey(dbg, "m_after_pair") && dbg["m_after_pair"] !== nothing
+                _report("msa.block_$(i_blk).m_after_pair", _to_array_f32(dbg["m_after_pair"]), m_after_pair_jl)
+            end
+            if m_trans_jl !== nothing && haskey(dbg, "m_trans") && dbg["m_trans"] !== nothing
+                _report("msa.block_$(i_blk).m_trans", _to_array_f32(dbg["m_trans"]), m_trans_jl)
+            end
+            if m_after_trans_jl !== nothing && haskey(dbg, "m_after_trans") && dbg["m_after_trans"] !== nothing
+                _report("msa.block_$(i_blk).m_after_trans", _to_array_f32(dbg["m_after_trans"]), m_after_trans_jl)
+            end
+            if haskey(dbg, "z_post_pair")
+                _report("msa.block_$(i_blk).z_post_pair", _to_array_f32(dbg["z_post_pair"]), z_cur)
+            end
+        end
+    end
     z_out_jl = m.msa_module(feat, z_in, s_inputs; pair_mask = nothing, rng = MersenneTwister(0))
 
     _report("msa.m0", m0_py, m0_jl)
     _report("msa.opm", opm_py, opm_jl)
     _report("msa.z1", z1_py, z1_jl)
     _report("msa.z2", z2_py, z2_jl)
+    for i in 1:min(length(z_blocks_py), length(z_blocks_jl))
+        _report("msa.z_block_$(i)", _to_array_f32(z_blocks_py[i]), z_blocks_jl[i])
+    end
+    for i in 1:min(length(m_blocks_py), length(m_blocks_jl))
+        if m_blocks_py[i] !== nothing && m_blocks_jl[i] !== nothing
+            _report("msa.m_block_$(i)", _to_array_f32(m_blocks_py[i]), m_blocks_jl[i])
+        end
+    end
+    _report("msa.z_out_loop", z_out_py, z_cur)
+    _report("msa.z_out_module_py", z_out_module_py, z_out_jl)
     _report("msa.z_out", z_out_py, z_out_jl)
 end
 

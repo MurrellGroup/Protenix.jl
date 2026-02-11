@@ -16,6 +16,198 @@ function _as_string_dict_test(x)
     return x
 end
 
+include("layer_regression.jl")
+
+@testset "Protenix API surface" begin
+    pmini = PXDesign.recommended_params("protenix_mini_default_v0.5.0")
+    @test pmini.cycle == 4
+    @test pmini.step == 5
+    @test pmini.sample == 5
+    @test pmini.use_msa == true
+
+    pover = PXDesign.recommended_params(
+        "protenix_base_default_v0.5.0";
+        use_default_params = false,
+        cycle = 3,
+        step = 11,
+        sample = 2,
+        use_msa = false,
+    )
+    @test pover.cycle == 3
+    @test pover.step == 11
+    @test pover.sample == 2
+    @test pover.use_msa == false
+
+    @test_throws ErrorException PXDesign.resolve_model_spec("not_a_model")
+
+    mktempdir() do d
+        pdb_path = joinpath(d, "tiny.pdb")
+        write(
+            pdb_path,
+            join(
+                [
+                    "ATOM      1  N   ALA A   1      11.104  13.207   9.474  1.00 20.00           N",
+                    "ATOM      2  CA  ALA A   1      12.447  13.702   9.934  1.00 20.00           C",
+                    "ATOM      3  C   ALA A   1      13.472  12.557   9.750  1.00 20.00           C",
+                    "ATOM      4  O   ALA A   1      13.180  11.383   9.969  1.00 20.00           O",
+                    "ATOM      5  N   GLY A   2      14.690  12.880   9.336  1.00 20.00           N",
+                    "ATOM      6  CA  GLY A   2      15.786  11.944   9.169  1.00 20.00           C",
+                    "ATOM      7  C   GLY A   2      16.026  11.393   7.773  1.00 20.00           C",
+                    "ATOM      8  O   GLY A   2      16.001  12.141   6.794  1.00 20.00           O",
+                    "TER",
+                    "END",
+                    "",
+                ],
+                "\n",
+            ),
+        )
+
+        json_out_dir = joinpath(d, "tojson_out")
+        out_paths = PXDesign.convert_structure_to_infer_json(pdb_path; out_dir = json_out_dir)
+        @test length(out_paths) == 1
+        @test isfile(out_paths[1])
+
+        parsed = PXDesign.JSONLite.parse_json(read(out_paths[1], String))
+        @test parsed isa AbstractVector
+        @test length(parsed) == 1
+        @test parsed[1]["name"] == "tiny"
+        seqs = parsed[1]["sequences"]
+        @test length(seqs) == 1
+        @test seqs[1]["proteinChain"]["sequence"] == "AG"
+        @test seqs[1]["proteinChain"]["count"] == 1
+
+        in_json = joinpath(d, "input.json")
+        PXDesign.JSONLite.write_json(
+            in_json,
+            Any[
+                Dict(
+                    "name" => "msa_demo",
+                    "sequences" => Any[
+                        Dict("proteinChain" => Dict("sequence" => "ACD", "count" => 1)),
+                        Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+                    ],
+                ),
+            ],
+        )
+        msa_out = PXDesign.add_precomputed_msa_to_json(
+            in_json;
+            out_dir = joinpath(d, "msa_out"),
+            precomputed_msa_dir = "/tmp/precomp_msa",
+        )
+        @test isfile(msa_out)
+        parsed_msa = PXDesign.JSONLite.parse_json(read(msa_out, String))
+        @test parsed_msa[1]["sequences"][1]["proteinChain"]["msa"]["precomputed_msa_dir"] == "/tmp/precomp_msa"
+        @test !haskey(parsed_msa[1]["sequences"][2], "proteinChain")
+
+        @test PXDesign.main(["tojson", "--input", pdb_path, "--out_dir", joinpath(d, "cli_tojson")]) == 0
+        @test PXDesign.main([
+            "msa",
+            "--input",
+            in_json,
+            "--precomputed_msa_dir",
+            "/tmp/precomp_msa",
+            "--out_dir",
+            joinpath(d, "cli_msa"),
+        ]) == 0
+        @test PXDesign.main(["predict", "--help"]) == 0
+    end
+end
+
+@testset "Protenix precomputed MSA ingestion" begin
+    mktempdir() do d
+        msa_dir = joinpath(d, "msa", "0")
+        mkpath(msa_dir)
+        write(
+            joinpath(msa_dir, "non_pairing.a3m"),
+            """
+>query
+ACD
+>hit1
+AFdD
+>hit2
+A-D
+""",
+        )
+        write(joinpath(msa_dir, "pairing.a3m"), ">query\nACD\n")
+
+        input_json = joinpath(d, "input.json")
+        task = Dict{String, Any}(
+            "name" => "msa_ingest_smoke",
+            "sequences" => Any[
+                Dict(
+                    "proteinChain" => Dict(
+                        "sequence" => "ACD",
+                        "count" => 1,
+                        "msa" => Dict(
+                            "precomputed_msa_dir" => "msa/0",
+                            "pairing_db" => "uniref100",
+                        ),
+                    ),
+                ),
+            ],
+        )
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        atoms = PXDesign.ProtenixAPI._build_atoms_from_infer_task(task)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = "msa_ingest_smoke")
+        feat = bundle["input_feature_dict"]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(feat, task, input_json; use_msa = true)
+
+        @test size(feat["msa"], 2) == 3
+        @test size(feat["msa"], 1) >= 2
+        @test maximum(feat["has_deletion"]) > 0f0
+        @test maximum(feat["deletion_value"]) > 0f0
+        @test size(feat["profile"]) == (3, 32)
+    end
+end
+
+@testset "Protenix template feature ingestion" begin
+    mktempdir() do d
+        input_json = joinpath(d, "input_template.json")
+        task = Dict{String, Any}(
+            "name" => "template_ingest_smoke",
+            "sequences" => Any[
+                Dict(
+                    "proteinChain" => Dict(
+                        "sequence" => "ACD",
+                        "count" => 1,
+                    ),
+                ),
+            ],
+            "template_features" => Dict(
+                "template_restype" => Any[Any[0, 1, 2]],
+                "template_all_atom_mask" => Any[
+                    Any[
+                        Any[ones(Int, 37)...],
+                        Any[ones(Int, 37)...],
+                        Any[ones(Int, 37)...],
+                    ],
+                ],
+                "template_all_atom_positions" => Any[
+                    Any[
+                        [Any[Any[0.0, 0.0, 0.0] for _ in 1:37]...],
+                        [Any[Any[0.0, 0.0, 0.0] for _ in 1:37]...],
+                        [Any[Any[0.0, 0.0, 0.0] for _ in 1:37]...],
+                    ],
+                ],
+            ),
+        )
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+        parsed_task = PXDesign.JSONLite.parse_json(read(input_json, String))[1]
+
+        atoms = PXDesign.ProtenixAPI._build_atoms_from_infer_task(parsed_task)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = "template_ingest_smoke")
+        feat = bundle["input_feature_dict"]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_template_features!(feat, parsed_task)
+
+        @test size(feat["template_restype"]) == (1, 3)
+        @test size(feat["template_all_atom_mask"]) == (1, 3, 37)
+        @test size(feat["template_all_atom_positions"]) == (1, 3, 37, 3)
+    end
+end
+
 @testset "ProtenixBase sequence wrappers" begin
     atoms = PXDesign.ProtenixBase.build_sequence_atoms("ACD")
     @test !isempty(atoms)

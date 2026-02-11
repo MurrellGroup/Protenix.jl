@@ -273,12 +273,58 @@ function _triangle_attention_row(
             for qi in 1:j_dim
                 # OpenFold triangle bias is non-batched: depends on (query, key, head),
                 # not on the batch/row index after reshaping.
-                @views scores[qi, :] .+= tri_bias[qi, :, h]
+                @views scores[qi, :] .+= tri_bias[qi, :]
                 @views scores[qi, :] .+= mask_bias_key
             end
             _row_softmax!(scores)
             ctx = scores * vh
             @view(out[b, :, r]) .= ctx
+        end
+    end
+
+    out .*= g
+    out = m.linear_o(out)
+    return out
+end
+
+function _triangle_attention_col(
+    m::TriangleAttention,
+    x::Array{Float32,3},
+    mask::Matrix{Float32},
+)
+    i_dim, j_dim, c_in = size(x)
+    c_in == m.c_in || error("TriangleAttention c_in mismatch")
+
+    x_ln = m.layer_norm(x)
+    tri_bias = m.linear(x_ln) # [I, J, H]
+
+    q = m.linear_q(x_ln)
+    k = m.linear_k(x_ln)
+    v = m.linear_v(x_ln)
+    g = 1f0 ./ (1f0 .+ exp.(-m.linear_g(x_ln)))
+
+    d = div(m.c_hidden, m.n_heads)
+    scale = inv(sqrt(Float32(d)))
+    out = zeros(Float32, i_dim, j_dim, m.c_hidden)
+
+    @inbounds for b in 1:j_dim
+        mask_bias_key = m.inf .* (mask[:, b] .- 1f0)
+        for h in 1:m.n_heads
+            r = ((h - 1) * d + 1):(h * d)
+            qh = @view q[:, b, r] # [Q, d]
+            kh = @view k[:, b, r] # [K, d]
+            vh = @view v[:, b, r] # [K, d]
+
+            scores = (qh * transpose(kh)) .* scale
+            for qi in 1:i_dim
+                # Mirrors transpose-based path:
+                # tri_bias_t[qi, key] == tri_bias[key, qi] in original layout.
+                @views scores[qi, :] .+= tri_bias[:, qi, h]
+                @views scores[qi, :] .+= mask_bias_key
+            end
+            _row_softmax!(scores)
+            ctx = scores * vh
+            @view(out[:, b, r]) .= ctx
         end
     end
 
@@ -302,12 +348,8 @@ function (m::TriangleAttention)(
 
     if m.starting
         return _triangle_attention_row(m, x_f, mask_f)
-    else
-        x_t = permutedims(x_f, (2, 1, 3))
-        m_t = permutedims(mask_f, (2, 1))
-        out_t = _triangle_attention_row(m, x_t, m_t)
-        return permutedims(out_t, (2, 1, 3))
     end
+    return _triangle_attention_col(m, x_f, mask_f)
 end
 
 """
@@ -375,9 +417,15 @@ function (m::OuterProductMean)(
                 end
             end
         end
-        # Python flattens `[c, e]` with `e` as the fastest axis.
-        # Julia is column-major, so transpose before flattening to match.
-        flat = reshape(permutedims(tmp, (2, 1)), 1, :)
+        # Python flattens `[c, e]` row-major with `e` as the fastest axis.
+        # Build the flattened view directly in that order to avoid permuting.
+        flat_vec = Vector{Float32}(undef, m.c_hidden * m.c_hidden)
+        idx = 1
+        for c1 in 1:m.c_hidden, c2 in 1:m.c_hidden
+            flat_vec[idx] = tmp[c1, c2]
+            idx += 1
+        end
+        flat = reshape(flat_vec, 1, :)
         out[i, j, :] .= vec(m.linear_out(flat))
     end
 

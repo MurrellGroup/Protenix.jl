@@ -6,5 +6,7 @@ output/
 .pydeps/
 .external/
 weights_raw/
+weights_raw_*/
 weights_safetensors/
+weights_safetensors_*/
 release_data/

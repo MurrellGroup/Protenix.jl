@@ -207,9 +207,12 @@ def main() -> None:
     with torch.no_grad():
         s_inputs = input_embedder(feat, inplace_safe=False, chunk_size=None)
         s_init = linear_no_bias_sinit(s_inputs)
-        z_init = linear_no_bias_zinit1(s_init)[:, None, :] + linear_no_bias_zinit2(s_init)[None, :, :]
-        z_init = z_init + relpos(feat)
-        z_init = z_init + linear_no_bias_token_bond(token_bonds.unsqueeze(-1))
+        z_init_lin = linear_no_bias_zinit1(s_init)[:, None, :] + linear_no_bias_zinit2(s_init)[
+            None, :, :
+        ]
+        z_relpos = relpos(feat)
+        z_token_bond = linear_no_bias_token_bond(token_bonds.unsqueeze(-1))
+        z_init = z_init_lin + z_relpos + z_token_bond
 
         z = torch.zeros_like(z_init)
         s = torch.zeros_like(s_init)
@@ -278,6 +281,11 @@ def main() -> None:
         "n_cycle": args.n_cycle,
         "feat": {k: v.tolist() for k, v in feat.items()},
         "s_inputs": s_inputs.tolist(),
+        "s_init": s_init.tolist(),
+        "z_init_lin": z_init_lin.tolist(),
+        "z_relpos": z_relpos.tolist(),
+        "z_token_bond": z_token_bond.tolist(),
+        "z_init": z_init.tolist(),
         "s_trunk": s.tolist(),
         "z_trunk": z.tolist(),
         "x_noisy": x_noisy.tolist(),

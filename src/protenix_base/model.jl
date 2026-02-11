@@ -27,7 +27,11 @@ function build_protenix_base_model(
     weights::AbstractDict{<:AbstractString,<:Any};
     n_cycle::Int = 10,
     sample_n_step::Int = 200,
-    sample_n_sample::Int = 1,
+    sample_n_sample::Int = 5,
+    sample_gamma0::Real = 0.8,
+    sample_gamma_min::Real = 1.0,
+    sample_noise_scale_lambda::Real = 1.003,
+    sample_step_scale_eta::Real = 1.5,
     rng::AbstractRNG = MersenneTwister(0),
 )
     d = infer_protenix_base_dims(weights)
@@ -46,6 +50,10 @@ function build_protenix_base_model(
         diffusion_atom_encoder_blocks = d.diffusion_atom_encoder_blocks,
         diffusion_atom_decoder_blocks = d.diffusion_atom_decoder_blocks,
         confidence_max_atoms_per_token = d.max_atoms_per_token,
+        sample_gamma0 = sample_gamma0,
+        sample_gamma_min = sample_gamma_min,
+        sample_noise_scale_lambda = sample_noise_scale_lambda,
+        sample_step_scale_eta = sample_step_scale_eta,
         sample_n_step = sample_n_step,
         sample_n_sample = sample_n_sample,
         rng = rng,

@@ -17,6 +17,10 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--n-token", type=int, default=6)
+    parser.add_argument("--n-blocks", type=int, default=16)
+    parser.add_argument("--c-z", type=int, default=128)
+    parser.add_argument("--c-s", type=int, default=384)
+    parser.add_argument("--n-heads", type=int, default=16)
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
@@ -27,7 +31,13 @@ def main() -> None:
     state = ckpt["model"]
     state = {_normalize_key(k): v for k, v in state.items() if torch.is_tensor(v)}
 
-    stack = PairformerStack(n_blocks=16, n_heads=16, c_z=128, c_s=384, dropout=0.25)
+    stack = PairformerStack(
+        n_blocks=args.n_blocks,
+        n_heads=args.n_heads,
+        c_z=args.c_z,
+        c_s=args.c_s,
+        dropout=0.25,
+    )
     sub = {
         k[len("pairformer_stack.") :]: v
         for k, v in state.items()

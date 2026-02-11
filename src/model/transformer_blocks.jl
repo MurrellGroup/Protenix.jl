@@ -106,13 +106,13 @@ function AttentionPairBias(
     )
 end
 
-function _row_softmax!(scores::Matrix{Float32})
-    for i in 1:size(scores, 1)
-        row = @view(scores[i, :])
-        m = maximum(row)
-        row .= exp.(row .- m)
-        s = sum(row)
-        row ./= s
+function _col_softmax!(scores::Matrix{Float32})
+    for j in 1:size(scores, 2)
+        col = @view(scores[:, j])
+        m = maximum(col)
+        col .= exp.(col .- m)
+        s = sum(col)
+        col ./= s
     end
     return scores
 end
@@ -164,14 +164,14 @@ function _attention_with_pair_bias(
         qh = @view(q[:, r])
         kh = @view(k[:, r])
         vh = @view(v[:, r])
-        scores = Array{Float32}(undef, n_token, n_token)
-        scores .= (qh * transpose(kh)) .* scale
-        scores .+= @view(z_bias[:, :, h])
+        scores = Array{Float32}(undef, n_token, n_token) # [key, query]
+        scores .= (kh * transpose(qh)) .* scale
+        scores .+= transpose(@view(z_bias[:, :, h]))
         if local_attn_bias !== nothing
-            scores .+= local_attn_bias
+            scores .+= transpose(local_attn_bias)
         end
-        _row_softmax!(scores)
-        ctx = scores * vh
+        _col_softmax!(scores)
+        ctx = transpose(scores) * vh
         @view(out[:, r]) .= ctx
     end
 
@@ -230,16 +230,15 @@ function _attention_with_pair_bias_local_trunks(
                 end
             end
 
-            scores = qh[q_start:q_end, :] * transpose(k_block)
-            scores .*= scale
-            scores .+= @view(z_bias_trunk[b, 1:q_len, :, h])
+            scores = (k_block * transpose(qh[q_start:q_end, :])) .* scale # [key, query]
+            scores .+= transpose(@view(z_bias_trunk[b, 1:q_len, :, h]))
             for kk in 1:n_keys
                 if !valid_key[kk]
-                    @inbounds scores[:, kk] .= -1f10
+                    @inbounds scores[kk, :] .= -1f10
                 end
             end
-            _row_softmax!(scores)
-            ctx = scores * v_block
+            _col_softmax!(scores)
+            ctx = transpose(scores) * v_block
             @view(out[q_start:q_end, r]) .= ctx
         end
     end
