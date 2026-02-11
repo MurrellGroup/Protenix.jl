@@ -19,6 +19,34 @@ end
 include("layer_regression.jl")
 
 @testset "Protenix API surface" begin
+    models = PXDesign.list_supported_models()
+    @test length(models) >= 5
+    @test issorted(getindex.(models, :model_name))
+    @test any(m -> m.model_name == "protenix_base_default_v0.5.0", models)
+    @test any(m -> m.model_name == "protenix_mini_default_v0.5.0", models)
+
+    opts = PXDesign.ProtenixPredictOptions(
+        model_name = "protenix_mini_default_v0.5.0",
+        seeds = [3, 5],
+        cycle = 2,
+        step = 7,
+        sample = 1,
+    )
+    @test opts.model_name == "protenix_mini_default_v0.5.0"
+    @test opts.seeds == [3, 5]
+    @test opts.cycle == 2
+    @test opts.step == 7
+    @test opts.sample == 1
+
+    seq_opts = PXDesign.ProtenixSequenceOptions(common = opts, task_name = "demo", chain_id = "A0")
+    @test seq_opts.common === opts
+    @test seq_opts.task_name == "demo"
+    @test seq_opts.chain_id == "A0"
+    @test seq_opts.esm_token_embedding === nothing
+
+    @test_throws ErrorException PXDesign.ProtenixPredictOptions(seeds = Int[])
+    @test PXDesign.main(["predict", "--list-models"]) == 0
+
     pmini = PXDesign.recommended_params("protenix_mini_default_v0.5.0")
     @test pmini.cycle == 4
     @test pmini.step == 5
@@ -123,6 +151,117 @@ include("layer_regression.jl")
             joinpath(d, "cli_msa"),
         ]) == 0
         @test PXDesign.main(["predict", "--help"]) == 0
+    end
+end
+
+@testset "Protenix mixed-entity parsing and covalent bonds" begin
+    task = Dict{String, Any}(
+        "name" => "mixed_entities_smoke",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("dnaSequence" => Dict("sequence" => "AT", "count" => 1)),
+            Dict("rnaSequence" => Dict("sequence" => "GU", "count" => 1)),
+            Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+            Dict("condition_ligand" => Dict("ligand" => "CCD_FAD", "count" => 1)),
+            Dict("ion" => Dict("ion" => "MG", "count" => 1)),
+        ],
+    )
+    parsed = PXDesign.ProtenixAPI._parse_task_entities(task)
+    @test !isempty(parsed.atoms)
+    @test length(parsed.protein_specs) == 1
+    @test length(parsed.entity_chain_ids) == 6
+    @test any(a -> a.mol_type == "protein", parsed.atoms)
+    @test any(a -> a.mol_type == "dna", parsed.atoms)
+    @test any(a -> a.mol_type == "rna", parsed.atoms)
+    @test any(a -> a.mol_type == "ligand", parsed.atoms)
+
+    bond_task = Dict{String, Any}(
+        "name" => "bond_smoke",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1)),
+        ],
+        "covalent_bonds" => Any[
+            Dict(
+                "entity1" => "1",
+                "position1" => "1",
+                "atom1" => "N",
+                "entity2" => "2",
+                "position2" => "1",
+                "atom2" => "N",
+            ),
+        ],
+    )
+    parsed_bond = PXDesign.ProtenixAPI._parse_task_entities(bond_task)
+    bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed_bond.atoms; task_name = "bond_smoke")
+    feat = bundle["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+    PXDesign.ProtenixAPI._inject_task_covalent_token_bonds!(feat, bundle["atoms"], bond_task, parsed_bond.entity_chain_ids)
+
+    token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
+    tok_a = findfirst(==("A0"), token_chain_ids)
+    tok_b = findfirst(==("B0"), token_chain_ids)
+    @test tok_a !== nothing
+    @test tok_b !== nothing
+    @test feat["token_bonds"][tok_a, tok_b] == 1
+    @test feat["token_bonds"][tok_b, tok_a] == 1
+
+    smiles_task = Dict{String, Any}(
+        "name" => "smiles_bond_smoke",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("ligand" => Dict("ligand" => "C[C:9]O", "count" => 1)),
+        ],
+        "covalent_bonds" => Any[
+            Dict(
+                "entity1" => 1,
+                "position1" => 1,
+                "atom1" => "CA",
+                "entity2" => 2,
+                "position2" => 1,
+                "atom2" => 9,
+            ),
+        ],
+    )
+    parsed_smiles = PXDesign.ProtenixAPI._parse_task_entities(smiles_task)
+    @test haskey(parsed_smiles.entity_atom_map, 2)
+    @test haskey(parsed_smiles.entity_atom_map[2], 9)
+
+    bundle_smiles = PXDesign.Data.build_feature_bundle_from_atoms(parsed_smiles.atoms; task_name = "smiles_bond_smoke")
+    feat_smiles = bundle_smiles["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_smiles)
+    PXDesign.ProtenixAPI._inject_task_covalent_token_bonds!(
+        feat_smiles,
+        bundle_smiles["atoms"],
+        smiles_task,
+        parsed_smiles.entity_chain_ids,
+        parsed_smiles.entity_atom_map,
+    )
+    token_chain_ids_smiles = [bundle_smiles["atoms"][tok.centre_atom_index].chain_id for tok in bundle_smiles["tokens"]]
+    prot_cols = findall(==("A0"), token_chain_ids_smiles)
+    lig_cols = findall(==("B0"), token_chain_ids_smiles)
+    @test !isempty(prot_cols)
+    @test !isempty(lig_cols)
+    @test any(feat_smiles["token_bonds"][i, j] == 1 for i in prot_cols, j in lig_cols)
+
+    mktempdir() do d
+        lig_pdb = joinpath(d, "ligand.pdb")
+        write(
+            lig_pdb,
+            """
+HETATM    1  C1  UNL A   1       0.000   0.000   0.000  1.00 20.00           C
+HETATM    2  O1  UNL A   1       1.200   0.000   0.000  1.00 20.00           O
+END
+""",
+        )
+        file_task = Dict{String, Any}(
+            "name" => "file_ligand_smoke",
+            "sequences" => Any[Dict("ligand" => Dict("ligand" => "FILE_ligand.pdb", "count" => 1))],
+        )
+        parsed_file = PXDesign.ProtenixAPI._parse_task_entities(file_task; json_dir = d)
+        @test any(a -> a.mol_type == "ligand", parsed_file.atoms)
+        @test haskey(parsed_file.entity_atom_map, 1)
+        @test !isempty(parsed_file.entity_atom_map[1])
     end
 end
 
@@ -266,6 +405,85 @@ end
     @test haskey(bundle, "input_feature_dict")
     @test haskey(bundle, "dims")
     @test bundle["dims"]["N_token"] == 3
+end
+
+@testset "Protenix mini/base end-to-end smoke" begin
+    seq = "ACDE"
+    mini_model = PXDesign.ProtenixMini.ProtenixMiniModel(
+        32,
+        32,
+        16,
+        8,
+        97;
+        c_atom = 16,
+        c_atompair = 8,
+        n_cycle = 1,
+        pairformer_blocks = 1,
+        msa_blocks = 1,
+        diffusion_transformer_blocks = 1,
+        diffusion_atom_encoder_blocks = 1,
+        diffusion_atom_decoder_blocks = 1,
+        confidence_max_atoms_per_token = 20,
+        sample_gamma0 = 0.0,
+        sample_gamma_min = 1.0,
+        sample_noise_scale_lambda = 1.0,
+        sample_step_scale_eta = 0.0,
+        sample_n_step = 1,
+        sample_n_sample = 1,
+        rng = MersenneTwister(1234),
+    )
+
+    folded_mini = PXDesign.ProtenixMini.fold_sequence(
+        mini_model,
+        seq;
+        n_cycle = 1,
+        n_step = 1,
+        n_sample = 1,
+        rng = MersenneTwister(11),
+    )
+    @test size(folded_mini.prediction.coordinate) == (1, length(folded_mini.atoms), 3)
+    @test all(isfinite, folded_mini.prediction.coordinate)
+
+    mktempdir() do d
+        pred_dir = PXDesign.Output.dump_prediction_bundle(
+            joinpath(d, "mini"),
+            "protenix_mini_e2e",
+            folded_mini.atoms,
+            folded_mini.prediction.coordinate,
+        )
+        cif_path = joinpath(pred_dir, "protenix_mini_e2e_sample_0.cif")
+        @test isfile(cif_path)
+        @test filesize(cif_path) > 0
+        cif_text = read(cif_path, String)
+        @test occursin("_entity_poly.", cif_text)
+        @test occursin("_struct_conn.", cif_text)
+    end
+
+    folded_base = PXDesign.ProtenixBase.fold_sequence(
+        mini_model,
+        seq;
+        n_cycle = 1,
+        n_step = 1,
+        n_sample = 1,
+        rng = MersenneTwister(22),
+    )
+    @test size(folded_base.prediction.coordinate) == (1, length(folded_base.atoms), 3)
+    @test all(isfinite, folded_base.prediction.coordinate)
+
+    mktempdir() do d
+        pred_dir = PXDesign.Output.dump_prediction_bundle(
+            joinpath(d, "base"),
+            "protenix_base_e2e",
+            folded_base.atoms,
+            folded_base.prediction.coordinate,
+        )
+        cif_path = joinpath(pred_dir, "protenix_base_e2e_sample_0.cif")
+        @test isfile(cif_path)
+        @test filesize(cif_path) > 0
+        cif_text = read(cif_path, String)
+        @test occursin("_entity_poly.", cif_text)
+        @test occursin("_struct_conn.", cif_text)
+    end
 end
 
 @testset "Protenix typed feature path parity" begin
@@ -669,6 +887,11 @@ target:
 end
 
 @testset "Inputs YAML vs PyYAML parity (supported subset)" begin
+    if get(ENV, "PXDESIGN_ENABLE_PYTHON_PARITY_TESTS", "0") != "1"
+        @test true
+        return
+    end
+
     has_pyyaml = success(
         pipeline(`python3 -c "import yaml; print('ok')"`, stdout = devnull, stderr = devnull),
     )

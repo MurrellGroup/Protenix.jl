@@ -10,6 +10,7 @@ import ..Model: compare_raw_weight_dirs
 import ..ProtenixAPI:
     add_precomputed_msa_to_json,
     convert_structure_to_infer_json,
+    list_supported_models,
     predict_json,
     predict_sequence
 
@@ -61,6 +62,7 @@ function _usage(io::IO = stdout)
     println(io, "  --use_msa <true|false>")
     println(io, "  --use_default_params <true|false>  (default: true)")
     println(io, "  --strict <true|false>           (default: true)")
+    println(io, "  --list-models                   (print supported model variants)")
     println(io, "  --task_name <name>              (sequence mode only)")
     println(io, "  --chain_id <id>                 (sequence mode only)")
     println(io, "  --esm_token_embedding_json <file> (sequence mode only; JSON matrix [N_token,D])")
@@ -267,6 +269,7 @@ function _parse_predict_args(args::Vector{String})
         "strict" => true,
         "task_name" => "protenix_sequence",
         "chain_id" => "A0",
+        "list_models" => false,
     )
 
     i = 1
@@ -308,6 +311,8 @@ function _parse_predict_args(args::Vector{String})
         elseif arg == "--strict"
             value, i = _require_value(args, i, arg)
             parsed["strict"] = _parse_bool(value)
+        elseif arg == "--list-models"
+            parsed["list_models"] = true
         elseif arg == "--task_name"
             value, i = _require_value(args, i, arg)
             parsed["task_name"] = value
@@ -328,8 +333,12 @@ function _parse_predict_args(args::Vector{String})
 
     has_input = haskey(parsed, "input")
     has_seq = haskey(parsed, "sequence")
-    (has_input || has_seq) || error("predict requires either --input or --sequence")
-    !(has_input && has_seq) || error("predict accepts only one of --input or --sequence")
+    if parsed["list_models"]
+        !(has_input || has_seq) || error("--list-models cannot be combined with --input/--sequence")
+    else
+        (has_input || has_seq) || error("predict requires either --input or --sequence")
+        !(has_input && has_seq) || error("predict accepts only one of --input or --sequence")
+    end
     return parsed
 end
 
@@ -357,6 +366,16 @@ function _load_embedding_json_matrix(path::AbstractString)
 end
 
 function _run_predict(parsed::Dict{String, Any})
+    if parsed["list_models"]
+        println("supported_models:")
+        for spec in list_supported_models()
+            println(
+                "  - $(spec.model_name) family=$(spec.family) cycle=$(spec.default_cycle) step=$(spec.default_step) sample=$(spec.default_sample) use_msa=$(spec.default_use_msa) needs_esm_embedding=$(spec.needs_esm_embedding)",
+            )
+        end
+        return
+    end
+
     common_kwargs = (
         out_dir = parsed["out_dir"],
         model_name = parsed["model_name"],

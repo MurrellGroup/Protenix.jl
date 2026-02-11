@@ -22,6 +22,7 @@
 5. Record known deltas from Python explicitly in docs until closed.
 6. Avoid unnecessary external runtime dependencies; isolate any temporary compatibility shims.
 7. Hardware safety: never use GPU on this Mac (MPS/CUDA). Always run CPU-only to avoid host instability.
+8. Runtime policy: `src/` and `bin/` must remain pure Julia. No Python subprocess/runtime dependency in user inference paths; Python is allowed only in explicit parity/audit tooling under `scripts/`.
 
 ## Escalation Policy
 

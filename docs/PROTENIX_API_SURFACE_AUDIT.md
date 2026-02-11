@@ -12,11 +12,12 @@ This document compares upstream `protenix` user-facing commands with the Julia p
 
 | Python API | Python behavior | Julia status | Julia entrypoint |
 |---|---|---|---|
-| `predict --input <json|dir>` | Runs inference for JSON tasks | Supported (protein-only task entities) | `pxdesign predict --input ...` / `PXDesign.predict_json(...)` |
+| `predict --input <json|dir>` | Runs inference for JSON tasks | Supported for protein/dna/rna/ligand/ion mixed task entities | `pxdesign predict --input ...` / `PXDesign.predict_json(...)` |
 | `predict --model_name` | Model variant selection | Supported for v0.5 mini/base model names | same |
 | `predict --seeds a,b,c` | Multi-seed inference | Supported | same |
 | `predict --cycle --step --sample` | Inference controls | Supported | same |
 | `predict --use_default_params` | Applies per-model recommended defaults | Supported | same |
+| `predict --list-models` | Discover model variants/defaults | Supported | `pxdesign predict --list-models` / `PXDesign.list_supported_models()` |
 | `predict --use_msa` | Enables MSA use/search path | Uses precomputed `non_pairing.a3m` (and `pairing.a3m` for multi-chain inputs); MSA search not implemented in Julia | same |
 | `tojson --input <pdb|cif|dir>` | Convert structures to infer JSON | Supported for protein-chain extraction | `pxdesign tojson ...` / `PXDesign.convert_structure_to_infer_json(...)` |
 | `tojson --altloc` | Altloc handling | `first` only | same |
@@ -41,14 +42,25 @@ Recognized and runnable in Julia when `esm_token_embedding` is provided (automat
 
 ## Current Functional Limits (Explicit)
 
-`predict_json(...)` currently supports `proteinChain` entities only. The following input entities are not yet supported in the Julia infer JSON path and will raise clear errors:
+`predict_json(...)` supports these task entities in Julia:
 
+- `proteinChain`
 - `dnaSequence`
 - `rnaSequence`
-- `ligand`
+- `ligand`:
+  - `CCD_*`
+  - `SMILES` (Julia-native parsing path)
+  - `FILE_*` (structure file path)
+  - `condition_ligand` alias support
 - `ion`
-- `covalent_bonds`
-- `constraint`
+- `covalent_bonds`:
+  - name-based atom references
+  - numeric ligand atom indices via `atom_map_to_atom_name`
+
+Current remaining deltas in this infer path:
+
+- `constraint` conditioning is not yet wired into runtime model inputs.
+- `SMILES` ligand handling is Julia-native and currently not RDKit-equivalent in conformer generation/chemistry normalization.
 
 Template note (v0.5 parity): upstream Protenix v0.5 keeps `TemplateEmbedder` disabled (`forward` returns zero). Julia mirrors this behavior; template features are not an active signal path for these checkpoints.
 

@@ -32,9 +32,12 @@ using .ProtenixBase:
     fold_sequence as fold_sequence_protenix_base
 using .ProtenixAPI:
     ProtenixModelSpec,
+    ProtenixPredictOptions,
+    ProtenixSequenceOptions,
     MODEL_SPECS,
     resolve_model_spec,
     recommended_params,
+    list_supported_models,
     default_weights_path,
     predict_json,
     predict_sequence,
@@ -47,9 +50,12 @@ export ProtenixBaseModel
 export infer_protenix_base_dims, build_protenix_base_model, load_protenix_base_model!
 export run_inference_protenix_base, build_sequence_atoms_protenix_base, build_sequence_feature_bundle_protenix_base, fold_sequence_protenix_base
 export ProtenixModelSpec,
+    ProtenixPredictOptions,
+    ProtenixSequenceOptions,
     MODEL_SPECS,
     resolve_model_spec,
     recommended_params,
+    list_supported_models,
     default_weights_path,
     predict_json,
     predict_sequence,

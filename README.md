@@ -26,7 +26,6 @@ Infer-only Julia port of PXDesign.
 - In progress:
   - exact Python model architecture port (`pxdesign/model/*.py`)
   - committed Python reference snapshot artifacts for CI parity gating
-  - full confidence heads/output parity
   - ESM2 integration for Protenix-mini ESM/ISM variants:
     - wire automatic `esm_token_embedding` production from our Julia ESM2/ESMFold port
     - current runtime supports ESM/ISM variants when `esm_token_embedding` is supplied from Julia (`[N_token, D]`)
@@ -54,6 +53,9 @@ bin/pxdesign predict --input /path/to/input.json --out_dir ./output \
 bin/pxdesign predict --sequence ACDEFGHIKLMNPQRSTVWY --out_dir ./output \
   --model_name protenix_mini_default_v0.5.0 --step 5 --sample 1
 
+# List supported model variants + defaults
+bin/pxdesign predict --list-models
+
 # PDB/CIF -> infer JSON conversion
 bin/pxdesign tojson --input /path/to/structure.cif --out_dir ./output
 
@@ -69,7 +71,24 @@ Detailed API coverage vs Python is documented in:
 
 - `docs/PROTENIX_API_SURFACE_AUDIT.md`
 
-Current Julia `predict` infer-JSON support is protein-chain focused. DNA/RNA/ligand/ion/covalent-bond/constraint entities are not yet wired in this path.
+Current Julia `predict` infer-JSON path supports mixed entities:
+
+- `proteinChain`
+- `dnaSequence`
+- `rnaSequence`
+- `ligand`:
+  - `CCD_*` ligands
+  - `SMILES` ligands (Julia-native parser path)
+  - `FILE_*` ligands (local structure-file ligand path)
+  - `condition_ligand` alias is accepted for compatibility
+- `ion`
+- `covalent_bonds`:
+  - atom-name fields (`left_atom`/`right_atom` or `atom1`/`atom2`)
+  - numeric atom indices for ligand entities via `atom_map_to_atom_name`
+
+Still pending in this path:
+
+- full `constraint` conditioning parity with Python
 
 ### Typed Protenix Features (Julia-first runtime path)
 
@@ -107,6 +126,8 @@ Optional parser parity check against `python3 + PyYAML` (for supported PXDesign 
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
   scripts/check_yaml_parity.jl /path/to/input.yaml
 ```
+
+Default test/inference runtime is pure Julia. Python parity checks are opt-in.
 
 Default config sets `download_cache=false` so infer runs without network. Enable PXDesign cache download explicitly with:
 
@@ -248,6 +269,28 @@ JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/runtests.jl
 ```
 
+`test/runtests.jl` includes end-to-end smoke paths for all three model families in this repo:
+
+- PXDesign infer scaffold (`Infer.run_infer` -> CIF output tree)
+- Protenix-mini sequence fold (`ProtenixMini.fold_sequence` -> CIF)
+- Protenix-base v0.5 sequence fold (`ProtenixBase.fold_sequence` -> CIF)
+
+For Python-vs-Julia numeric checks across Protenix modules (MSA, pairformer, mini trunk+denoise, base trunk+denoise):
+
+```bash
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+scripts/run_protenix_parity_suite.jl
+```
+
+To run Python-backed parity checks inside `test/runtests.jl`, opt in explicitly:
+
+```bash
+PXDESIGN_ENABLE_PYTHON_PARITY_TESTS=1 \
+JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
+JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/runtests.jl
+```
+
 ### Frozen layer regression fixtures
 
 The test suite includes locked layer-level regression fixtures across PXDesign + Protenix-mini/v0.5 paths:
@@ -282,3 +325,4 @@ See:
 - `docs/PORTING_PLAN.md`
 - `docs/INFER_ONLY_AUDIT.md`
 - `docs/MODEL_PORT_MAP.md`
+- `docs/CODEBASE_ISSUES_TRACKER.md`

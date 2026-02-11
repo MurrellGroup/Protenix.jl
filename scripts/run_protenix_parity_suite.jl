@@ -23,12 +23,16 @@ function main()
 
     diag_msa = "/tmp/py_msa_diag.json"
     diag_pair = "/tmp/py_pairformer_diag.json"
+    diag_mini_td = "/tmp/py_protenix_mini_trunk_denoise_diag.json"
     diag_base = "/tmp/py_protenix_base_trunk_denoise_diag.json"
 
     t0 = now()
 
     _run(`$PYTHON $(joinpath(ROOT, "scripts", "dump_python_msa_parity.py")) --checkpoint $mini_ckpt --out $diag_msa`)
     _run(`$PYTHON $(joinpath(ROOT, "scripts", "dump_python_pairformer_parity.py")) --checkpoint $mini_ckpt --out $diag_pair`)
+    _run(
+        `$PYTHON $(joinpath(ROOT, "scripts", "dump_python_protenix_mini_trunk_denoise_parity.py")) --checkpoint $mini_ckpt --out $diag_mini_td`,
+    )
     _run(`$PYTHON $(joinpath(ROOT, "scripts", "dump_python_protenix_base_trunk_denoise_parity.py")) --checkpoint $base_ckpt --out $diag_base`)
 
     julia = Base.julia_cmd()
@@ -41,6 +45,14 @@ function main()
     _run(Cmd(
         `$julia --project=$ROOT $(joinpath(ROOT, "scripts", "compare_pairformer_parity.jl"))`;
         env = Dict("PAIRFORMER_DIAG" => diag_pair, "JULIA_DEPOT_PATH" => depot, "JULIAUP_DEPOT_PATH" => juliaup_depot),
+    ))
+    _run(Cmd(
+        `$julia --project=$ROOT $(joinpath(ROOT, "scripts", "compare_protenix_mini_trunk_denoise_parity.jl"))`;
+        env = Dict(
+            "PMINI_TRUNK_DENOISE_DIAG" => diag_mini_td,
+            "JULIA_DEPOT_PATH" => depot,
+            "JULIAUP_DEPOT_PATH" => juliaup_depot,
+        ),
     ))
     _run(Cmd(
         `$julia --project=$ROOT $(joinpath(ROOT, "scripts", "compare_protenix_base_trunk_denoise_parity.jl"))`;
