@@ -40,6 +40,19 @@ include("layer_regression.jl")
 
     @test_throws ErrorException PXDesign.resolve_model_spec("not_a_model")
 
+    mktempdir() do droot
+        tiny_dir = joinpath(droot, "weights_safetensors_protenix_tiny_default_v0.5.0")
+        mkpath(tiny_dir)
+        @test PXDesign.default_weights_path(
+            "protenix_tiny_default_v0.5.0";
+            project_root = droot,
+        ) == tiny_dir
+        @test_throws ErrorException PXDesign.default_weights_path(
+            "protenix_base_constraint_v0.5.0";
+            project_root = droot,
+        )
+    end
+
     mktempdir() do d
         pdb_path = joinpath(d, "tiny.pdb")
         write(

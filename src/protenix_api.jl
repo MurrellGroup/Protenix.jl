@@ -221,10 +221,16 @@ end
 
 function default_weights_path(model_name::AbstractString; project_root::AbstractString = normpath(joinpath(@__DIR__, "..")))
     key = String(model_name)
-    haskey(_MODEL_DEFAULT_SAFETENSORS_DIR, key) || error(
-        "No default safetensors path for model '$key'. Pass weights_path explicitly.",
+    direct = joinpath(project_root, "weights_safetensors_" * key)
+    isdir(direct) && return direct
+    if haskey(_MODEL_DEFAULT_SAFETENSORS_DIR, key)
+        mapped = joinpath(project_root, _MODEL_DEFAULT_SAFETENSORS_DIR[key])
+        isdir(mapped) && return mapped
+    end
+    error(
+        "No default safetensors path found for model '$key'. " *
+        "Looked for: $(abspath(direct)). Pass weights_path explicitly or convert/checkpoint this model first.",
     )
-    return joinpath(project_root, _MODEL_DEFAULT_SAFETENSORS_DIR[key])
 end
 
 function _ensure_json_tasks(path::AbstractString)
