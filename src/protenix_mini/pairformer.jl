@@ -20,6 +20,9 @@ export TransitionBlock,
     TemplateEmbedder,
     NoisyStructureEmbedder
 
+_as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
+_as_f32_copy(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? copy(x) : Float32.(x)
+
 struct TransitionBlock
     c_in::Int
     n::Int
@@ -83,7 +86,7 @@ function (m::PairformerBlock)(
     z::AbstractArray{<:Real,3};
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
-    z_f = Float32.(z)
+    z_f = _as_f32_copy(z)
 
     z_f .+= m.tri_mul_out(z_f; mask = pair_mask)
     z_f .+= m.tri_mul_in(z_f; mask = pair_mask)
@@ -93,7 +96,7 @@ function (m::PairformerBlock)(
 
     if m.c_s > 0
         s === nothing && error("PairformerBlock with c_s>0 requires s")
-        s_f = Float32.(s)
+        s_f = _as_f32_copy(s)
         m.attention_pair_bias === nothing && error("Missing attention_pair_bias")
         m.single_transition === nothing && error("Missing single_transition")
         s_f .+= m.attention_pair_bias(s_f, z_f, pair_mask)
@@ -128,8 +131,8 @@ function (m::PairformerStack)(
     z::AbstractArray{<:Real,3};
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
-    s_cur = s === nothing ? nothing : Float32.(s)
-    z_cur = Float32.(z)
+    s_cur = s === nothing ? nothing : _as_f32_array(s)
+    z_cur = _as_f32_array(z)
     for blk in m.blocks
         s_cur, z_cur = blk(s_cur, z_cur; pair_mask = pair_mask)
     end
@@ -215,7 +218,7 @@ function MSAStack(
 end
 
 function (m::MSAStack)(msa::AbstractArray{<:Real,3}, z::AbstractArray{<:Real,3})
-    msa_f = Float32.(msa)
+    msa_f = _as_f32_copy(msa)
     msa_f .+= m.msa_pair_weighted_averaging(msa_f, z)
     msa_f .+= m.transition_m(msa_f)
     return msa_f
@@ -248,8 +251,8 @@ function (m::MSABlock)(
     z::AbstractArray{<:Real,3};
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
-    msa_f = Float32.(msa)
-    z_f = Float32.(z)
+    msa_f = _as_f32_copy(msa)
+    z_f = _as_f32_copy(z)
     z_f .+= m.outer_product_mean_msa(msa_f)
 
     if !m.is_last_block
@@ -320,12 +323,12 @@ function (m::MSAModule)(
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
     rng::AbstractRNG = Random.default_rng(),
 )
-    m.n_blocks < 1 && return Float32.(z)
-    haskey(input_feature_dict, "msa") || return Float32.(z)
+    m.n_blocks < 1 && return _as_f32_array(z)
+    haskey(input_feature_dict, "msa") || return _as_f32_array(z)
 
     msa_raw = input_feature_dict["msa"]
-    msa_raw isa AbstractMatrix || return Float32.(z)
-    size(msa_raw, 2) > 0 || return Float32.(z)
+    msa_raw isa AbstractMatrix || return _as_f32_array(z)
+    size(msa_raw, 2) > 0 || return _as_f32_array(z)
 
     haskey(input_feature_dict, "has_deletion") || error("Missing 'has_deletion' for MSAModule")
     haskey(input_feature_dict, "deletion_value") || error("Missing 'deletion_value' for MSAModule")
@@ -338,20 +341,20 @@ function (m::MSAModule)(
         strategy = m.sample_strategy,
         rng = rng,
     )
-    isempty(idx) && return Float32.(z)
+    isempty(idx) && return _as_f32_array(z)
 
     msa_sel = Int.(msa_raw[idx, :])
-    del_mask = Float32.(input_feature_dict["has_deletion"][idx, :])
-    del_val = Float32.(input_feature_dict["deletion_value"][idx, :])
+    del_mask = _as_f32_array(input_feature_dict["has_deletion"][idx, :])
+    del_val = _as_f32_array(input_feature_dict["deletion_value"][idx, :])
 
     msa_onehot = one_hot_int(msa_sel, 32)
     msa_feat = cat(msa_onehot, reshape(del_mask, size(del_mask)..., 1), reshape(del_val, size(del_val)..., 1); dims = 3)
 
     msa_emb = m.linear_no_bias_m(msa_feat)
-    s_proj = m.linear_no_bias_s(Float32.(s_inputs))
+    s_proj = m.linear_no_bias_s(_as_f32_array(s_inputs))
     msa_emb .+= reshape(s_proj, 1, size(s_proj, 1), size(s_proj, 2))
 
-    z_cur = Float32.(z)
+    z_cur = _as_f32_copy(z)
     msa_cur = msa_emb
     for blk in m.blocks
         msa_cur, z_cur = blk(msa_cur, z_cur; pair_mask = pair_mask)
@@ -459,7 +462,7 @@ function (m::NoisyStructureEmbedder)(
 )
     n = size(z, 1)
     x = if haskey(input_feature_dict, "struct_cb_coords")
-        Float32.(input_feature_dict["struct_cb_coords"])
+        _as_f32_array(input_feature_dict["struct_cb_coords"])
     else
         zeros(Float32, n, 3)
     end

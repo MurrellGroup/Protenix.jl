@@ -8,6 +8,9 @@ import ..Utils: one_hot_interval, broadcast_token_to_atom, pairwise_distances
 
 export DistogramHead, ConfidenceHead
 
+_as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
+_as_f32_copy(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? copy(x) : Float32.(x)
+
 struct DistogramHead
     c_z::Int
     no_bins::Int
@@ -133,7 +136,13 @@ function _atom_head(
     @inbounds for n in 1:n_atom
         t = Int(atom_to_tokatom_idx[n]) + 1
         1 <= t <= size(w, 1) || error("atom_to_tokatom_idx[$n] out of range")
-        out[n, :] .= vec(transpose(Float32.(a[n, :])) * @view(w[t, :, :]))
+        for b in 1:out_bins
+            acc = 0f0
+            for c in 1:c_s
+                acc += Float32(a[n, c]) * w[t, c, b]
+            end
+            out[n, b] = acc
+        end
     end
     return out
 end
@@ -144,7 +153,7 @@ function _distance_augmented_z(
     rep_coords::AbstractMatrix{<:Real},
 )
     d = pairwise_distances(rep_coords)
-    z = Float32.(z_pair)
+    z = _as_f32_copy(z_pair)
     z .+= m.linear_no_bias_d(one_hot_interval(d, m.lower_bins, m.upper_bins))
     z .+= m.linear_no_bias_d_wo_onehot(reshape(d, size(d, 1), size(d, 2), 1))
     return z
@@ -170,9 +179,10 @@ function (m::ConfidenceHead)(;
 )
     # x_pred_coords expected [N_sample, N_atom, 3] or [N_atom, 3]
     x_pred = if ndims(x_pred_coords) == 2
-        reshape(Float32.(x_pred_coords), 1, size(x_pred_coords, 1), 3)
+        x_f = _as_f32_array(x_pred_coords)
+        reshape(x_f, 1, size(x_f, 1), 3)
     elseif ndims(x_pred_coords) == 3
-        Float32.(x_pred_coords)
+        _as_f32_array(x_pred_coords)
     else
         error("x_pred_coords must be rank-2 or rank-3")
     end
@@ -193,14 +203,15 @@ function (m::ConfidenceHead)(;
     size(s_trunk) == (n_tok, m.c_s) || error("s_trunk shape mismatch")
     size(z_trunk) == (n_tok, n_tok, m.c_z) || error("z_trunk shape mismatch")
 
-    s_base = m.input_strunk_ln(clamp.(Float32.(s_trunk), -512f0, 512f0))
-    z_base = Float32.(z_trunk)
+    s_base = m.input_strunk_ln(clamp.(_as_f32_array(s_trunk), -512f0, 512f0))
+    z_base = _as_f32_copy(z_trunk)
     if !use_embedding
         z_base .= 0f0
     end
 
-    s1 = m.linear_no_bias_s1(Float32.(s_inputs))
-    s2 = m.linear_no_bias_s2(Float32.(s_inputs))
+    s_inputs_f = _as_f32_array(s_inputs)
+    s1 = m.linear_no_bias_s1(s_inputs_f)
+    s2 = m.linear_no_bias_s2(s_inputs_f)
     z_init = reshape(s1, 1, n_tok, m.c_z) .+ reshape(s2, n_tok, 1, m.c_z)
     z_base .+= z_init
 
@@ -217,8 +228,8 @@ function (m::ConfidenceHead)(;
         s_i, z_i = m.pairformer_stack(s_base, z_i; pair_mask = pair_mask)
         s_i === nothing && error("Confidence pairformer produced no single features")
 
-        z_f = Float32.(z_i)
-        s_f = Float32.(s_i)
+        z_f = _as_f32_array(z_i)
+        s_f = _as_f32_array(s_i)
 
         pae = m.linear_no_bias_pae(m.pae_ln(z_f))
         pde = m.linear_no_bias_pde(m.pde_ln(_symmetrize_pair_lastdim(z_f)))

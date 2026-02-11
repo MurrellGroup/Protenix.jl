@@ -12,6 +12,8 @@ export Linear,
 silu(x::Real) = x / (1 + exp(-x))
 silu(x::AbstractArray) = x ./ (1 .+ exp.(-x))
 
+_as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
+
 struct Linear
     weight::Matrix{Float32} # [out, in]
     bias::Union{Vector{Float32}, Nothing}
@@ -34,7 +36,7 @@ function (lin::Linear)(x::AbstractArray{<:Real})
     in_features = size(x, ndims(x))
     size(lin.weight, 2) == in_features ||
         error("Linear input mismatch: expected $(size(lin.weight, 2)), got $in_features")
-    x_f = Float32.(x)
+    x_f = _as_f32_array(x)
     flat = reshape(x_f, :, in_features)
     y = flat * transpose(lin.weight)
     if lin.bias !== nothing
@@ -58,7 +60,7 @@ function (lin::LinearNoBias)(x::AbstractArray{<:Real})
     in_features = size(x, ndims(x))
     size(lin.weight, 2) == in_features ||
         error("LinearNoBias input mismatch: expected $(size(lin.weight, 2)), got $in_features")
-    x_f = Float32.(x)
+    x_f = _as_f32_array(x)
     flat = reshape(x_f, :, in_features)
     y = flat * transpose(lin.weight)
     return reshape(y, (size(x)[1:(ndims(x)-1)]..., size(lin.weight, 1)))
@@ -79,7 +81,7 @@ function (ln::LayerNorm)(x::AbstractArray{<:Real})
     c = size(x, ndims(x))
     length(ln.weight) == c || error("LayerNorm weight length mismatch")
     length(ln.bias) == c || error("LayerNorm bias length mismatch")
-    x_f = Float32.(x)
+    x_f = _as_f32_array(x)
     flat = reshape(x_f, :, c)
     out = similar(flat)
     @inbounds for i in 1:size(flat, 1)

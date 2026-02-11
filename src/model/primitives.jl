@@ -12,6 +12,8 @@ export LinearNoBias,
 silu(x::Real) = x / (1 + exp(-x))
 silu(x::AbstractArray) = x ./ (1 .+ exp.(-x))
 
+_as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
+
 struct LinearNoBias
     weight::Matrix{Float32} # [out_features, in_features]
 end
@@ -29,7 +31,7 @@ function (linear::LinearNoBias)(x::AbstractArray{<:Real})
     size(linear.weight, 2) == in_features ||
         error("LinearNoBias shape mismatch: expected input dim $(size(linear.weight, 2)), got $in_features")
 
-    flat = reshape(Float32.(x), :, in_features)
+    flat = reshape(_as_f32_array(x), :, in_features)
     y = flat * transpose(linear.weight) # [*, in] x [in, out]
     out_shape = (size(x)[1:(ndims(x)-1)]..., size(linear.weight, 1))
     return reshape(y, out_shape)
@@ -52,7 +54,7 @@ function (ln::LayerNormNoOffset)(x::AbstractArray{<:Real})
     length(ln.weight) == c || error("LayerNorm weight length mismatch: $(length(ln.weight)) vs $c")
     length(ln.bias) == c || error("LayerNorm bias length mismatch: $(length(ln.bias)) vs $c")
 
-    flat = reshape(Float32.(x), :, c)
+    flat = reshape(_as_f32_array(x), :, c)
     out = similar(flat)
     for i in 1:size(flat, 1)
         row = @view flat[i, :]

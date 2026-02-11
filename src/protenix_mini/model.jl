@@ -10,6 +10,8 @@ import ...Model: DiffusionModule, InferenceNoiseScheduler, sample_diffusion, as_
 
 export ProtenixMiniModel, get_pairformer_output, run_inference
 
+_as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
+
 struct ProtenixMiniModel
     n_cycle::Int
     input_embedder::InputFeatureEmbedder
@@ -126,7 +128,7 @@ end
 
 function _pair_mask(input_feature_dict::AbstractDict{<:AbstractString, <:Any})
     if haskey(input_feature_dict, "token_mask")
-        m = Float32.(input_feature_dict["token_mask"])
+        m = _as_f32_array(input_feature_dict["token_mask"])
         n = length(m)
         out = zeros(Float32, n, n)
         @inbounds for i in 1:n, j in 1:n
@@ -157,7 +159,7 @@ function get_pairformer_output(
     z_init .+= model.relative_position_encoding(input_feature_dict)
 
     haskey(input_feature_dict, "token_bonds") || error("Missing token_bonds for ProtenixMini trunk")
-    token_bonds = Float32.(input_feature_dict["token_bonds"])
+    token_bonds = _as_f32_array(input_feature_dict["token_bonds"])
     size(token_bonds) == (n_tok, n_tok) || error("token_bonds shape mismatch")
     z_init .+= model.linear_no_bias_token_bond(reshape(token_bonds, n_tok, n_tok, 1))
 
