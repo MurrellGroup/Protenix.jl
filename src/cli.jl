@@ -5,6 +5,7 @@ using Printf
 import ..Config: default_config, set_by_key!
 import ..Infer: run_infer
 import ..Inputs: parse_yaml_to_json
+import ..JSONLite: parse_json
 import ..Model: compare_raw_weight_dirs
 import ..ProtenixAPI:
     add_precomputed_msa_to_json,
@@ -62,6 +63,7 @@ function _usage(io::IO = stdout)
     println(io, "  --strict <true|false>           (default: true)")
     println(io, "  --task_name <name>              (sequence mode only)")
     println(io, "  --chain_id <id>                 (sequence mode only)")
+    println(io, "  --esm_token_embedding_json <file> (sequence mode only; JSON matrix [N_token,D])")
     println(io, "")
     println(io, "Tojson options:")
     println(io, "  --input <pdb|cif|dir>")
@@ -312,6 +314,9 @@ function _parse_predict_args(args::Vector{String})
         elseif arg == "--chain_id"
             value, i = _require_value(args, i, arg)
             parsed["chain_id"] = value
+        elseif arg == "--esm_token_embedding_json"
+            value, i = _require_value(args, i, arg)
+            parsed["esm_token_embedding_json"] = value
         elseif arg == "--help" || arg == "-h"
             _usage()
             return Dict{String, Any}("__help__" => true)
@@ -326,6 +331,29 @@ function _parse_predict_args(args::Vector{String})
     (has_input || has_seq) || error("predict requires either --input or --sequence")
     !(has_input && has_seq) || error("predict accepts only one of --input or --sequence")
     return parsed
+end
+
+function _load_embedding_json_matrix(path::AbstractString)
+    abspath_path = abspath(path)
+    isfile(abspath_path) || error("Embedding JSON file not found: $abspath_path")
+    value = parse_json(read(abspath_path, String))
+    value isa AbstractVector || error("Embedding JSON must be a rank-2 array [N_token,D].")
+    n_row = length(value)
+    n_row > 0 || error("Embedding JSON matrix must be non-empty.")
+    first_row = value[1]
+    first_row isa AbstractVector || error("Embedding JSON must be a rank-2 array [N_token,D].")
+    n_col = length(first_row)
+    n_col > 0 || error("Embedding JSON matrix must have at least one feature column.")
+    out = Matrix{Float32}(undef, n_row, n_col)
+    for i in 1:n_row
+        row = value[i]
+        row isa AbstractVector || error("Embedding JSON row $i is not an array.")
+        length(row) == n_col || error("Embedding JSON rows must be rectangular (row $i length mismatch).")
+        for j in 1:n_col
+            out[i, j] = Float32(row[j])
+        end
+    end
+    return out
 end
 
 function _run_predict(parsed::Dict{String, Any})
@@ -343,6 +371,9 @@ function _run_predict(parsed::Dict{String, Any})
     )
 
     if haskey(parsed, "sequence")
+        emb = haskey(parsed, "esm_token_embedding_json") ?
+              _load_embedding_json_matrix(String(parsed["esm_token_embedding_json"])) :
+              nothing
         records = predict_sequence(
             parsed["sequence"];
             out_dir = common_kwargs.out_dir,
@@ -356,6 +387,7 @@ function _run_predict(parsed::Dict{String, Any})
             step = common_kwargs.step,
             sample = common_kwargs.sample,
             use_msa = common_kwargs.use_msa,
+            esm_token_embedding = emb,
             strict = common_kwargs.strict,
         )
         for r in records

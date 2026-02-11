@@ -273,7 +273,7 @@ function _triangle_attention_row(
             for qi in 1:j_dim
                 # OpenFold triangle bias is non-batched: depends on (query, key, head),
                 # not on the batch/row index after reshaping.
-                @views scores[qi, :] .+= tri_bias[qi, :]
+                @views scores[qi, :] .+= tri_bias[qi, :, h]
                 @views scores[qi, :] .+= mask_bias_key
             end
             _row_softmax!(scores)

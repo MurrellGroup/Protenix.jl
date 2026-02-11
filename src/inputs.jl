@@ -32,7 +32,9 @@ function _normalize_chain_props(props)
     if props === nothing
         return Dict{String, Any}()
     elseif props isa AbstractString
-        return lowercase(strip(props)) in ("all", "full") ? Dict{String, Any}() : Dict{String, Any}()
+        t = lowercase(strip(props))
+        t in ("all", "full") && return Dict{String, Any}()
+        error("Invalid chain config string '$props': expected 'all'/'full' or a mapping")
     elseif props isa AbstractDict
         return _as_string_dict(props)
     end
@@ -102,9 +104,8 @@ function _parse_yaml_cfg_to_tasks(cfg::Dict{String, Any}, yaml_path::AbstractStr
 
         if haskey(props, "msa") && props["msa"] !== nothing && !isempty(string(props["msa"]))
             msa_path = String(props["msa"])
-            for fname in ("pairing.a3m", "non_pairing.a3m")
-                isfile(joinpath(msa_path, fname)) || error("MSA file not found: $(joinpath(msa_path, fname))")
-            end
+            non_pair = joinpath(msa_path, "non_pairing.a3m")
+            isfile(non_pair) || error("MSA file not found: $non_pair")
             msa_dict_per_chain[chain_id] = Dict(
                 "precomputed_msa_dir" => msa_path,
                 "pairing_db" => "uniref100",

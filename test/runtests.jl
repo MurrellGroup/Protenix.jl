@@ -208,6 +208,41 @@ end
     end
 end
 
+@testset "Protenix ESM token embedding injection" begin
+    task = Dict{String, Any}(
+        "name" => "esm_inject",
+        "sequences" => Any[
+            Dict(
+                "proteinChain" => Dict(
+                    "sequence" => "ACD",
+                    "count" => 1,
+                ),
+            ),
+        ],
+        "esm_token_embedding" => Any[
+            Any[0.1, 0.2, 0.3, 0.4],
+            Any[0.5, 0.6, 0.7, 0.8],
+            Any[0.9, 1.0, 1.1, 1.2],
+        ],
+    )
+    atoms = PXDesign.ProtenixAPI._build_atoms_from_infer_task(task)
+    bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = "esm_inject")
+    feat = bundle["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+    PXDesign.ProtenixAPI._inject_task_esm_token_embedding!(feat, task)
+    @test haskey(feat, "esm_token_embedding")
+    @test size(feat["esm_token_embedding"]) == (3, 4)
+    params = (model_name = "protenix_mini_esm_v0.5.0", needs_esm_embedding = true)
+    @test PXDesign.ProtenixAPI._validate_required_model_inputs!(params, feat, "esm task") === feat
+
+    feat_missing = Dict{String, Any}("restype" => zeros(Float32, 3, 32))
+    @test_throws ErrorException PXDesign.ProtenixAPI._validate_required_model_inputs!(
+        params,
+        feat_missing,
+        "missing esm",
+    )
+end
+
 @testset "ProtenixBase sequence wrappers" begin
     atoms = PXDesign.ProtenixBase.build_sequence_atoms("ACD")
     @test !isempty(atoms)
@@ -536,6 +571,40 @@ binder_length: 12
         @test tasks_nt[1]["name"] == "no_target_demo"
         @test tasks_nt[1]["generation"][1]["length"] == 12
         @test !haskey(tasks_nt[1], "condition")
+
+        msa_dir_nonpair = joinpath(d, "msa_nonpair")
+        mkpath(msa_dir_nonpair)
+        write(joinpath(msa_dir_nonpair, "non_pairing.a3m"), ">a\nAA\n")
+        yaml_nonpair = joinpath(d, "input_nonpair.yaml")
+        write(
+            yaml_nonpair,
+            """
+task_name: nonpair_only
+binder_length: 16
+target:
+  file: $target_cif
+  chains:
+    A:
+      msa: $msa_dir_nonpair
+""",
+        )
+        tasks_nonpair = PXDesign.Inputs.parse_yaml_to_json(yaml_nonpair)
+        @test length(tasks_nonpair) == 1
+        @test tasks_nonpair[1]["condition"]["msa"]["A"]["precomputed_msa_dir"] == msa_dir_nonpair
+
+        yaml_bad_chain = joinpath(d, "input_bad_chain.yaml")
+        write(
+            yaml_bad_chain,
+            """
+task_name: bad_chain_cfg
+binder_length: 16
+target:
+  file: $target_cif
+  chains:
+    A: nonsense
+""",
+        )
+        @test_throws ErrorException PXDesign.Inputs.parse_yaml_to_json(yaml_bad_chain)
     end
 end
 

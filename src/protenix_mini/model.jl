@@ -60,9 +60,18 @@ function ProtenixMiniModel(
     sample_step_scale_eta::Real = 1.0,
     sample_n_step::Int = 5,
     sample_n_sample::Int = 1,
+    input_esm_enable::Bool = false,
+    input_esm_embedding_dim::Int = 2560,
     rng::AbstractRNG = Random.default_rng(),
 )
-    input_embedder = InputFeatureEmbedder(c_atom, c_atompair, c_token_input; rng = rng)
+    input_embedder = InputFeatureEmbedder(
+        c_atom,
+        c_atompair,
+        c_token_input;
+        esm_enable = input_esm_enable,
+        esm_embedding_dim = input_esm_embedding_dim,
+        rng = rng,
+    )
     relpos = RelativePositionEncoding(32, 2, c_z; rng = rng)
     template_embedder = TemplateEmbedder(c_z; n_blocks = 0, c = 64, rng = rng)
     noisy = nothing

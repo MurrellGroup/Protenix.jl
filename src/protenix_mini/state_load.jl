@@ -346,7 +346,7 @@ function _load_input_feature_embedder!(
     _load_linear_nobias!(enc.linear_no_bias_q, weights, "$prefix.atom_attention_encoder.linear_no_bias_q.weight"; strict = strict)
 
     if inp.esm_enable && inp.linear_esm !== nothing
-        _load_linear_nobias!(inp.linear_esm, weights, "$prefix.linear_esm.weight"; strict = false)
+        _load_linear_nobias!(inp.linear_esm, weights, "$prefix.linear_esm.weight"; strict = strict)
     end
 
     return inp
@@ -437,6 +437,15 @@ function infer_protenix_mini_dims(weights::AbstractDict{<:AbstractString, <:Any}
     w_in_tok = weights[k_input_token]
     w_in_tok isa AbstractMatrix || error("$k_input_token must be matrix")
 
+    k_esm = "input_embedder.linear_esm.weight"
+    has_esm = haskey(weights, k_esm)
+    esm_embedding_dim = 2560
+    if has_esm
+        w_esm = weights[k_esm]
+        w_esm isa AbstractMatrix || error("$k_esm must be matrix")
+        esm_embedding_dim = size(w_esm, 2)
+    end
+
     return (
         c_token_diffusion = dm.c_token,
         c_token_input = size(w_in_tok, 1),
@@ -455,6 +464,8 @@ function infer_protenix_mini_dims(weights::AbstractDict{<:AbstractString, <:Any}
         pairformer_heads = size(pair_att, 1),
         max_atoms_per_token = size(plddt_w, 1),
         b_plddt = size(plddt_w, 3),
+        input_esm_enable = has_esm,
+        input_esm_embedding_dim = esm_embedding_dim,
     )
 end
 
@@ -480,6 +491,8 @@ function build_protenix_mini_model(
         confidence_max_atoms_per_token = d.max_atoms_per_token,
         sample_n_step = 5,
         sample_n_sample = 1,
+        input_esm_enable = d.input_esm_enable,
+        input_esm_embedding_dim = d.input_esm_embedding_dim,
         rng = rng,
     )
 end

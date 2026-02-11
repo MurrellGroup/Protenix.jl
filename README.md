@@ -28,8 +28,8 @@ Infer-only Julia port of PXDesign.
   - committed Python reference snapshot artifacts for CI parity gating
   - full confidence heads/output parity
   - ESM2 integration for Protenix-mini ESM/ISM variants:
-    - wire `esm_token_embedding` production from our Julia ESM2/ESMFold port
-    - load/use `input_embedder.linear_esm.weight` for `protenix_mini_esm_v0.5.0` and `protenix_mini_ism_v0.5.0`
+    - wire automatic `esm_token_embedding` production from our Julia ESM2/ESMFold port
+    - current runtime supports ESM/ISM variants when `esm_token_embedding` is supplied from Julia (`[N_token, D]`)
 
 ### Protenix v0.5 ESM Notes
 
@@ -37,6 +37,9 @@ Infer-only Julia port of PXDesign.
   - ESM enabled: `protenix_mini_esm_v0.5.0`, `protenix_mini_ism_v0.5.0`
   - ESM disabled by default: `protenix_base_default_v0.5.0`, `protenix_base_constraint_v0.5.0`, `protenix_mini_default_v0.5.0`, `protenix_mini_tmpl_v0.5.0`, `protenix_tiny_default_v0.5.0`
 - `esm2-3b-ism` refers to an ISM-tuned ESM2 checkpoint (ISM = Implicit Structure Model in the upstream cited work).
+- For ESM/ISM model variants, provide `esm_token_embedding` explicitly:
+  - JSON mode: add top-level `task.esm_token_embedding` (`[N_token, D]`)
+  - sequence mode: pass `--esm_token_embedding_json /path/to/embedding.json`
 
 ### Protenix v0.5 User API (Julia)
 

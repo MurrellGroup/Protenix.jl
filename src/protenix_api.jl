@@ -676,6 +676,34 @@ function _inject_task_template_features!(
     return feat
 end
 
+function _inject_task_esm_token_embedding!(
+    feat::Dict{String, Any},
+    task::AbstractDict{<:Any, <:Any},
+)
+    haskey(task, "esm_token_embedding") || return feat
+    emb = _to_float_array(task["esm_token_embedding"])
+    ndims(emb) == 2 || error("esm_token_embedding must be rank-2 [N_token, D].")
+    size(emb, 1) == size(feat["restype"], 1) || error(
+        "esm_token_embedding token length mismatch: expected $(size(feat["restype"], 1)), got $(size(emb, 1)).",
+    )
+    feat["esm_token_embedding"] = emb
+    return feat
+end
+
+function _validate_required_model_inputs!(
+    params::NamedTuple,
+    feat::AbstractDict{<:AbstractString, <:Any},
+    context::AbstractString,
+)
+    if params.needs_esm_embedding && !haskey(feat, "esm_token_embedding")
+        error(
+            "Model $(params.model_name) requires esm_token_embedding for $context. " *
+            "Provide task.esm_token_embedding [N_token,D] in JSON, or pass esm_token_embedding directly in sequence mode.",
+        )
+    end
+    return feat
+end
+
 function _protein_chain_sequences(atoms::Vector{AtomRecord})
     chain_ids = String[]
     seen_chain = Set{String}()
@@ -746,9 +774,6 @@ end
 
 function _load_model(model_name::AbstractString, weights_path::AbstractString; strict::Bool = true)
     params = recommended_params(model_name)
-    params.needs_esm_embedding && error(
-        "Model $(model_name) needs ESM2/ISM embeddings; this Julia path does not yet inject them.",
-    )
 
     w = load_safetensors_weights(weights_path)
     if params.family == :mini
@@ -871,10 +896,6 @@ function predict_json(
         sample = sample,
         use_msa = use_msa,
     )
-    params.needs_esm_embedding && error(
-        "Model $(model_name) needs ESM2/ISM embeddings; this Julia path does not yet inject them.",
-    )
-
     mkpath(out_dir)
     length(seeds) > 0 || error("seeds must be non-empty")
     all(s -> s >= 0, seeds) || error("seeds must be non-negative")
@@ -905,6 +926,12 @@ function predict_json(
                     use_msa = params.use_msa,
                 )
                 _inject_task_template_features!(bundle["input_feature_dict"], task)
+                _inject_task_esm_token_embedding!(bundle["input_feature_dict"], task)
+                _validate_required_model_inputs!(
+                    params,
+                    bundle["input_feature_dict"],
+                    "task '$task_name' in $(basename(json_path))",
+                )
                 pred = _run_model(
                     loaded,
                     bundle["input_feature_dict"];
@@ -949,6 +976,7 @@ function predict_sequence(
     step::Union{Nothing, Int} = nothing,
     sample::Union{Nothing, Int} = nothing,
     use_msa::Union{Nothing, Bool} = nothing,
+    esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
     strict::Bool = true,
 )
     seq = uppercase(strip(sequence))
@@ -962,10 +990,6 @@ function predict_sequence(
         sample = sample,
         use_msa = use_msa,
     )
-    params.needs_esm_embedding && error(
-        "Model $(model_name) needs ESM2/ISM embeddings; this Julia path does not yet inject them.",
-    )
-
     mkpath(out_dir)
     local_weights = isempty(weights_path) ? default_weights_path(model_name) : abspath(weights_path)
     isdir(local_weights) || error("weights_path does not exist: $local_weights")
@@ -978,6 +1002,18 @@ function predict_sequence(
         atoms = ProtenixMini.build_sequence_atoms(seq; chain_id = chain_id)
         bundle = build_feature_bundle_from_atoms(atoms; task_name = task_name, rng = rng)
         _normalize_protenix_feature_dict!(bundle["input_feature_dict"])
+        if esm_token_embedding !== nothing
+            emb = Float32.(esm_token_embedding)
+            size(emb, 1) == size(bundle["input_feature_dict"]["restype"], 1) || error(
+                "esm_token_embedding token length mismatch: expected $(size(bundle["input_feature_dict"]["restype"], 1)), got $(size(emb, 1)).",
+            )
+            bundle["input_feature_dict"]["esm_token_embedding"] = emb
+        end
+        _validate_required_model_inputs!(
+            params,
+            bundle["input_feature_dict"],
+            "sequence task '$task_name'",
+        )
         pred = _run_model(
             loaded,
             bundle["input_feature_dict"];

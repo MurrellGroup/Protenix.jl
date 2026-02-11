@@ -34,7 +34,7 @@ Supported model-name defaults in Julia:
 - `protenix_mini_tmpl_v0.5.0`: cycle=4, step=5, sample=5, use_msa=true
 - `protenix_tiny_default_v0.5.0`: cycle=4, step=5, sample=5, use_msa=true
 
-Recognized but currently blocked in Julia runtime until ESM2/ISM embedding wiring is completed:
+Recognized and runnable in Julia when `esm_token_embedding` is provided (automatic ESM2 feature generation is still pending):
 
 - `protenix_mini_esm_v0.5.0`
 - `protenix_mini_ism_v0.5.0`
