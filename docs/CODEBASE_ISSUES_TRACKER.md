@@ -51,7 +51,8 @@ Python is allowed only for explicit parity tooling, not runtime inference.
      - validate against real `protenix_base_constraint_v0.5.0` checkpoint tensors for full numeric parity
 
 2. Improve multi-chain MSA merge parity:
-   - current chain-wise merge works, but full species-pairing parity is pending.
+   - implemented: heteromer `pairing.a3m` rows merge across chains by row index, then non-pair rows append chain-wise.
+   - pending: full OpenFold species/taxonomic pairing parity.
 
 3. Continue Dict-boundary reduction:
    - replace remaining mutable `Dict{String,Any}` internals with typed records where schema is stable.

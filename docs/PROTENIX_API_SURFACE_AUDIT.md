@@ -78,4 +78,5 @@ When `predict --use_msa true`, Julia consumes precomputed A3M files from JSON `p
 - always reads `non_pairing.a3m`
 - additionally requires/reads `pairing.a3m` for multi-chain assemblies
 - applies A3M lowercase-deletion transforms (`has_deletion`, `deletion_value`, `deletion_mean`) and profile remapping to Protenix residue indices
-- for multi-chain inputs, current merge is per-chain/block-concatenated (full OpenFold-style species pairing/merge parity is not fully ported yet)
+- for heteromer inputs with `pairing.a3m`, paired rows are merged across chains by row index, then non-pair rows are appended chain-wise
+- full OpenFold species/taxonomic pairing parity is still not fully ported

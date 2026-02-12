@@ -349,6 +349,65 @@ A-D
         @test maximum(feat["deletion_value"]) > 0f0
         @test size(feat["profile"]) == (3, 32)
     end
+
+    mktempdir() do d
+        msa_a = joinpath(d, "msa", "0")
+        msa_b = joinpath(d, "msa", "1")
+        mkpath(msa_a)
+        mkpath(msa_b)
+        write(joinpath(msa_a, "pairing.a3m"), ">query\nAC\n>p1\nAA\n>p2\nCC\n")
+        write(joinpath(msa_a, "non_pairing.a3m"), ">query\nAC\n>n1\nAG\n")
+        write(joinpath(msa_b, "pairing.a3m"), ">query\nGG\n>p1\nTT\n>p2\nAA\n")
+        write(joinpath(msa_b, "non_pairing.a3m"), ">query\nGG\n>n1\nGT\n")
+
+        task = Dict{String, Any}(
+            "name" => "msa_pair_merge_smoke",
+            "sequences" => Any[
+                Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1, "msa" => Dict("precomputed_msa_dir" => "msa/0"))),
+                Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1, "msa" => Dict("precomputed_msa_dir" => "msa/1"))),
+            ],
+        )
+        input_json = joinpath(d, "input_pair_merge.json")
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        parsed = PXDesign.ProtenixAPI._parse_task_entities(task; json_dir = d)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed.atoms; task_name = "msa_pair_merge_smoke")
+        feat = bundle["input_feature_dict"]
+        token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(
+            feat,
+            task,
+            input_json;
+            use_msa = true,
+            chain_specs = parsed.protein_specs,
+            token_chain_ids = token_chain_ids,
+        )
+
+        msa = Int.(feat["msa"])
+        a_cols = findall(==("A0"), token_chain_ids)
+        b_cols = findall(==("B0"), token_chain_ids)
+        q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
+        q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
+        pair1_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
+        pair1_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("TT")
+        pair2_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("CC")
+        pair2_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
+        nonpair_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AG")
+        nonpair_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GT")
+
+        @test size(msa) == (5, 4)
+        @test msa[1, a_cols] == q_a
+        @test msa[1, b_cols] == q_b
+        @test msa[2, a_cols] == pair1_a
+        @test msa[2, b_cols] == pair1_b
+        @test msa[3, a_cols] == pair2_a
+        @test msa[3, b_cols] == pair2_b
+        @test msa[4, a_cols] == nonpair_a
+        @test msa[4, b_cols] == q_b
+        @test msa[5, a_cols] == q_a
+        @test msa[5, b_cols] == nonpair_b
+    end
 end
 
 @testset "Protenix template feature ingestion" begin

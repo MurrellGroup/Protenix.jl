@@ -65,7 +65,7 @@ bin/pxdesign msa --input /path/to/input.json \
 ```
 
 `predict --use_msa true` now consumes precomputed A3Ms from JSON `proteinChain.msa.precomputed_msa_dir` (reads `non_pairing.a3m`, and `pairing.a3m` for multi-chain tasks). Julia still does not run online/local MSA search.
-For multi-chain assemblies, current Julia MSA merge is chain-wise (not yet full OpenFold species-pairing parity).
+For heteromer assemblies, Julia merges `pairing.a3m` rows across chains by row index and appends non-pair rows chain-wise (still not full OpenFold species-pairing parity).
 
 Detailed API coverage vs Python is documented in:
 

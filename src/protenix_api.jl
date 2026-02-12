@@ -1366,8 +1366,7 @@ function _chain_msa_features(
     json_dir::AbstractString;
     require_pairing::Bool,
 )
-    msa_dir_any = get(msa_cfg, "precomputed_msa_dir", nothing)
-    if msa_dir_any === nothing || isempty(strip(String(msa_dir_any)))
+    function _query_only_features()
         query_idx = _sequence_to_protenix_indices(sequence)
         profile = zeros(Float32, length(query_idx), 32)
         for (i, x) in enumerate(query_idx)
@@ -1382,31 +1381,52 @@ function _chain_msa_features(
         )
     end
 
+    msa_dir_any = get(msa_cfg, "precomputed_msa_dir", nothing)
+    if msa_dir_any === nothing || isempty(strip(String(msa_dir_any)))
+        base = _query_only_features()
+        return (combined = base, non_pairing = base, pairing = nothing)
+    end
+
     msa_dir_raw = String(msa_dir_any)
     msa_dir = isabspath(msa_dir_raw) ? msa_dir_raw : normpath(joinpath(json_dir, msa_dir_raw))
     isdir(msa_dir) || error("The provided precomputed_msa_dir does not exist: $msa_dir")
 
-    aligned = String[]
-    deletion_matrix = Vector{Vector{Float32}}()
-
     non_pair_path = joinpath(msa_dir, "non_pairing.a3m")
-    if isfile(non_pair_path)
+    non_pairing = if isfile(non_pair_path)
         seqs, _ = _parse_a3m(non_pair_path; seq_limit = -1)
         aln, del = _aligned_and_deletions_from_a3m(seqs)
-        append!(aligned, aln)
-        append!(deletion_matrix, del)
+        _build_chain_msa_features(sequence, aln, del)
+    else
+        _query_only_features()
     end
 
+    pairing = nothing
     if require_pairing
         pair_path = joinpath(msa_dir, "pairing.a3m")
         isfile(pair_path) || error("No pairing-MSA found at $pair_path for multi-chain assembly.")
         seqs, _ = _parse_a3m(pair_path; seq_limit = -1)
         aln, del = _aligned_and_deletions_from_a3m(seqs)
-        append!(aligned, aln)
-        append!(deletion_matrix, del)
+        pairing = _build_chain_msa_features(sequence, aln, del)
     end
 
-    return _build_chain_msa_features(sequence, aligned, deletion_matrix)
+    if pairing === nothing
+        combined = non_pairing
+    else
+        n_pair = size(pairing.msa, 1)
+        n_non = size(non_pairing.msa, 1)
+        n_tot = max(n_pair + n_non, 1)
+        wt_pair = Float32(n_pair) / Float32(n_tot)
+        wt_non = Float32(n_non) / Float32(n_tot)
+        combined = (
+            msa = vcat(pairing.msa, non_pairing.msa),
+            has_deletion = vcat(pairing.has_deletion, non_pairing.has_deletion),
+            deletion_value = vcat(pairing.deletion_value, non_pairing.deletion_value),
+            deletion_mean = wt_pair .* pairing.deletion_mean .+ wt_non .* non_pairing.deletion_mean,
+            profile = wt_pair .* pairing.profile .+ wt_non .* non_pairing.profile,
+        )
+    end
+
+    return (combined = combined, non_pairing = non_pairing, pairing = pairing)
 end
 
 function _inject_task_msa_features!(
@@ -1454,12 +1474,19 @@ function _inject_task_msa_features!(
     end
 
     for (i, cols) in enumerate(chain_token_cols)
-        size(chain_features[i].msa, 2) == length(cols) || error(
-            "MSA/token length mismatch on chain $(local_specs[i].chain_id): MSA has $(size(chain_features[i].msa, 2)) columns, tokens have $(length(cols)).",
+        size(chain_features[i].combined.msa, 2) == length(cols) || error(
+            "MSA/token length mismatch on chain $(local_specs[i].chain_id): MSA has $(size(chain_features[i].combined.msa, 2)) columns, tokens have $(length(cols)).",
         )
     end
 
-    total_rows = sum(size(cf.msa, 1) for cf in chain_features)
+    heteromer_pairing_merge = !is_homomer_or_monomer && all(cf -> cf.pairing !== nothing, chain_features)
+    total_rows = if heteromer_pairing_merge
+        paired_rows = minimum(size(cf.pairing.msa, 1) for cf in chain_features)
+        nonpair_extra_rows = sum(max(size(cf.non_pairing.msa, 1) - 1, 0) for cf in chain_features)
+        paired_rows + nonpair_extra_rows
+    else
+        sum(size(cf.combined.msa, 1) for cf in chain_features)
+    end
     total_rows > 0 || (total_rows = 1)
 
     msa = repeat(reshape(restype_idx, 1, :), total_rows, 1)
@@ -1468,17 +1495,47 @@ function _inject_task_msa_features!(
     profile = copy(restype)
     deletion_mean = zeros(Float32, n_tok)
 
-    row_start = 1
-    for (cf, cols) in zip(chain_features, chain_token_cols)
-        n_row = size(cf.msa, 1)
-        row_stop = row_start + n_row - 1
-        rows = row_start:row_stop
-        msa[rows, cols] .= cf.msa
-        has_deletion[rows, cols] .= cf.has_deletion
-        deletion_value[rows, cols] .= cf.deletion_value
-        profile[cols, :] .= cf.profile
-        deletion_mean[cols] .= cf.deletion_mean
-        row_start = row_stop + 1
+    if heteromer_pairing_merge
+        paired_rows = minimum(size(cf.pairing.msa, 1) for cf in chain_features)
+        row = 1
+
+        # Paired rows are merged across chains at the same row index.
+        for r in 1:paired_rows
+            for (cf, cols) in zip(chain_features, chain_token_cols)
+                msa[row, cols] .= cf.pairing.msa[r, :]
+                has_deletion[row, cols] .= cf.pairing.has_deletion[r, :]
+                deletion_value[row, cols] .= cf.pairing.deletion_value[r, :]
+            end
+            row += 1
+        end
+
+        # Append non-pairing rows chain-wise (excluding duplicate query row).
+        for (cf, cols) in zip(chain_features, chain_token_cols)
+            n_row = size(cf.non_pairing.msa, 1)
+            if n_row >= 2
+                rows = row:(row + (n_row - 2))
+                msa[rows, cols] .= cf.non_pairing.msa[2:end, :]
+                has_deletion[rows, cols] .= cf.non_pairing.has_deletion[2:end, :]
+                deletion_value[rows, cols] .= cf.non_pairing.deletion_value[2:end, :]
+                row += n_row - 1
+            end
+            profile[cols, :] .= cf.non_pairing.profile
+            deletion_mean[cols] .= cf.non_pairing.deletion_mean
+        end
+        row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch")
+    else
+        row_start = 1
+        for (cf, cols) in zip(chain_features, chain_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            row_stop = row_start + n_row - 1
+            rows = row_start:row_stop
+            msa[rows, cols] .= cf.combined.msa
+            has_deletion[rows, cols] .= cf.combined.has_deletion
+            deletion_value[rows, cols] .= cf.combined.deletion_value
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+            row_start = row_stop + 1
+        end
     end
 
     feat["msa"] = msa
