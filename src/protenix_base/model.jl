@@ -32,6 +32,7 @@ function build_protenix_base_model(
     sample_gamma_min::Real = 1.0,
     sample_noise_scale_lambda::Real = 1.003,
     sample_step_scale_eta::Real = 1.5,
+    constraint_enable::Bool = false,
     rng::AbstractRNG = MersenneTwister(0),
 )
     d = infer_protenix_base_dims(weights)
@@ -56,6 +57,7 @@ function build_protenix_base_model(
         sample_step_scale_eta = sample_step_scale_eta,
         sample_n_step = sample_n_step,
         sample_n_sample = sample_n_sample,
+        constraint_enable = constraint_enable,
         rng = rng,
     )
 end

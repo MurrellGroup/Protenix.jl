@@ -42,8 +42,12 @@ Python is allowed only for explicit parity tooling, not runtime inference.
 ## Open / Next
 
 1. Implement `constraint` conditioning parity in `predict_json` runtime path.
-   - parsing + feature injection
-   - parity checks vs Python behavior
+   - completed in part:
+     - `constraint.contact` and `constraint.pocket` parsing + feature injection
+     - typed constraint feature plumbing into Protenix trunk `z` path
+   - remaining:
+     - full `constraint.structure` support
+     - substructure embedder architecture parity and weight-loading parity for constraint checkpoint variants
 
 2. Improve multi-chain MSA merge parity:
    - current chain-wise merge works, but full species-pairing parity is pending.

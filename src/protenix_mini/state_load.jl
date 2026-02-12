@@ -16,6 +16,7 @@ import ..Pairformer:
     TemplateEmbedder,
     NoisyStructureEmbedder
 import ..Heads: DistogramHead, ConfidenceHead
+import ..Constraint: ConstraintEmbedder
 import ..Model: ProtenixMiniModel
 import ...Model: load_diffusion_module!, infer_model_scaffold_dims
 
@@ -390,6 +391,29 @@ function _load_confidence_head!(
     return conf
 end
 
+function _load_constraint_embedder!(
+    cemb::ConstraintEmbedder,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    prefix::String;
+    strict::Bool = true,
+)
+    if cemb.pocket_z_embedder !== nothing
+        _load_linear_nobias!(cemb.pocket_z_embedder, weights, "$prefix.pocket_z_embedder.weight"; strict = strict)
+    end
+    if cemb.contact_z_embedder !== nothing
+        _load_linear_nobias!(cemb.contact_z_embedder, weights, "$prefix.contact_z_embedder.weight"; strict = strict)
+    end
+    if cemb.contact_atom_z_embedder !== nothing
+        _load_linear_nobias!(cemb.contact_atom_z_embedder, weights, "$prefix.contact_atom_z_embedder.weight"; strict = strict)
+    end
+    if cemb.substructure_z_embedder !== nothing
+        # Substructure transformer/MLP variants use different key layouts upstream.
+        # Load direct linear key when available; otherwise keep zero init.
+        _load_linear_nobias!(cemb.substructure_z_embedder, weights, "$prefix.substructure_z_embedder.weight"; strict = false)
+    end
+    return cemb
+end
+
 function infer_protenix_mini_dims(weights::AbstractDict{<:AbstractString, <:Any})
     dm = infer_model_scaffold_dims(weights)
 
@@ -513,6 +537,9 @@ function load_protenix_mini_model!(
     end
 
     _load_msa_module!(model.msa_module, weights, "msa_module"; strict = strict)
+    if model.constraint_embedder !== nothing
+        _load_constraint_embedder!(model.constraint_embedder, weights, "constraint_embedder"; strict = strict)
+    end
     _load_pairformer_stack!(model.pairformer_stack, weights, "pairformer_stack"; strict = strict)
     load_diffusion_module!(model.diffusion_module, weights, "diffusion_module"; strict = strict)
 

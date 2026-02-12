@@ -1728,19 +1728,266 @@ function _inject_task_esm_token_embedding!(
     return feat
 end
 
-function _ensure_constraint_not_silent!(
+function _constraint_is_empty(x)
+    return (x isa AbstractDict && isempty(x)) || (x isa AbstractVector && isempty(x))
+end
+
+function _token_lookup_for_constraints(
+    atoms::Vector{AtomRecord},
+    atom_to_token_idx::AbstractVector{<:Integer},
+)
+    token_lookup = Dict{Tuple{String, Int}, Vector{Int}}()
+    atom_lookup = Dict{Tuple{String, Int, String}, Vector{Int}}()
+    chain_tokens = Dict{String, Vector{Int}}()
+    for (atom_i, a) in enumerate(atoms)
+        tok = Int(atom_to_token_idx[atom_i]) + 1
+        key_res = (a.chain_id, a.res_id)
+        if haskey(token_lookup, key_res)
+            tok in token_lookup[key_res] || push!(token_lookup[key_res], tok)
+        else
+            token_lookup[key_res] = [tok]
+        end
+
+        key_atom = (a.chain_id, a.res_id, uppercase(a.atom_name))
+        if haskey(atom_lookup, key_atom)
+            push!(atom_lookup[key_atom], atom_i)
+        else
+            atom_lookup[key_atom] = [atom_i]
+        end
+
+        if haskey(chain_tokens, a.chain_id)
+            tok in chain_tokens[a.chain_id] || push!(chain_tokens[a.chain_id], tok)
+        else
+            chain_tokens[a.chain_id] = [tok]
+        end
+    end
+    return token_lookup, atom_lookup, chain_tokens
+end
+
+function _constraint_side_tokens(
+    token_lookup::Dict{Tuple{String, Int}, Vector{Int}},
+    atom_lookup::Dict{Tuple{String, Int, String}, Vector{Int}},
+    atom_to_token_idx::AbstractVector{<:Integer},
+    chains::Vector{String},
+    position::Int,
+    atom_any,
+    entity_id::Int,
+    entity_atom_map::Dict{Int, Dict{Int, String}},
+    context::String,
+)
+    if atom_any === nothing
+        out = Int[]
+        for chain in chains
+            key = (chain, position)
+            haskey(token_lookup, key) || error("$context did not match residue at $chain:$position")
+            append!(out, token_lookup[key])
+        end
+        return sort!(unique!(out))
+    end
+
+    atom_name = _resolve_bond_atom_name(atom_any, entity_id, entity_atom_map, context)
+    out = Int[]
+    for chain in chains
+        key = (chain, position, uppercase(strip(atom_name)))
+        haskey(atom_lookup, key) || error("$context did not match atom '$atom_name' at $chain:$position")
+        for atom_i in atom_lookup[key]
+            push!(out, Int(atom_to_token_idx[atom_i]) + 1)
+        end
+    end
+    return sort!(unique!(out))
+end
+
+function _inject_constraint_feature_from_json!(
+    feat::Dict{String, Any},
+    atoms::Vector{AtomRecord},
     task::AbstractDict{<:Any, <:Any},
-    params::NamedTuple,
+    entity_chain_ids::Dict{Int, Vector{String}},
+    entity_atom_map::Dict{Int, Dict{Int, String}},
     context::AbstractString,
 )
-    haskey(task, "constraint") || return nothing
-    c = task["constraint"]
-    is_empty = (c isa AbstractDict && isempty(c)) || (c isa AbstractVector && isempty(c))
-    is_empty && return nothing
-    error(
-        "task.constraint was provided for $context, but constraint feature injection is not yet implemented in Julia runtime. " *
-        "Use Python reference for constraint-conditioned runs until this path is ported.",
+    haskey(task, "constraint") || return feat
+    c_any = task["constraint"]
+    c_any isa AbstractDict || error("task.constraint must be an object for $context")
+    _constraint_is_empty(c_any) && return feat
+    c = _as_string_dict(c_any)
+
+    n_tok = size(feat["restype"], 1)
+    atom_to_token_idx = Int.(feat["atom_to_token_idx"])
+    token_lookup, atom_lookup, chain_tokens = _token_lookup_for_constraints(atoms, atom_to_token_idx)
+
+    contact = zeros(Float32, n_tok, n_tok, 2)
+    contact_atom = zeros(Float32, n_tok, n_tok, 2)
+    pocket = zeros(Float32, n_tok, n_tok, 1)
+    substructure = zeros(Float32, n_tok, n_tok, 4)
+
+    if haskey(c, "contact")
+        pairs_any = c["contact"]
+        pairs_any isa AbstractVector || error("task.constraint.contact must be an array for $context")
+        for (i, pair_any) in enumerate(pairs_any)
+            pair_any isa AbstractDict || error("task.constraint.contact[$i] must be an object")
+            pair = _as_string_dict(pair_any)
+
+            left_raw = haskey(pair, "atom1") ? pair["atom1"] : get(pair, "residue1", nothing)
+            right_raw = haskey(pair, "atom2") ? pair["atom2"] : get(pair, "residue2", nothing)
+            left_raw === nothing && error("task.constraint.contact[$i] missing atom1/residue1")
+            right_raw === nothing && error("task.constraint.contact[$i] missing atom2/residue2")
+            left_raw isa AbstractVector || error("task.constraint.contact[$i].atom1/residue1 must be an array")
+            right_raw isa AbstractVector || error("task.constraint.contact[$i].atom2/residue2 must be an array")
+
+            left = collect(left_raw)
+            right = collect(right_raw)
+            (length(left) == 3 || length(left) == 4) || error("task.constraint.contact[$i].atom1/residue1 must have length 3 or 4")
+            (length(right) == 3 || length(right) == 4) || error("task.constraint.contact[$i].atom2/residue2 must have length 3 or 4")
+
+            left_is_atom = length(left) == 4
+            right_is_atom = length(right) == 4
+            left_is_atom == right_is_atom || error("task.constraint.contact[$i] must use atom1+atom2 or residue1+residue2 consistently")
+
+            e1 = left[1] isa Integer ? Int(left[1]) : parse(Int, strip(String(left[1])))
+            c1 = left[2]
+            p1 = left[3] isa Integer ? Int(left[3]) : parse(Int, strip(String(left[3])))
+            a1 = left_is_atom ? left[4] : nothing
+
+            e2 = right[1] isa Integer ? Int(right[1]) : parse(Int, strip(String(right[1])))
+            c2 = right[2]
+            p2 = right[3] isa Integer ? Int(right[3]) : parse(Int, strip(String(right[3])))
+            a2 = right_is_atom ? right[4] : nothing
+
+            chains1 = _resolve_bond_chains(entity_chain_ids, e1, c1, "task.constraint.contact[$i] side1")
+            chains2 = _resolve_bond_chains(entity_chain_ids, e2, c2, "task.constraint.contact[$i] side2")
+            toks1 = _constraint_side_tokens(
+                token_lookup,
+                atom_lookup,
+                atom_to_token_idx,
+                chains1,
+                p1,
+                a1,
+                e1,
+                entity_atom_map,
+                "task.constraint.contact[$i] side1",
+            )
+            toks2 = _constraint_side_tokens(
+                token_lookup,
+                atom_lookup,
+                atom_to_token_idx,
+                chains2,
+                p2,
+                a2,
+                e2,
+                entity_atom_map,
+                "task.constraint.contact[$i] side2",
+            )
+
+            max_dist = Float32(pair["max_distance"])
+            min_dist = haskey(pair, "min_distance") ? Float32(pair["min_distance"]) : 0f0
+            target = left_is_atom ? contact_atom : contact
+            for t1 in toks1, t2 in toks2
+                target[t1, t2, 1] = min_dist
+                target[t1, t2, 2] = max_dist
+                target[t2, t1, 1] = min_dist
+                target[t2, t1, 2] = max_dist
+            end
+        end
+    end
+
+    if haskey(c, "pocket")
+        p_any = c["pocket"]
+        p_any isa AbstractDict || error("task.constraint.pocket must be an object for $context")
+        p = _as_string_dict(p_any)
+        if !_constraint_is_empty(p)
+            haskey(p, "binder_chain") || error("task.constraint.pocket.binder_chain is required for $context")
+            haskey(p, "contact_residues") || error("task.constraint.pocket.contact_residues is required for $context")
+            haskey(p, "max_distance") || error("task.constraint.pocket.max_distance is required for $context")
+            binder = collect(p["binder_chain"])
+            length(binder) == 2 || error("task.constraint.pocket.binder_chain must have length 2 [entity,copy]")
+            be = binder[1] isa Integer ? Int(binder[1]) : parse(Int, strip(String(binder[1])))
+            bc = binder[2]
+            bchains = _resolve_bond_chains(entity_chain_ids, be, bc, "task.constraint.pocket binder")
+            btoks = Int[]
+            for chain in bchains
+                haskey(chain_tokens, chain) || error("task.constraint.pocket binder chain $chain not found")
+                append!(btoks, chain_tokens[chain])
+            end
+            btoks = sort!(unique!(btoks))
+
+            contact_res = p["contact_residues"]
+            contact_res isa AbstractVector || error("task.constraint.pocket.contact_residues must be an array")
+            dist = Float32(p["max_distance"])
+            for (j, r_any) in enumerate(contact_res)
+                r_any isa AbstractVector || error("task.constraint.pocket.contact_residues[$j] must be an array")
+                r = collect(r_any)
+                length(r) == 3 || error("task.constraint.pocket.contact_residues[$j] must have length 3 [entity,copy,position]")
+                re = r[1] isa Integer ? Int(r[1]) : parse(Int, strip(String(r[1])))
+                rc = r[2]
+                rp = r[3] isa Integer ? Int(r[3]) : parse(Int, strip(String(r[3])))
+                rchains = _resolve_bond_chains(entity_chain_ids, re, rc, "task.constraint.pocket.contact_residues[$j]")
+                rtoks = _constraint_side_tokens(
+                    token_lookup,
+                    atom_lookup,
+                    atom_to_token_idx,
+                    rchains,
+                    rp,
+                    nothing,
+                    re,
+                    entity_atom_map,
+                    "task.constraint.pocket.contact_residues[$j]",
+                )
+                for t1 in btoks, t2 in rtoks
+                    pocket[t1, t2, 1] = dist
+                    pocket[t2, t1, 1] = dist
+                end
+            end
+        end
+    end
+
+    if haskey(c, "structure") && !_constraint_is_empty(c["structure"])
+        error("task.constraint.structure is not yet implemented in Julia runtime for $context")
+    end
+
+    feat["constraint_feature"] = Dict(
+        "contact" => contact,
+        "pocket" => pocket,
+        "contact_atom" => contact_atom,
+        "substructure" => substructure,
     )
+    return feat
+end
+
+function _inject_task_constraint_feature!(
+    feat::Dict{String, Any},
+    task::AbstractDict{<:Any, <:Any},
+    atoms::Vector{AtomRecord},
+    entity_chain_ids::Dict{Int, Vector{String}},
+    entity_atom_map::Dict{Int, Dict{Int, String}},
+    context::AbstractString,
+)
+    if haskey(task, "constraint_feature")
+        cf_any = task["constraint_feature"]
+        cf_any isa AbstractDict || error("task.constraint_feature must be an object for $context")
+        cf = _as_string_dict(cf_any)
+        n_tok = size(feat["restype"], 1)
+        required = ("contact", "pocket", "contact_atom", "substructure")
+        all(haskey(cf, k) for k in required) || error("task.constraint_feature must include contact/pocket/contact_atom/substructure")
+        contact = Float32.(cf["contact"])
+        pocket = Float32.(cf["pocket"])
+        contact_atom = Float32.(cf["contact_atom"])
+        substructure = Float32.(cf["substructure"])
+        ndims(contact) == 3 && size(contact, 1) == n_tok && size(contact, 2) == n_tok || error("task.constraint_feature.contact must be [N_token,N_token,C]")
+        ndims(pocket) == 3 && size(pocket, 1) == n_tok && size(pocket, 2) == n_tok || error("task.constraint_feature.pocket must be [N_token,N_token,C]")
+        ndims(contact_atom) == 3 && size(contact_atom, 1) == n_tok && size(contact_atom, 2) == n_tok || error("task.constraint_feature.contact_atom must be [N_token,N_token,C]")
+        ndims(substructure) == 3 && size(substructure, 1) == n_tok && size(substructure, 2) == n_tok || error("task.constraint_feature.substructure must be [N_token,N_token,C]")
+        feat["constraint_feature"] = Dict(
+            "contact" => contact,
+            "pocket" => pocket,
+            "contact_atom" => contact_atom,
+            "substructure" => substructure,
+        )
+        return feat
+    end
+
+    # Needed by _inject_constraint_feature_from_json! token-lookup helper.
+    _inject_constraint_feature_from_json!(feat, atoms, task, entity_chain_ids, entity_atom_map, context)
+    return feat
 end
 
 function _validate_required_model_inputs!(
@@ -1834,7 +2081,8 @@ function _load_model(model_name::AbstractString, weights_path::AbstractString; s
         ProtenixMini.load_protenix_mini_model!(m, w; strict = strict)
         return (model = m, family = :mini)
     elseif params.family == :base
-        m = ProtenixBase.build_protenix_base_model(w)
+        constraint_enable = occursin("constraint", lowercase(String(model_name)))
+        m = ProtenixBase.build_protenix_base_model(w; constraint_enable = constraint_enable)
         ProtenixBase.load_protenix_base_model!(m, w; strict = strict)
         return (model = m, family = :base)
     end
@@ -1982,9 +2230,12 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                 )
                 _inject_task_template_features!(bundle["input_feature_dict"], task)
                 _inject_task_esm_token_embedding!(bundle["input_feature_dict"], task)
-                _ensure_constraint_not_silent!(
+                _inject_task_constraint_feature!(
+                    bundle["input_feature_dict"],
                     task,
-                    params,
+                    bundle["atoms"],
+                    parsed_task.entity_chain_ids,
+                    parsed_task.entity_atom_map,
                     "task '$task_name' in $(basename(json_path))",
                 )
                 _validate_required_model_inputs!(

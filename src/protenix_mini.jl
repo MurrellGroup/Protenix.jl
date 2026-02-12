@@ -3,6 +3,7 @@ module ProtenixMini
 include("protenix_mini/utils.jl")
 include("protenix_mini/primitives.jl")
 include("protenix_mini/features.jl")
+include("protenix_mini/constraint.jl")
 include("protenix_mini/openfold_blocks.jl")
 include("protenix_mini/embedders.jl")
 include("protenix_mini/pairformer.jl")
@@ -24,6 +25,7 @@ using .Utils:
 
 using .Primitives: Linear, LinearNoBias, LayerNorm, transition, silu
 using .Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+using .Constraint: ConstraintEmbedder
 using .OpenFoldBlocks: TriangleMultiplication, TriangleAttention, OuterProductMean, PairAttentionNoS
 using .Embedders: InputFeatureEmbedder, RelativePositionEncoding
 using .Pairformer:
@@ -53,6 +55,7 @@ export softmax_lastdim,
 
 export Linear, LinearNoBias, LayerNorm, transition, silu
 export ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+export ConstraintEmbedder
 export TriangleMultiplication, TriangleAttention, OuterProductMean, PairAttentionNoS
 export InputFeatureEmbedder, RelativePositionEncoding
 export TransitionBlock,

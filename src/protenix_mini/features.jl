@@ -2,7 +2,14 @@ module Features
 
 import ..Utils: one_hot_int
 
-export ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+export ConstraintFeatures, ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+
+struct ConstraintFeatures
+    contact::Union{Nothing, Array{Float32,3}}
+    pocket::Union{Nothing, Array{Float32,3}}
+    contact_atom::Union{Nothing, Array{Float32,3}}
+    substructure::Union{Nothing, Array{Float32,3}}
+end
 
 struct ProtenixFeatures
     asym_id::Vector{Int}
@@ -33,6 +40,7 @@ struct ProtenixFeatures
     atom_to_token_idx::Vector{Int}
     atom_to_tokatom_idx::Vector{Int}
     distogram_rep_atom_mask::Vector{Bool}
+    constraint_feature::Union{Nothing, ConstraintFeatures}
 end
 
 _as_i_vec(x, name::String) = x isa AbstractVector ? Int.(x) : error("$name must be a vector")
@@ -63,6 +71,24 @@ function _optional_f_arr4(feat::AbstractDict{<:AbstractString, <:Any}, key::Stri
     x isa AbstractArray || error("$key must be array-like")
     ndims(x) == 4 || error("$key must have rank 4")
     return Float32.(x)
+end
+
+function _to_f_arr3(x, key::String)
+    x isa AbstractArray || error("$key must be array-like")
+    ndims(x) == 3 || error("$key must have rank 3")
+    return Float32.(x)
+end
+
+function _optional_constraint_features(feat::AbstractDict{<:AbstractString, <:Any})
+    haskey(feat, "constraint_feature") || return nothing
+    c_any = feat["constraint_feature"]
+    c_any isa AbstractDict || error("constraint_feature must be an object")
+    c = c_any
+    contact = haskey(c, "contact") ? _to_f_arr3(c["contact"], "constraint_feature.contact") : nothing
+    pocket = haskey(c, "pocket") ? _to_f_arr3(c["pocket"], "constraint_feature.pocket") : nothing
+    contact_atom = haskey(c, "contact_atom") ? _to_f_arr3(c["contact_atom"], "constraint_feature.contact_atom") : nothing
+    substructure = haskey(c, "substructure") ? _to_f_arr3(c["substructure"], "constraint_feature.substructure") : nothing
+    return ConstraintFeatures(contact, pocket, contact_atom, substructure)
 end
 
 function _coalesce_restype(feat::AbstractDict{<:AbstractString, <:Any})
@@ -120,6 +146,7 @@ function as_protenix_features(feat::AbstractDict{<:AbstractString, <:Any})
         _as_i_vec(feat["atom_to_token_idx"], "atom_to_token_idx"),
         _as_i_vec(feat["atom_to_tokatom_idx"], "atom_to_tokatom_idx"),
         _as_b_vec(feat["distogram_rep_atom_mask"], "distogram_rep_atom_mask"),
+        _optional_constraint_features(feat),
     )
 end
 

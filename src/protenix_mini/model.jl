@@ -7,6 +7,7 @@ import ..Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_at
 import ..Embedders: InputFeatureEmbedder, RelativePositionEncoding
 import ..Pairformer: TemplateEmbedder, NoisyStructureEmbedder, MSAModule, PairformerStack
 import ..Heads: DistogramHead, ConfidenceHead
+import ..Constraint: ConstraintEmbedder
 import ...Model: DiffusionModule, InferenceNoiseScheduler, sample_diffusion
 
 export ProtenixMiniModel, get_pairformer_output, run_inference
@@ -20,6 +21,7 @@ struct ProtenixMiniModel
     template_embedder::TemplateEmbedder
     noisy_structure_embedder::Union{NoisyStructureEmbedder, Nothing}
     msa_module::MSAModule
+    constraint_embedder::Union{Nothing, ConstraintEmbedder}
     pairformer_stack::PairformerStack
     diffusion_module::DiffusionModule
     distogram_head::DistogramHead
@@ -65,6 +67,8 @@ function ProtenixMiniModel(
     sample_n_sample::Int = 1,
     input_esm_enable::Bool = false,
     input_esm_embedding_dim::Int = 2560,
+    constraint_enable::Bool = false,
+    constraint_substructure_enable::Bool = false,
     rng::AbstractRNG = Random.default_rng(),
 )
     input_embedder = InputFeatureEmbedder(
@@ -79,6 +83,15 @@ function ProtenixMiniModel(
     template_embedder = TemplateEmbedder(c_z; n_blocks = 0, c = 64, rng = rng)
     noisy = nothing
     msa = MSAModule(c_z, c_s_inputs; n_blocks = msa_blocks, rng = rng)
+    constraint = constraint_enable ? ConstraintEmbedder(
+        c_z;
+        pocket_enable = true,
+        contact_enable = true,
+        contact_atom_enable = true,
+        substructure_enable = constraint_substructure_enable,
+        initialize_method = :zero,
+        rng = rng,
+    ) : nothing
     pairformer = PairformerStack(c_z, c_s; n_blocks = pairformer_blocks, n_heads = 16, rng = rng)
 
     dm = DiffusionModule(
@@ -104,6 +117,7 @@ function ProtenixMiniModel(
         template_embedder,
         noisy,
         msa,
+        constraint,
         pairformer,
         dm,
         DistogramHead(c_z; no_bins = 64, rng = rng),
@@ -162,6 +176,15 @@ function get_pairformer_output(
     token_bonds = feat.token_bonds
     size(token_bonds) == (n_tok, n_tok) || error("token_bonds shape mismatch")
     z_init .+= model.linear_no_bias_token_bond(reshape(token_bonds, n_tok, n_tok, 1))
+
+    if model.constraint_embedder !== nothing && feat.constraint_feature !== nothing
+        z_constraint = model.constraint_embedder(feat.constraint_feature)
+        if z_constraint !== nothing
+            size(z_constraint) == size(z_init) ||
+                error("constraint z shape mismatch: expected $(size(z_init)), got $(size(z_constraint))")
+            z_init .+= z_constraint
+        end
+    end
 
     z = zeros(Float32, size(z_init))
     s = zeros(Float32, size(s_init))

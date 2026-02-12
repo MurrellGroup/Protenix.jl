@@ -264,11 +264,37 @@ END
         @test !isempty(parsed_file.entity_atom_map[1])
     end
 
-    @test_throws ErrorException PXDesign.ProtenixAPI._ensure_constraint_not_silent!(
-        Dict{String, Any}("constraint" => Dict("contact" => Any[Dict("foo" => 1)])),
-        PXDesign.recommended_params("protenix_base_constraint_v0.5.0"),
+    constraint_task = Dict{String, Any}(
+        "name" => "constraint_smoke",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1)),
+        ],
+        "constraint" => Dict(
+            "contact" => Any[
+                Dict("residue1" => Any[1, 1, 1], "residue2" => Any[2, 1, 1], "max_distance" => 10.0),
+            ],
+            "pocket" => Dict(
+                "binder_chain" => Any[1, 1],
+                "contact_residues" => Any[Any[2, 1, 1]],
+                "max_distance" => 12.0,
+            ),
+        ),
+    )
+    parsed_constraint = PXDesign.ProtenixAPI._parse_task_entities(constraint_task)
+    bundle_constraint = PXDesign.Data.build_feature_bundle_from_atoms(parsed_constraint.atoms; task_name = "constraint_smoke")
+    feat_constraint = bundle_constraint["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_constraint)
+    PXDesign.ProtenixAPI._inject_task_constraint_feature!(
+        feat_constraint,
+        constraint_task,
+        bundle_constraint["atoms"],
+        parsed_constraint.entity_chain_ids,
+        parsed_constraint.entity_atom_map,
         "constraint_smoke",
     )
+    @test haskey(feat_constraint, "constraint_feature")
+    @test size(feat_constraint["constraint_feature"]["contact"]) == (size(feat_constraint["restype"], 1), size(feat_constraint["restype"], 1), 2)
 end
 
 @testset "Protenix precomputed MSA ingestion" begin
@@ -537,6 +563,45 @@ end
     @test isapprox(trunk_typed.s_inputs, trunk_dict.s_inputs; atol = 1e-6, rtol = 1e-6)
     @test isapprox(trunk_typed.s, trunk_dict.s; atol = 1e-6, rtol = 1e-6)
     @test isapprox(trunk_typed.z, trunk_dict.z; atol = 1e-6, rtol = 1e-6)
+end
+
+@testset "Protenix constraint embedder plumbing" begin
+    ce = PXDesign.ProtenixMini.ConstraintEmbedder(
+        8;
+        pocket_enable = true,
+        contact_enable = true,
+        contact_atom_enable = true,
+        substructure_enable = true,
+        initialize_method = :zero,
+        rng = MersenneTwister(1),
+    )
+    ce.pocket_z_embedder !== nothing && (ce.pocket_z_embedder.weight .= 1f0)
+    ce.contact_z_embedder !== nothing && (ce.contact_z_embedder.weight .= 0f0)
+    ce.contact_atom_z_embedder !== nothing && (ce.contact_atom_z_embedder.weight .= 0f0)
+    ce.substructure_z_embedder !== nothing && (ce.substructure_z_embedder.weight .= 0f0)
+
+    cf = Dict(
+        "pocket" => ones(Float32, 3, 3, 1),
+        "contact" => zeros(Float32, 3, 3, 2),
+        "contact_atom" => zeros(Float32, 3, 3, 2),
+        "substructure" => zeros(Float32, 3, 3, 4),
+    )
+    z = ce(cf)
+    @test z !== nothing
+    @test size(z) == (3, 3, 8)
+    @test all(z .≈ 1f0)
+
+    bundle = PXDesign.ProtenixMini.build_sequence_feature_bundle("ACDE"; task_name = "constraint_typed")
+    feat = copy(bundle["input_feature_dict"])
+    n_tok = size(feat["restype"], 1)
+    feat["constraint_feature"] = Dict(
+        "contact" => zeros(Float32, n_tok, n_tok, 2),
+        "pocket" => zeros(Float32, n_tok, n_tok, 1),
+        "contact_atom" => zeros(Float32, n_tok, n_tok, 2),
+        "substructure" => zeros(Float32, n_tok, n_tok, 4),
+    )
+    typed = PXDesign.ProtenixMini.as_protenix_features(feat)
+    @test typed.constraint_feature !== nothing
 end
 
 @testset "Cache zero-byte checkpoint refresh" begin
