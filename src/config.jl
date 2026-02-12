@@ -17,6 +17,7 @@ function default_urls()
     return Dict(
         "pxdesign_v0.1.0" => "https://pxdesign.tos-cn-beijing.volces.com/release_model/pxdesign_v0.1.0.pt",
         "protenix_base_default_v0.5.0" => "https://pxdesign.tos-cn-beijing.volces.com/release_model/protenix_base_default_v0.5.0.pt",
+        "protenix_base_constraint_v0.5.0" => "https://af3-dev.tos-cn-beijing.volces.com/release_model/protenix_base_constraint_v0.5.0.pt",
         "protenix_mini_default_v0.5.0" => "https://pxdesign.tos-cn-beijing.volces.com/release_model/protenix_mini_default_v0.5.0.pt",
         "protenix_mini_tmpl_v0.5.0" => "https://pxdesign.tos-cn-beijing.volces.com/release_model/protenix_mini_tmpl_v0.5.0.pt",
         "ccd_components_file" => "https://pxdesign.tos-cn-beijing.volces.com/release_data/components.v20240608.cif",

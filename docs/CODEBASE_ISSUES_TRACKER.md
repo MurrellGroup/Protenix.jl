@@ -47,8 +47,9 @@ Python is allowed only for explicit parity tooling, not runtime inference.
      - typed constraint feature plumbing into Protenix trunk `z` path
      - `constraint.structure` acceptance as JSON-inference no-op (Python v0.5 parity)
      - substructure embedder architecture/weight-loading support for `linear`/`mlp`/`transformer`
+     - real checkpoint conversion/load coverage validated for `protenix_base_constraint_v0.5.0`
    - remaining:
-     - validate against real `protenix_base_constraint_v0.5.0` checkpoint tensors for full numeric parity
+     - full forward numeric parity against Python reference dumps for constraint-conditioned paths
 
 2. Improve multi-chain MSA merge parity:
    - implemented: heteromer `pairing.a3m` rows merge across chains by row index, then non-pair rows append chain-wise.

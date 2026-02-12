@@ -172,6 +172,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
 
 const _MODEL_DEFAULT_SAFETENSORS_DIR = Dict(
     "protenix_base_default_v0.5.0" => "weights_safetensors_protenix_base_default_v0.5.0",
+    "protenix_base_constraint_v0.5.0" => "weights_safetensors_protenix_base_constraint_v0.5.0",
     "protenix_mini_default_v0.5.0" => "weights_safetensors_protenix_mini_default_v0.5.0",
     "protenix_mini_tmpl_v0.5.0" => "weights_safetensors_protenix_mini_tmpl_v0.5.0",
 )

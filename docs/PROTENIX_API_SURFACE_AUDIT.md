@@ -64,7 +64,8 @@ Current remaining deltas in this infer path:
   - pair `z` receives additive constraint embeddings when constraint embedder modules are enabled
   - `constraint.structure` is accepted and currently treated as a no-op for JSON inference (matching current Python v0.5 `generate_from_json` behavior)
   - substructure embedder supports `linear`/`mlp`/`transformer` architectures with state-load mapping
-- pending: validation against the real constraint checkpoint bundle for full end-to-end numeric parity.
+- real constraint checkpoint conversion/load coverage is validated (`4109/4109` tensors parity raw vs safetensors).
+- pending: full end-to-end numeric parity against Python reference dumps for constraint-conditioned forwards.
 - `SMILES` ligand handling is Julia-native and currently not RDKit-equivalent in conformer generation/chemistry normalization.
 
 Template note (v0.5 parity): upstream Protenix v0.5 keeps `TemplateEmbedder` disabled (`forward` returns zero). Julia mirrors this behavior; template features are not an active signal path for these checkpoints.

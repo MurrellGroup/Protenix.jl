@@ -57,6 +57,7 @@ function ensure_inference_cache!(
     if include_protenix_checkpoints
         for model in (
             "protenix_base_default_v0.5.0",
+            "protenix_base_constraint_v0.5.0",
             "protenix_mini_default_v0.5.0",
             "protenix_mini_tmpl_v0.5.0",
         )

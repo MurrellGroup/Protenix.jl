@@ -91,7 +91,8 @@ Still pending in this path:
 - full `constraint` conditioning parity with Python
   - implemented now: `constraint.contact`/`constraint.pocket` ingestion + typed constraint embedder plumbing
   - `constraint.structure` is accepted for JSON inference and currently treated as a no-op to match current Python v0.5 behavior
-  - pending: validation against real constraint checkpoints for full substructure numerical parity
+  - real checkpoint conversion/load coverage is now validated for `protenix_base_constraint_v0.5.0`
+  - remaining: forward numerical parity checks against Python dumps for constraint-conditioned trunks/denoise
 
 ### Typed Protenix Features (Julia-first runtime path)
 
@@ -225,6 +226,12 @@ Prepare Protenix-Base v0.5.0 safetensors and run conversion + coverage audits:
 
 ```bash
 scripts/prepare_protenix_base_safetensors.sh
+```
+
+Prepare Protenix-Base constraint v0.5.0 safetensors and run conversion + coverage audits:
+
+```bash
+scripts/prepare_protenix_base_constraint_safetensors.sh
 ```
 
 See status/details in:
