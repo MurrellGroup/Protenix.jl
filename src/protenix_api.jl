@@ -411,7 +411,24 @@ end
 struct ProteinChainSpec
     chain_id::String
     sequence::String
-    msa_cfg::Dict{String, Any}
+    msa_cfg::NamedTuple{(:precomputed_msa_dir, :pairing_db), Tuple{Union{Nothing, String}, String}}
+end
+
+const _DEFAULT_MSA_CFG = (precomputed_msa_dir = nothing, pairing_db = "uniref100")
+
+function _parse_msa_cfg(x)
+    if !(x isa AbstractDict)
+        return _DEFAULT_MSA_CFG
+    end
+    cfg = _as_string_dict(x)
+    precomputed_msa_dir = if haskey(cfg, "precomputed_msa_dir")
+        raw = cfg["precomputed_msa_dir"]
+        raw === nothing ? nothing : String(raw)
+    else
+        nothing
+    end
+    pairing_db = haskey(cfg, "pairing_db") ? String(cfg["pairing_db"]) : "uniref100"
+    return (precomputed_msa_dir = precomputed_msa_dir, pairing_db = pairing_db)
 end
 
 struct TaskEntityParseResult
@@ -990,11 +1007,11 @@ function _extract_protein_chain_specs(task::AbstractDict{<:Any, <:Any})
             isempty(seq) && error("Task.sequences[$i].proteinChain.sequence must be non-empty")
             count = Int(get(pc, "count", 1))
             count > 0 || error("Task.sequences[$i].proteinChain.count must be positive")
-            msa_cfg = haskey(pc, "msa") && pc["msa"] isa AbstractDict ? _as_string_dict(pc["msa"]) : Dict{String, Any}()
+            msa_cfg = haskey(pc, "msa") ? _parse_msa_cfg(pc["msa"]) : _DEFAULT_MSA_CFG
             for _ in 1:count
                 chain_id = _chain_id_from_index(chain_idx)
                 chain_idx += 1
-                push!(specs, ProteinChainSpec(chain_id, seq, copy(msa_cfg)))
+                push!(specs, ProteinChainSpec(chain_id, seq, msa_cfg))
             end
             continue
         end
@@ -1045,7 +1062,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
             isempty(seq) && error("Task.sequences[$entity_idx].proteinChain.sequence must be non-empty")
             count = Int(get(pc, "count", 1))
             count > 0 || error("Task.sequences[$entity_idx].proteinChain.count must be positive")
-            msa_cfg = haskey(pc, "msa") && pc["msa"] isa AbstractDict ? _as_string_dict(pc["msa"]) : Dict{String, Any}()
+            msa_cfg = haskey(pc, "msa") ? _parse_msa_cfg(pc["msa"]) : _DEFAULT_MSA_CFG
 
             ccd_codes = String[get(PROT_STD_RESIDUES_ONE_TO_THREE, string(c), "UNK") for c in seq]
             has_mods = haskey(pc, "modifications") && (pc["modifications"] isa AbstractVector) && !isempty(pc["modifications"])
@@ -1068,7 +1085,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 else
                     append!(atoms, ProtenixMini.build_sequence_atoms(seq; chain_id = chain_id))
                 end
-                push!(protein_specs, ProteinChainSpec(chain_id, seq, copy(msa_cfg)))
+                push!(protein_specs, ProteinChainSpec(chain_id, seq, msa_cfg))
             end
         elseif haskey(entity, "dnaSequence")
             dna_any = entity["dnaSequence"]
@@ -1362,7 +1379,7 @@ end
 
 function _chain_msa_features(
     sequence::AbstractString,
-    msa_cfg::AbstractDict{<:AbstractString, <:Any},
+    msa_cfg::NamedTuple{(:precomputed_msa_dir, :pairing_db), Tuple{Union{Nothing, String}, String}},
     json_dir::AbstractString;
     require_pairing::Bool,
 )
@@ -1381,7 +1398,7 @@ function _chain_msa_features(
         )
     end
 
-    msa_dir_any = get(msa_cfg, "precomputed_msa_dir", nothing)
+    msa_dir_any = msa_cfg.precomputed_msa_dir
     if msa_dir_any === nothing || isempty(strip(String(msa_dir_any)))
         base = _query_only_features()
         return (combined = base, non_pairing = base, pairing = nothing)
