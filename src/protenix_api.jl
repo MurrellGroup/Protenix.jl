@@ -435,8 +435,8 @@ end
 struct TaskEntityParseResult
     atoms::Vector{AtomRecord}
     protein_specs::Vector{ProteinChainSpec}
-    entity_chain_ids::Dict{Int, Vector{String}}
-    entity_atom_map::Dict{Int, Dict{Int, String}}
+    entity_chain_ids::Vector{Vector{String}}
+    entity_atom_map::Vector{Dict{Int, String}}
 end
 
 function _split_cif_tokens(line::AbstractString)
@@ -1045,14 +1045,15 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
 
     atoms = AtomRecord[]
     protein_specs = ProteinChainSpec[]
-    entity_chain_ids = Dict{Int, Vector{String}}()
-    entity_atom_map = Dict{Int, Dict{Int, String}}()
+    entity_chain_ids = Vector{Vector{String}}()
+    entity_atom_map = Vector{Dict{Int, String}}()
     chain_idx = 1
 
     for (entity_idx, entity_any) in enumerate(sequences)
         entity_any isa AbstractDict || error("Task.sequences[$entity_idx] must be an object")
         entity = _as_string_dict(entity_any)
         chain_ids = String[]
+        atom_map = Dict{Int, String}()
 
         if haskey(entity, "proteinChain")
             pc_any = entity["proteinChain"]
@@ -1169,15 +1170,15 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                     chain_id = _chain_id_from_index(chain_idx)
                     chain_idx += 1
                     push!(chain_ids, chain_id)
-                    lig_atoms, atom_map = _build_ligand_atoms_from_file(
+                    lig_atoms, built_atom_map = _build_ligand_atoms_from_file(
                         file_spec;
                         chain_id = chain_id,
                         json_dir = json_dir,
                     )
                     append!(atoms, lig_atoms)
-                    isempty(inferred_map) && (inferred_map = atom_map)
+                    isempty(inferred_map) && (inferred_map = built_atom_map)
                 end
-                entity_atom_map[entity_idx] = isempty(provided_map) ? inferred_map : provided_map
+                atom_map = isempty(provided_map) ? inferred_map : provided_map
             else
                 provided_map = haskey(lig, "atom_map_to_atom_name") ? _normalize_ligand_atom_map(
                     lig["atom_map_to_atom_name"],
@@ -1188,11 +1189,11 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                     chain_id = _chain_id_from_index(chain_idx)
                     chain_idx += 1
                     push!(chain_ids, chain_id)
-                    lig_atoms, atom_map = _build_ligand_atoms_from_smiles(ligand_str; chain_id = chain_id)
+                    lig_atoms, built_atom_map = _build_ligand_atoms_from_smiles(ligand_str; chain_id = chain_id)
                     append!(atoms, lig_atoms)
-                    isempty(inferred_map) && (inferred_map = atom_map)
+                    isempty(inferred_map) && (inferred_map = built_atom_map)
                 end
-                entity_atom_map[entity_idx] = isempty(provided_map) ? inferred_map : provided_map
+                atom_map = isempty(provided_map) ? inferred_map : provided_map
             end
         elseif haskey(entity, "ion")
             ion_any = entity["ion"]
@@ -1215,7 +1216,8 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
             error("Unsupported sequence entry keys at sequences[$entity_idx]: [$keys_str]")
         end
 
-        entity_chain_ids[entity_idx] = chain_ids
+        push!(entity_chain_ids, chain_ids)
+        push!(entity_atom_map, atom_map)
     end
 
     isempty(atoms) && error("No supported sequence entities found in infer task")
@@ -1572,12 +1574,12 @@ function _bond_field(bond::Dict{String, Any}, side::String, idx::Int, field::Str
 end
 
 function _resolve_bond_chains(
-    entity_chain_ids::Dict{Int, Vector{String}},
+    entity_chain_ids::Vector{Vector{String}},
     entity_id::Int,
     copy_any,
     context::String,
 )
-    haskey(entity_chain_ids, entity_id) || error("$context references unknown entity $entity_id")
+    (1 <= entity_id <= length(entity_chain_ids)) || error("$context references unknown entity $entity_id")
     chains = entity_chain_ids[entity_id]
     if copy_any === nothing
         return chains
@@ -1604,13 +1606,14 @@ function _resolve_bond_atoms(
     return sort(idxs)
 end
 
-function _resolve_bond_atom_name(atom_any, entity_id::Int, entity_atom_map::Dict{Int, Dict{Int, String}}, context::String)
+function _resolve_bond_atom_name(atom_any, entity_id::Int, entity_atom_map::Vector{Dict{Int, String}}, context::String)
     if atom_any isa Integer
         idx = Int(atom_any)
-        haskey(entity_atom_map, entity_id) || error(
+        (1 <= entity_id <= length(entity_atom_map)) || error(
             "$context uses numeric atom index $idx for entity $entity_id, but no atom_map_to_atom_name is available.",
         )
         amap = entity_atom_map[entity_id]
+        !isempty(amap) || error("$context uses numeric atom index $idx for entity $entity_id, but no atom_map_to_atom_name is available.")
         haskey(amap, idx) || error("$context atom index $idx not found in atom_map_to_atom_name for entity $entity_id.")
         return String(amap[idx])
     end
@@ -1618,10 +1621,11 @@ function _resolve_bond_atom_name(atom_any, entity_id::Int, entity_atom_map::Dict
     atom_name = String(strip(String(atom_any)))
     all(isdigit, atom_name) || return atom_name
     idx = parse(Int, atom_name)
-    haskey(entity_atom_map, entity_id) || error(
+    (1 <= entity_id <= length(entity_atom_map)) || error(
         "$context uses numeric atom index $idx for entity $entity_id, but no atom_map_to_atom_name is available.",
     )
     amap = entity_atom_map[entity_id]
+    !isempty(amap) || error("$context uses numeric atom index $idx for entity $entity_id, but no atom_map_to_atom_name is available.")
     haskey(amap, idx) || error("$context atom index $idx not found in atom_map_to_atom_name for entity $entity_id.")
     return String(amap[idx])
 end
@@ -1630,8 +1634,8 @@ function _inject_task_covalent_token_bonds!(
     feat::Dict{String, Any},
     atoms::Vector{AtomRecord},
     task::AbstractDict{<:Any, <:Any},
-    entity_chain_ids::Dict{Int, Vector{String}},
-    entity_atom_map::Dict{Int, Dict{Int, String}} = Dict{Int, Dict{Int, String}}(),
+    entity_chain_ids::Vector{Vector{String}},
+    entity_atom_map::Vector{Dict{Int, String}} = Dict{Int, String}[],
 )
     haskey(task, "covalent_bonds") || return feat
     bonds_any = task["covalent_bonds"]
@@ -1847,7 +1851,7 @@ function _constraint_side_tokens(
     position::Int,
     atom_any,
     entity_id::Int,
-    entity_atom_map::Dict{Int, Dict{Int, String}},
+    entity_atom_map::Vector{Dict{Int, String}},
     context::String,
 )
     if atom_any === nothing
@@ -1876,8 +1880,8 @@ function _inject_constraint_feature_from_json!(
     feat::Dict{String, Any},
     atoms::Vector{AtomRecord},
     task::AbstractDict{<:Any, <:Any},
-    entity_chain_ids::Dict{Int, Vector{String}},
-    entity_atom_map::Dict{Int, Dict{Int, String}},
+    entity_chain_ids::Vector{Vector{String}},
+    entity_atom_map::Vector{Dict{Int, String}},
     context::AbstractString,
 )
     haskey(task, "constraint") || return feat
@@ -2037,8 +2041,8 @@ function _inject_task_constraint_feature!(
     feat::Dict{String, Any},
     task::AbstractDict{<:Any, <:Any},
     atoms::Vector{AtomRecord},
-    entity_chain_ids::Dict{Int, Vector{String}},
-    entity_atom_map::Dict{Int, Dict{Int, String}},
+    entity_chain_ids::Vector{Vector{String}},
+    entity_atom_map::Vector{Dict{Int, String}},
     context::AbstractString,
 )
     if haskey(task, "constraint_feature")
@@ -2114,6 +2118,184 @@ function _protein_chain_sequences(atoms::Vector{AtomRecord})
         sequence = String(take!(seq))
         isempty(sequence) && continue
         push!(out, (chain_id = chain_id, sequence = sequence))
+    end
+    return out
+end
+
+_is_cif_missing(x::AbstractString) = begin
+    s = strip(String(x))
+    isempty(s) || s == "." || s == "?"
+end
+
+function _mmcif_loop_table(path::AbstractString, field_prefix::AbstractString)
+    lines = readlines(path)
+    i = 1
+    while i <= length(lines)
+        if strip(lines[i]) != "loop_"
+            i += 1
+            continue
+        end
+
+        j = i + 1
+        fields = String[]
+        while j <= length(lines)
+            s = strip(lines[j])
+            startswith(s, "_") || break
+            push!(fields, s)
+            j += 1
+        end
+        if isempty(fields) || !all(startswith(f, field_prefix) for f in fields)
+            i = j
+            continue
+        end
+
+        n_fields = length(fields)
+        pool = String[]
+        rows = Vector{Vector{String}}()
+        while j <= length(lines)
+            row = strip(lines[j])
+            if isempty(row)
+                j += 1
+                continue
+            end
+            if row == "#" || row == "loop_" || startswith(row, "_") || startswith(row, "data_")
+                if isempty(pool)
+                    break
+                end
+            else
+                append!(pool, _split_cif_tokens(lines[j]))
+                j += 1
+            end
+
+            while length(pool) >= n_fields
+                push!(rows, pool[1:n_fields])
+                if length(pool) == n_fields
+                    empty!(pool)
+                else
+                    pool = pool[(n_fields + 1):end]
+                end
+            end
+        end
+        return (fields = fields, rows = rows)
+    end
+    return nothing
+end
+
+function _mmcif_field_index(fields::Vector{String}, candidates::Vector{String})
+    for name in candidates
+        idx = findfirst(==(name), fields)
+        idx !== nothing && return idx
+    end
+    return nothing
+end
+
+function _mmcif_label_to_auth_map(path::AbstractString)
+    tab = _mmcif_loop_table(path, "_atom_site.")
+    tab === nothing && return Dict{String, String}()
+    f = tab.fields
+    rows = tab.rows
+    idx_label = _mmcif_field_index(f, ["_atom_site.label_asym_id"])
+    idx_auth = _mmcif_field_index(f, ["_atom_site.auth_asym_id"])
+    idx_label === nothing && return Dict{String, String}()
+    idx_label = idx_label::Int
+    idx_auth = idx_auth === nothing ? nothing : (idx_auth::Int)
+
+    out = Dict{String, String}()
+    for row in rows
+        idx_label <= length(row) || continue
+        label = strip(String(row[idx_label]))
+        _is_cif_missing(label) && continue
+        auth = if idx_auth === nothing || idx_auth > length(row)
+            label
+        else
+            v = strip(String(row[idx_auth]))
+            _is_cif_missing(v) ? label : v
+        end
+        haskey(out, label) || (out[label] = auth)
+    end
+    return out
+end
+
+function _oper_group_count(group_expr::AbstractString)
+    s = strip(String(group_expr))
+    isempty(s) && return 0
+    total = 0
+    for item_raw in split(s, ',')
+        item = strip(item_raw)
+        isempty(item) && continue
+        if occursin('-', item)
+            parts = split(item, '-')
+            if length(parts) == 2
+                a = tryparse(Int, strip(parts[1]))
+                b = tryparse(Int, strip(parts[2]))
+                if a !== nothing && b !== nothing
+                    total += abs(b - a) + 1
+                    continue
+                end
+            end
+        end
+        total += 1
+    end
+    return total
+end
+
+function _operation_expression_count(expr::AbstractString)
+    s = strip(String(expr))
+    isempty(s) && return 1
+    groups = [m.captures[1] for m in eachmatch(r"\(([^()]*)\)", s)]
+    if isempty(groups)
+        return max(_oper_group_count(s), 1)
+    end
+    count = 1
+    for g in groups
+        count *= max(_oper_group_count(g), 1)
+    end
+    return count
+end
+
+function _mmcif_assembly_chain_copy_counts(path::AbstractString, assembly_id::AbstractString)
+    tab = _mmcif_loop_table(path, "_pdbx_struct_assembly_gen.")
+    tab === nothing && return nothing
+
+    f = tab.fields
+    rows = tab.rows
+    idx_assembly = _mmcif_field_index(f, ["_pdbx_struct_assembly_gen.assembly_id"])
+    idx_oper = _mmcif_field_index(f, ["_pdbx_struct_assembly_gen.oper_expression"])
+    idx_asym = _mmcif_field_index(f, ["_pdbx_struct_assembly_gen.asym_id_list"])
+    idx_assembly === nothing && return nothing
+    idx_oper === nothing && return nothing
+    idx_asym === nothing && return nothing
+    idx_assembly = idx_assembly::Int
+    idx_oper = idx_oper::Int
+    idx_asym = idx_asym::Int
+
+    target = strip(String(assembly_id))
+    isempty(target) && return nothing
+    target_all = lowercase(target) == "all"
+    label_to_auth = _mmcif_label_to_auth_map(path)
+    found = false
+    out = Dict{String, Int}()
+    for row in rows
+        idx_assembly <= length(row) || continue
+        assembly = strip(String(row[idx_assembly]))
+        _is_cif_missing(assembly) && continue
+        if !target_all && assembly != target
+            continue
+        end
+        found = true
+        op_expr = idx_oper <= length(row) ? String(row[idx_oper]) : "1"
+        asym_expr = idx_asym <= length(row) ? String(row[idx_asym]) : ""
+        op_count = max(_operation_expression_count(op_expr), 1)
+        for asym_raw in split(asym_expr, ',')
+            asym = strip(asym_raw)
+            _is_cif_missing(asym) && continue
+            auth = get(label_to_auth, asym, asym)
+            _is_cif_missing(auth) && continue
+            out[auth] = get(out, auth, 0) + op_count
+        end
+    end
+    if !target_all && !found
+        error("File has no Assembly ID '$target'")
     end
     return out
 end
@@ -2542,7 +2724,6 @@ function convert_structure_to_infer_json(
     assembly_id::Union{Nothing, String} = nothing,
 )
     lowercase(strip(altloc)) == "first" || error("Only altloc='first' is currently supported.")
-    assembly_id === nothing || error("assembly_id expansion is not yet supported in Julia tojson.")
 
     mkpath(out_dir)
     paths = _collect_input_paths(input; exts = (".pdb", ".cif", ".mmcif"))
@@ -2550,28 +2731,43 @@ function convert_structure_to_infer_json(
 
     for p in paths
         atoms = load_structure_atoms(p)
+        ext = lowercase(splitext(p)[2])
         chains = _protein_chain_sequences(atoms)
         isempty(chains) && error("No protein chains parsed from structure: $p")
+        assembly_copy_counts = if assembly_id !== nothing && (ext == ".cif" || ext == ".mmcif")
+            _mmcif_assembly_chain_copy_counts(p, String(assembly_id))
+        else
+            nothing
+        end
 
         sequences = Any[]
         for chain in chains
+            count = if assembly_copy_counts === nothing
+                1
+            else
+                get(assembly_copy_counts, chain.chain_id, 0)
+            end
+            count > 0 || continue
             push!(
                 sequences,
                 Dict(
                     "proteinChain" => Dict(
                         "sequence" => chain.sequence,
-                        "count" => 1,
+                        "count" => count,
                     ),
                 ),
             )
         end
+        isempty(sequences) && error("No protein chains selected after assembly expansion for structure: $p")
 
-        payload = Any[
-            Dict(
-                "name" => _default_task_name(p),
-                "sequences" => sequences,
-            ),
-        ]
+        task = Dict{String, Any}(
+            "name" => _default_task_name(p),
+            "sequences" => sequences,
+        )
+        if assembly_id !== nothing
+            task["assembly_id"] = String(assembly_id)
+        end
+        payload = Any[task]
 
         out_path = _next_available_json_path(out_dir, _default_task_name(p))
         write_json(out_path, payload)

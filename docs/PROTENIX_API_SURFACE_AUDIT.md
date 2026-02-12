@@ -21,7 +21,7 @@ This document compares upstream `protenix` user-facing commands with the Julia p
 | `predict --use_msa` | Enables MSA use/search path | Uses precomputed `non_pairing.a3m` (and `pairing.a3m` for multi-chain inputs); MSA search not implemented in Julia | same |
 | `tojson --input <pdb|cif|dir>` | Convert structures to infer JSON | Supported for protein-chain extraction | `pxdesign tojson ...` / `PXDesign.convert_structure_to_infer_json(...)` |
 | `tojson --altloc` | Altloc handling | `first` only | same |
-| `tojson --assembly_id` | Bioassembly expansion | Not supported yet | same (errors explicitly) |
+| `tojson --assembly_id` | Bioassembly expansion | Supported for mmCIF input (`id` or `all`) | same |
 | `msa --input <json>` | Search/update MSA in JSON | Search not implemented; precomputed MSA attachment supported | `pxdesign msa ...` / `PXDesign.add_precomputed_msa_to_json(...)` |
 | `msa --input <fasta>` | Run MSA search by FASTA | Not implemented yet | explicit error |
 
@@ -57,15 +57,17 @@ Recognized and runnable in Julia when `esm_token_embedding` is provided (automat
   - name-based atom references
   - numeric ligand atom indices via `atom_map_to_atom_name`
 
-Current remaining deltas in this infer path:
+Constraint-path status in this infer path:
 
-- `constraint` conditioning is partially wired:
+- `constraint` conditioning is implemented with parity checks:
   - `constraint.contact` and `constraint.pocket` are ingested into `constraint_feature`
   - pair `z` receives additive constraint embeddings when constraint embedder modules are enabled
   - `constraint.structure` is accepted and currently treated as a no-op for JSON inference (matching current Python v0.5 `generate_from_json` behavior)
   - substructure embedder supports `linear`/`mlp`/`transformer` architectures with state-load mapping
 - real constraint checkpoint conversion/load coverage is validated (`4109/4109` tensors parity raw vs safetensors).
-- pending: full end-to-end numeric parity against Python reference dumps for constraint-conditioned forwards.
+- full end-to-end numeric parity for constraint-conditioned forwards is now covered via:
+  - `scripts/dump_python_protenix_base_constraint_trunk_denoise_parity.py`
+  - `scripts/compare_protenix_base_constraint_trunk_denoise_parity.jl`
 - `SMILES` ligand handling is Julia-native and currently not RDKit-equivalent in conformer generation/chemistry normalization.
 
 Template note (v0.5 parity): upstream Protenix v0.5 keeps `TemplateEmbedder` disabled (`forward` returns zero). Julia mirrors this behavior; template features are not an active signal path for these checkpoints.

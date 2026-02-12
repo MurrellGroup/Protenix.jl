@@ -150,9 +150,9 @@ end
 
 function (m::SubstructureTransformerLayer)(x::AbstractArray{<:Real,3})
     x0 = _as_f32_array(x)
-    a = x0 .+ m.self_attn(m.norm1(x0))
-    b = m.linear2(max.(m.linear1(m.norm2(a)), 0f0))
-    return a .+ b
+    a = m.norm1(x0 .+ m.self_attn(x0))
+    b = m.norm2(a .+ m.linear2(max.(m.linear1(a), 0f0)))
+    return b
 end
 
 struct SubstructureTransformerEmbedder <: AbstractSubstructureEmbedder
@@ -189,13 +189,27 @@ function (m::SubstructureTransformerEmbedder)(x::AbstractArray{<:Real})
 
     lead_dims = n > 3 ? Tuple(size(x)[1:(n - 3)]) : ()
     batch = n > 3 ? prod(lead_dims) : 1
-    h = reshape(_as_f32_array(x), batch, n_tok1 * n_tok2, in_dim)
-    h = m.input_proj(h)
+    x4 = reshape(_as_f32_array(x), batch, n_tok1, n_tok2, in_dim)
+    x4 = m.input_proj(x4)
+    h = Array{Float32}(undef, batch, n_tok1 * n_tok2, size(x4, 4))
+    @inbounds for b in 1:batch, i in 1:n_tok1, j in 1:n_tok2
+        seq_idx = (i - 1) * n_tok2 + j
+        @views h[b, seq_idx, :] .= x4[b, i, j, :]
+    end
+
     for layer in m.layers
         h = layer(h)
     end
     y = m.output_proj(h)
-    return reshape(y, (lead_dims..., n_tok1, n_tok2, size(y, 3)))
+    y4 = Array{Float32}(undef, batch, n_tok1, n_tok2, size(y, 3))
+    @inbounds for b in 1:batch, i in 1:n_tok1, j in 1:n_tok2
+        seq_idx = (i - 1) * n_tok2 + j
+        @views y4[b, i, j, :] .= y[b, seq_idx, :]
+    end
+    if isempty(lead_dims)
+        return reshape(y4, n_tok1, n_tok2, size(y4, 4))
+    end
+    return reshape(y4, (lead_dims..., n_tok1, n_tok2, size(y4, 4)))
 end
 
 _substructure_channels(m::SubstructureLinearEmbedder) = size(m.proj.weight, 2)
@@ -212,11 +226,11 @@ function _constraint_get(constraint_feature, key::String)
     if constraint_feature isa AbstractDict
         haskey(constraint_feature, key) || return nothing
         return constraint_feature[key]
-    elseif constraint_feature isa NamedTuple
+    elseif constraint_feature isa NamedTuple || hasproperty(constraint_feature, Symbol(key))
         hasproperty(constraint_feature, Symbol(key)) || return nothing
         return getproperty(constraint_feature, Symbol(key))
     end
-    error("constraint_feature must be a Dict/NamedTuple")
+    error("constraint_feature must expose fields by key (Dict/NamedTuple/struct).")
 end
 
 function _substructure_from_index(sub_raw::AbstractMatrix{<:Integer}, n_classes::Int)

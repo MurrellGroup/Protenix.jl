@@ -117,6 +117,57 @@ include("layer_regression.jl")
         @test seqs[1]["proteinChain"]["sequence"] == "AG"
         @test seqs[1]["proteinChain"]["count"] == 1
 
+        mmcif_path = joinpath(d, "tiny_assembly.cif")
+        write(
+            mmcif_path,
+            """
+data_tiny
+#
+loop_
+_atom_site.group_PDB
+_atom_site.id
+_atom_site.type_symbol
+_atom_site.label_atom_id
+_atom_site.label_comp_id
+_atom_site.label_asym_id
+_atom_site.auth_asym_id
+_atom_site.label_seq_id
+_atom_site.auth_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+_atom_site.pdbx_PDB_model_num
+ATOM 1 N N ALA A A 1 1 0.0 0.0 0.0 1
+ATOM 2 C CA ALA A A 1 1 1.0 0.0 0.0 1
+ATOM 3 C C ALA A A 1 1 2.0 0.0 0.0 1
+ATOM 4 O O ALA A A 1 1 3.0 0.0 0.0 1
+ATOM 5 N N GLY B B 1 1 0.0 1.0 0.0 1
+ATOM 6 C CA GLY B B 1 1 1.0 1.0 0.0 1
+ATOM 7 C C GLY B B 1 1 2.0 1.0 0.0 1
+ATOM 8 O O GLY B B 1 1 3.0 1.0 0.0 1
+#
+loop_
+_pdbx_struct_assembly_gen.assembly_id
+_pdbx_struct_assembly_gen.oper_expression
+_pdbx_struct_assembly_gen.asym_id_list
+1 "1,2" A
+2 1 B
+#
+""",
+        )
+        assembly_out_paths = PXDesign.convert_structure_to_infer_json(
+            mmcif_path;
+            out_dir = json_out_dir,
+            assembly_id = "1",
+        )
+        @test length(assembly_out_paths) == 1
+        parsed_assembly = PXDesign.JSONLite.parse_json(read(assembly_out_paths[1], String))
+        @test parsed_assembly[1]["assembly_id"] == "1"
+        seqs_assembly = parsed_assembly[1]["sequences"]
+        @test length(seqs_assembly) == 1
+        @test seqs_assembly[1]["proteinChain"]["sequence"] == "A"
+        @test seqs_assembly[1]["proteinChain"]["count"] == 2
+
         in_json = joinpath(d, "input.json")
         PXDesign.JSONLite.write_json(
             in_json,
@@ -224,7 +275,7 @@ end
         ],
     )
     parsed_smiles = PXDesign.ProtenixAPI._parse_task_entities(smiles_task)
-    @test haskey(parsed_smiles.entity_atom_map, 2)
+    @test length(parsed_smiles.entity_atom_map) >= 2
     @test haskey(parsed_smiles.entity_atom_map[2], 9)
 
     bundle_smiles = PXDesign.Data.build_feature_bundle_from_atoms(parsed_smiles.atoms; task_name = "smiles_bond_smoke")
@@ -260,7 +311,7 @@ END
         )
         parsed_file = PXDesign.ProtenixAPI._parse_task_entities(file_task; json_dir = d)
         @test any(a -> a.mol_type == "ligand", parsed_file.atoms)
-        @test haskey(parsed_file.entity_atom_map, 1)
+        @test length(parsed_file.entity_atom_map) >= 1
         @test !isempty(parsed_file.entity_atom_map[1])
     end
 
@@ -695,6 +746,9 @@ end
     )
     typed = PXDesign.ProtenixMini.as_protenix_features(feat)
     @test typed.constraint_feature !== nothing
+    z_typed = ce(typed.constraint_feature)
+    @test z_typed !== nothing
+    @test size(z_typed) == (n_tok, n_tok, 8)
 end
 
 @testset "Cache zero-byte checkpoint refresh" begin

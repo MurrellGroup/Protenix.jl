@@ -17,6 +17,7 @@ end
 function main()
     mini_ckpt = joinpath(ROOT, "release_data", "checkpoint", "protenix_mini_default_v0.5.0.pt")
     base_ckpt = joinpath(ROOT, "release_data", "checkpoint", "protenix_base_default_v0.5.0.pt")
+    constraint_ckpt = joinpath(ROOT, "release_data", "checkpoint", "protenix_base_constraint_v0.5.0.pt")
     _require_file(PYTHON, "Python interpreter")
     _require_file(mini_ckpt, "Protenix-mini checkpoint")
     _require_file(base_ckpt, "Protenix-base checkpoint")
@@ -25,6 +26,7 @@ function main()
     diag_pair = "/tmp/py_pairformer_diag.json"
     diag_mini_td = "/tmp/py_protenix_mini_trunk_denoise_diag.json"
     diag_base = "/tmp/py_protenix_base_trunk_denoise_diag.json"
+    diag_constraint = "/tmp/py_protenix_base_constraint_trunk_denoise_diag.json"
 
     t0 = now()
 
@@ -34,6 +36,13 @@ function main()
         `$PYTHON $(joinpath(ROOT, "scripts", "dump_python_protenix_mini_trunk_denoise_parity.py")) --checkpoint $mini_ckpt --out $diag_mini_td`,
     )
     _run(`$PYTHON $(joinpath(ROOT, "scripts", "dump_python_protenix_base_trunk_denoise_parity.py")) --checkpoint $base_ckpt --out $diag_base`)
+    if isfile(constraint_ckpt)
+        _run(
+            `$PYTHON $(joinpath(ROOT, "scripts", "dump_python_protenix_base_constraint_trunk_denoise_parity.py")) --checkpoint $constraint_ckpt --out $diag_constraint`,
+        )
+    else
+        println("[skip] constraint checkpoint not found: ", constraint_ckpt)
+    end
 
     julia = Base.julia_cmd()
     depot = get(ENV, "JULIA_DEPOT_PATH", joinpath(ROOT, ".julia_depot") * ":" * joinpath(homedir(), ".julia"))
@@ -58,6 +67,16 @@ function main()
         `$julia --project=$ROOT $(joinpath(ROOT, "scripts", "compare_protenix_base_trunk_denoise_parity.jl"))`;
         env = Dict("PBASE_TRUNK_DENOISE_DIAG" => diag_base, "JULIA_DEPOT_PATH" => depot, "JULIAUP_DEPOT_PATH" => juliaup_depot),
     ))
+    if isfile(constraint_ckpt)
+        _run(Cmd(
+            `$julia --project=$ROOT $(joinpath(ROOT, "scripts", "compare_protenix_base_constraint_trunk_denoise_parity.jl"))`;
+            env = Dict(
+                "PBASE_CONSTRAINT_TRUNK_DENOISE_DIAG" => diag_constraint,
+                "JULIA_DEPOT_PATH" => depot,
+                "JULIAUP_DEPOT_PATH" => juliaup_depot,
+            ),
+        ))
+    end
 
     dt = now() - t0
     println("[done] Protenix parity suite completed in ", dt)

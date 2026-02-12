@@ -3,6 +3,7 @@
 This document records safetensors conversion + coverage checks for:
 
 - `protenix_base_default_v0.5.0`
+- `protenix_base_constraint_v0.5.0`
 
 ## Artifacts
 
@@ -22,6 +23,27 @@ This document records safetensors conversion + coverage checks for:
 Reports:
 
 - `output/protenix_base_audit/protenix_base_default_v0.5.0_parity.toml`
+- `output/protenix_base_audit/protenix_base_constraint_v0.5.0_parity.toml`
+
+## Constraint Variant Forward Parity
+
+Constraint-conditioned trunk/denoise/head parity is covered by Python-vs-Julia dump/compare scripts:
+
+- Python dump:
+  - `scripts/dump_python_protenix_base_constraint_trunk_denoise_parity.py`
+- Julia compare:
+  - `scripts/compare_protenix_base_constraint_trunk_denoise_parity.jl`
+
+Latest saved report:
+
+- `output/protenix_base_audit/protenix_base_constraint_forward_parity.txt`
+
+Observed parity quality from the latest run:
+
+- trunk substructure constraint path: max_abs `1.3828278e-5`
+- trunk z after constraints: max_abs `1.4305115e-5`
+- diffusion `x_denoised`: max_abs `8.285046e-6`
+- confidence heads: max_abs `<= 3.9577484e-5`
 
 ## Component Coverage / Missing Check
 

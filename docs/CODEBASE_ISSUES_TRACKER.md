@@ -48,15 +48,21 @@ Python is allowed only for explicit parity tooling, not runtime inference.
      - `constraint.structure` acceptance as JSON-inference no-op (Python v0.5 parity)
      - substructure embedder architecture/weight-loading support for `linear`/`mlp`/`transformer`
      - real checkpoint conversion/load coverage validated for `protenix_base_constraint_v0.5.0`
-   - remaining:
-     - full forward numeric parity against Python reference dumps for constraint-conditioned paths
+      - full forward numeric parity against Python reference dumps for constraint-conditioned paths
+        (`dump_python_protenix_base_constraint_trunk_denoise_parity.py` vs
+        `compare_protenix_base_constraint_trunk_denoise_parity.jl`)
 
 2. Improve multi-chain MSA merge parity:
    - implemented: heteromer `pairing.a3m` rows merge across chains by row index, then non-pair rows append chain-wise.
    - pending: full OpenFold species/taxonomic pairing parity.
 
 3. Continue Dict-boundary reduction:
-   - replace remaining mutable `Dict{String,Any}` internals with typed records where schema is stable.
+   - recent pass:
+     - `TaskEntityParseResult.entity_chain_ids` migrated from `Dict{Int,Vector{String}}` to `Vector{Vector{String}}`
+     - `TaskEntityParseResult.entity_atom_map` migrated from `Dict{Int,Dict{Int,String}}` to `Vector{Dict{Int,String}}`
+     - covalent/constraint entity lookup helpers now operate on typed vectors
+   - remaining:
+     - replace remaining mutable `Dict{String,Any}` internals with typed records where schema is stable.
 
 4. Keep layer/layout cleanup moving toward Julia-first memory locality:
    - feature-first + batch-last in hot kernels with minimal `permutedims`.

@@ -59,6 +59,9 @@ bin/pxdesign predict --list-models
 # PDB/CIF -> infer JSON conversion
 bin/pxdesign tojson --input /path/to/structure.cif --out_dir ./output
 
+# mmCIF bioassembly expansion (single id or all)
+bin/pxdesign tojson --input /path/to/structure.cif --assembly_id 1 --out_dir ./output
+
 # Attach precomputed MSA path to an infer JSON
 bin/pxdesign msa --input /path/to/input.json \
   --precomputed_msa_dir /path/to/msa_dir --out_dir ./output
@@ -86,13 +89,14 @@ Current Julia `predict` infer-JSON path supports mixed entities:
   - atom-name fields (`left_atom`/`right_atom` or `atom1`/`atom2`)
   - numeric atom indices for ligand entities via `atom_map_to_atom_name`
 
-Still pending in this path:
+Constraint path status in this runtime:
 
-- full `constraint` conditioning parity with Python
-  - implemented now: `constraint.contact`/`constraint.pocket` ingestion + typed constraint embedder plumbing
-  - `constraint.structure` is accepted for JSON inference and currently treated as a no-op to match current Python v0.5 behavior
-  - real checkpoint conversion/load coverage is now validated for `protenix_base_constraint_v0.5.0`
-  - remaining: forward numerical parity checks against Python dumps for constraint-conditioned trunks/denoise
+- `constraint.contact` / `constraint.pocket` ingestion + typed constraint embedder plumbing: implemented
+- `constraint.structure`: accepted for JSON inference and treated as a no-op (matches current Python v0.5 behavior)
+- real checkpoint conversion/load coverage validated for `protenix_base_constraint_v0.5.0`
+- forward numerical parity checks are now wired:
+  - `scripts/dump_python_protenix_base_constraint_trunk_denoise_parity.py`
+  - `scripts/compare_protenix_base_constraint_trunk_denoise_parity.jl`
 
 ### Typed Protenix Features (Julia-first runtime path)
 
