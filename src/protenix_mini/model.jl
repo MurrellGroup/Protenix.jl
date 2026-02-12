@@ -69,6 +69,10 @@ function ProtenixMiniModel(
     input_esm_embedding_dim::Int = 2560,
     constraint_enable::Bool = false,
     constraint_substructure_enable::Bool = false,
+    constraint_substructure_architecture::Symbol = :linear,
+    constraint_substructure_hidden_dim::Int = 128,
+    constraint_substructure_n_layers::Int = 1,
+    constraint_substructure_n_heads::Int = 4,
     rng::AbstractRNG = Random.default_rng(),
 )
     input_embedder = InputFeatureEmbedder(
@@ -89,6 +93,10 @@ function ProtenixMiniModel(
         contact_enable = true,
         contact_atom_enable = true,
         substructure_enable = constraint_substructure_enable,
+        substructure_architecture = constraint_substructure_architecture,
+        substructure_hidden_dim = constraint_substructure_hidden_dim,
+        substructure_n_layers = constraint_substructure_n_layers,
+        substructure_n_heads = constraint_substructure_n_heads,
         initialize_method = :zero,
         rng = rng,
     ) : nothing

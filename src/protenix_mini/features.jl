@@ -82,12 +82,17 @@ end
 function _optional_constraint_features(feat::AbstractDict{<:AbstractString, <:Any})
     haskey(feat, "constraint_feature") || return nothing
     c_any = feat["constraint_feature"]
-    c_any isa AbstractDict || error("constraint_feature must be an object")
+    c_any isa AbstractDict || c_any isa NamedTuple || error("constraint_feature must be an object/NamedTuple")
     c = c_any
-    contact = haskey(c, "contact") ? _to_f_arr3(c["contact"], "constraint_feature.contact") : nothing
-    pocket = haskey(c, "pocket") ? _to_f_arr3(c["pocket"], "constraint_feature.pocket") : nothing
-    contact_atom = haskey(c, "contact_atom") ? _to_f_arr3(c["contact_atom"], "constraint_feature.contact_atom") : nothing
-    substructure = haskey(c, "substructure") ? _to_f_arr3(c["substructure"], "constraint_feature.substructure") : nothing
+    get_cf(k::String) = c isa AbstractDict ? get(c, k, nothing) : (hasproperty(c, Symbol(k)) ? getproperty(c, Symbol(k)) : nothing)
+    contact_raw = get_cf("contact")
+    pocket_raw = get_cf("pocket")
+    contact_atom_raw = get_cf("contact_atom")
+    substructure_raw = get_cf("substructure")
+    contact = contact_raw === nothing ? nothing : _to_f_arr3(contact_raw, "constraint_feature.contact")
+    pocket = pocket_raw === nothing ? nothing : _to_f_arr3(pocket_raw, "constraint_feature.pocket")
+    contact_atom = contact_atom_raw === nothing ? nothing : _to_f_arr3(contact_atom_raw, "constraint_feature.contact_atom")
+    substructure = substructure_raw === nothing ? nothing : _to_f_arr3(substructure_raw, "constraint_feature.substructure")
     return ConstraintFeatures(contact, pocket, contact_atom, substructure)
 end
 

@@ -33,6 +33,11 @@ function build_protenix_base_model(
     sample_noise_scale_lambda::Real = 1.003,
     sample_step_scale_eta::Real = 1.5,
     constraint_enable::Bool = false,
+    constraint_substructure_enable::Bool = false,
+    constraint_substructure_architecture::Symbol = :linear,
+    constraint_substructure_hidden_dim::Int = 128,
+    constraint_substructure_n_layers::Int = 1,
+    constraint_substructure_n_heads::Int = 4,
     rng::AbstractRNG = MersenneTwister(0),
 )
     d = infer_protenix_base_dims(weights)
@@ -58,6 +63,11 @@ function build_protenix_base_model(
         sample_n_step = sample_n_step,
         sample_n_sample = sample_n_sample,
         constraint_enable = constraint_enable,
+        constraint_substructure_enable = constraint_substructure_enable,
+        constraint_substructure_architecture = constraint_substructure_architecture,
+        constraint_substructure_hidden_dim = constraint_substructure_hidden_dim,
+        constraint_substructure_n_layers = constraint_substructure_n_layers,
+        constraint_substructure_n_heads = constraint_substructure_n_heads,
         rng = rng,
     )
 end

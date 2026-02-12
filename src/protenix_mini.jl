@@ -25,7 +25,14 @@ using .Utils:
 
 using .Primitives: Linear, LinearNoBias, LayerNorm, transition, silu
 using .Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
-using .Constraint: ConstraintEmbedder
+using .Constraint:
+    AbstractSubstructureEmbedder,
+    SubstructureLinearEmbedder,
+    SubstructureMLPEmbedder,
+    SubstructureSelfAttention,
+    SubstructureTransformerLayer,
+    SubstructureTransformerEmbedder,
+    ConstraintEmbedder
 using .OpenFoldBlocks: TriangleMultiplication, TriangleAttention, OuterProductMean, PairAttentionNoS
 using .Embedders: InputFeatureEmbedder, RelativePositionEncoding
 using .Pairformer:
@@ -55,7 +62,13 @@ export softmax_lastdim,
 
 export Linear, LinearNoBias, LayerNorm, transition, silu
 export ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
-export ConstraintEmbedder
+export AbstractSubstructureEmbedder,
+    SubstructureLinearEmbedder,
+    SubstructureMLPEmbedder,
+    SubstructureSelfAttention,
+    SubstructureTransformerLayer,
+    SubstructureTransformerEmbedder,
+    ConstraintEmbedder
 export TriangleMultiplication, TriangleAttention, OuterProductMean, PairAttentionNoS
 export InputFeatureEmbedder, RelativePositionEncoding
 export TransitionBlock,

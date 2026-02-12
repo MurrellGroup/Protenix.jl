@@ -1940,15 +1940,20 @@ function _inject_constraint_feature_from_json!(
         end
     end
 
-    if haskey(c, "structure") && !_constraint_is_empty(c["structure"])
-        error("task.constraint.structure is not yet implemented in Julia runtime for $context")
+    if haskey(c, "structure")
+        # Python reference currently accepts `constraint.structure` but leaves this path as
+        # a no-op in JSON inference (`ConstraintFeatureGenerator.generate_from_json`).
+        # Keep runtime parity by accepting and ignoring non-empty payloads here.
+        s_any = c["structure"]
+        (s_any isa AbstractDict || s_any isa AbstractVector) ||
+            error("task.constraint.structure must be an object/array for $context")
     end
 
-    feat["constraint_feature"] = Dict(
-        "contact" => contact,
-        "pocket" => pocket,
-        "contact_atom" => contact_atom,
-        "substructure" => substructure,
+    feat["constraint_feature"] = (
+        contact = contact,
+        pocket = pocket,
+        contact_atom = contact_atom,
+        substructure = substructure,
     )
     return feat
 end
@@ -1976,11 +1981,11 @@ function _inject_task_constraint_feature!(
         ndims(pocket) == 3 && size(pocket, 1) == n_tok && size(pocket, 2) == n_tok || error("task.constraint_feature.pocket must be [N_token,N_token,C]")
         ndims(contact_atom) == 3 && size(contact_atom, 1) == n_tok && size(contact_atom, 2) == n_tok || error("task.constraint_feature.contact_atom must be [N_token,N_token,C]")
         ndims(substructure) == 3 && size(substructure, 1) == n_tok && size(substructure, 2) == n_tok || error("task.constraint_feature.substructure must be [N_token,N_token,C]")
-        feat["constraint_feature"] = Dict(
-            "contact" => contact,
-            "pocket" => pocket,
-            "contact_atom" => contact_atom,
-            "substructure" => substructure,
+        feat["constraint_feature"] = (
+            contact = contact,
+            pocket = pocket,
+            contact_atom = contact_atom,
+            substructure = substructure,
         )
         return feat
     end
@@ -2072,6 +2077,53 @@ function _next_available_json_path(out_dir::AbstractString, stem::AbstractString
     end
 end
 
+function _has_weight_prefix(weights::AbstractDict{<:AbstractString, <:Any}, prefix::String)
+    for key_any in keys(weights)
+        startswith(String(key_any), prefix) && return true
+    end
+    return false
+end
+
+function _infer_substructure_transformer_layers(weights::AbstractDict{<:AbstractString, <:Any}, prefix::String)
+    max_idx = -1
+    p = prefix * ".transformer.layers."
+    for key_any in keys(weights)
+        key = String(key_any)
+        startswith(key, p) || continue
+        parts = split(key, '.')
+        pos = findfirst(==("layers"), parts)
+        if pos !== nothing && pos < length(parts)
+            idx = tryparse(Int, parts[pos + 1])
+            idx !== nothing && (max_idx = max(max_idx, idx))
+        end
+    end
+    return max_idx + 1
+end
+
+function _infer_constraint_substructure_config(weights::AbstractDict{<:AbstractString, <:Any}, prefix::String)
+    sub_prefix = "$prefix.substructure_z_embedder"
+    if _has_weight_prefix(weights, "$sub_prefix.transformer.layers.")
+        hidden_dim = haskey(weights, "$sub_prefix.input_proj.weight") ? size(weights["$sub_prefix.input_proj.weight"], 1) : 128
+        n_layers = max(_infer_substructure_transformer_layers(weights, sub_prefix), 1)
+        return (architecture = :transformer, hidden_dim = hidden_dim, n_layers = n_layers, n_heads = 4)
+    end
+
+    if _has_weight_prefix(weights, "$sub_prefix.network.")
+        hidden_dim = haskey(weights, "$sub_prefix.network.0.weight") ? size(weights["$sub_prefix.network.0.weight"], 1) : 256
+        linear_count = 0
+        for key_any in keys(weights)
+            key = String(key_any)
+            startswith(key, "$sub_prefix.network.") || continue
+            endswith(key, ".weight") || continue
+            linear_count += 1
+        end
+        n_layers = max(linear_count, 1)
+        return (architecture = :mlp, hidden_dim = hidden_dim, n_layers = n_layers, n_heads = 4)
+    end
+
+    return (architecture = :transformer, hidden_dim = 128, n_layers = 1, n_heads = 4)
+end
+
 function _load_model(model_name::AbstractString, weights_path::AbstractString; strict::Bool = true)
     params = recommended_params(model_name)
 
@@ -2082,7 +2134,20 @@ function _load_model(model_name::AbstractString, weights_path::AbstractString; s
         return (model = m, family = :mini)
     elseif params.family == :base
         constraint_enable = occursin("constraint", lowercase(String(model_name)))
-        m = ProtenixBase.build_protenix_base_model(w; constraint_enable = constraint_enable)
+        if constraint_enable
+            sub_cfg = _infer_constraint_substructure_config(w, "constraint_embedder")
+            m = ProtenixBase.build_protenix_base_model(
+                w;
+                constraint_enable = true,
+                constraint_substructure_enable = true,
+                constraint_substructure_architecture = sub_cfg.architecture,
+                constraint_substructure_hidden_dim = sub_cfg.hidden_dim,
+                constraint_substructure_n_layers = sub_cfg.n_layers,
+                constraint_substructure_n_heads = sub_cfg.n_heads,
+            )
+        else
+            m = ProtenixBase.build_protenix_base_model(w; constraint_enable = false)
+        end
         ProtenixBase.load_protenix_base_model!(m, w; strict = strict)
         return (model = m, family = :base)
     end

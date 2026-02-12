@@ -16,7 +16,13 @@ import ..Pairformer:
     TemplateEmbedder,
     NoisyStructureEmbedder
 import ..Heads: DistogramHead, ConfidenceHead
-import ..Constraint: ConstraintEmbedder
+import ..Constraint:
+    ConstraintEmbedder,
+    SubstructureLinearEmbedder,
+    SubstructureMLPEmbedder,
+    SubstructureSelfAttention,
+    SubstructureTransformerLayer,
+    SubstructureTransformerEmbedder
 import ..Model: ProtenixMiniModel
 import ...Model: load_diffusion_module!, infer_model_scaffold_dims
 
@@ -391,6 +397,91 @@ function _load_confidence_head!(
     return conf
 end
 
+function _has_substructure_keys(weights::AbstractDict{<:AbstractString, <:Any}, prefix::String)
+    p = prefix * "."
+    for key_any in keys(weights)
+        startswith(String(key_any), p) && return true
+    end
+    return false
+end
+
+function _load_substructure_embedder!(
+    emb::SubstructureLinearEmbedder,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    prefix::String;
+    strict::Bool = true,
+)
+    has_keys = _has_substructure_keys(weights, prefix)
+    _load_linear_nobias!(emb.proj, weights, "$prefix.weight"; strict = strict && has_keys)
+    return emb
+end
+
+function _load_substructure_embedder!(
+    emb::SubstructureMLPEmbedder,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    prefix::String;
+    strict::Bool = true,
+)
+    has_keys = _has_substructure_keys(weights, prefix)
+    for (i, lin) in enumerate(emb.layers)
+        py_idx = (i - 1) * 3
+        _load_linear_nobias!(lin, weights, "$prefix.network.$py_idx.weight"; strict = strict && has_keys)
+    end
+    return emb
+end
+
+function _load_substructure_self_attn!(
+    sa::SubstructureSelfAttention,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    prefix::String;
+    strict::Bool = true,
+)
+    w = _key(weights, "$prefix.in_proj_weight"; strict = strict)
+    if w !== nothing
+        w isa AbstractMatrix || error("$prefix.in_proj_weight must be matrix")
+        size(sa.in_proj_weight) == size(w) || error("Shape mismatch for $prefix.in_proj_weight")
+        sa.in_proj_weight .= Float32.(w)
+    end
+    b = _key(weights, "$prefix.in_proj_bias"; strict = strict)
+    if b !== nothing
+        b isa AbstractVector || error("$prefix.in_proj_bias must be vector")
+        length(sa.in_proj_bias) == length(b) || error("Shape mismatch for $prefix.in_proj_bias")
+        sa.in_proj_bias .= Float32.(b)
+    end
+    _load_linear!(sa.out_proj, weights, "$prefix.out_proj.weight"; b_key = "$prefix.out_proj.bias", strict = strict)
+    return sa
+end
+
+function _load_substructure_transformer_layer!(
+    layer::SubstructureTransformerLayer,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    prefix::String;
+    strict::Bool = true,
+)
+    _load_substructure_self_attn!(layer.self_attn, weights, "$prefix.self_attn"; strict = strict)
+    _load_linear!(layer.linear1, weights, "$prefix.linear1.weight"; b_key = "$prefix.linear1.bias", strict = strict)
+    _load_linear!(layer.linear2, weights, "$prefix.linear2.weight"; b_key = "$prefix.linear2.bias", strict = strict)
+    _load_layernorm!(layer.norm1, weights, "$prefix.norm1"; strict = strict)
+    _load_layernorm!(layer.norm2, weights, "$prefix.norm2"; strict = strict)
+    return layer
+end
+
+function _load_substructure_embedder!(
+    emb::SubstructureTransformerEmbedder,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    prefix::String;
+    strict::Bool = true,
+)
+    has_keys = _has_substructure_keys(weights, prefix)
+    local_strict = strict && has_keys
+    _load_linear_nobias!(emb.input_proj, weights, "$prefix.input_proj.weight"; strict = local_strict)
+    for (i, layer) in enumerate(emb.layers)
+        _load_substructure_transformer_layer!(layer, weights, "$prefix.transformer.layers.$(i - 1)"; strict = local_strict)
+    end
+    _load_linear_nobias!(emb.output_proj, weights, "$prefix.output_proj.weight"; strict = local_strict)
+    return emb
+end
+
 function _load_constraint_embedder!(
     cemb::ConstraintEmbedder,
     weights::AbstractDict{<:AbstractString, <:Any},
@@ -407,9 +498,7 @@ function _load_constraint_embedder!(
         _load_linear_nobias!(cemb.contact_atom_z_embedder, weights, "$prefix.contact_atom_z_embedder.weight"; strict = strict)
     end
     if cemb.substructure_z_embedder !== nothing
-        # Substructure transformer/MLP variants use different key layouts upstream.
-        # Load direct linear key when available; otherwise keep zero init.
-        _load_linear_nobias!(cemb.substructure_z_embedder, weights, "$prefix.substructure_z_embedder.weight"; strict = false)
+        _load_substructure_embedder!(cemb.substructure_z_embedder, weights, "$prefix.substructure_z_embedder"; strict = strict)
     end
     return cemb
 end

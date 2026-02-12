@@ -279,6 +279,7 @@ END
                 "contact_residues" => Any[Any[2, 1, 1]],
                 "max_distance" => 12.0,
             ),
+            "structure" => Dict("token_indices" => Any[1, 2]),
         ),
     )
     parsed_constraint = PXDesign.ProtenixAPI._parse_task_entities(constraint_task)
@@ -294,7 +295,11 @@ END
         "constraint_smoke",
     )
     @test haskey(feat_constraint, "constraint_feature")
-    @test size(feat_constraint["constraint_feature"]["contact"]) == (size(feat_constraint["restype"], 1), size(feat_constraint["restype"], 1), 2)
+    cf = feat_constraint["constraint_feature"]
+    contact = cf isa NamedTuple ? cf.contact : cf["contact"]
+    substructure = cf isa NamedTuple ? cf.substructure : cf["substructure"]
+    @test size(contact) == (size(feat_constraint["restype"], 1), size(feat_constraint["restype"], 1), 2)
+    @test sum(abs, substructure) == 0f0
 end
 
 @testset "Protenix precomputed MSA ingestion" begin
@@ -578,7 +583,9 @@ end
     ce.pocket_z_embedder !== nothing && (ce.pocket_z_embedder.weight .= 1f0)
     ce.contact_z_embedder !== nothing && (ce.contact_z_embedder.weight .= 0f0)
     ce.contact_atom_z_embedder !== nothing && (ce.contact_atom_z_embedder.weight .= 0f0)
-    ce.substructure_z_embedder !== nothing && (ce.substructure_z_embedder.weight .= 0f0)
+    if ce.substructure_z_embedder isa PXDesign.ProtenixMini.SubstructureLinearEmbedder
+        ce.substructure_z_embedder.proj.weight .= 0f0
+    end
 
     cf = Dict(
         "pocket" => ones(Float32, 3, 3, 1),
@@ -590,6 +597,33 @@ end
     @test z !== nothing
     @test size(z) == (3, 3, 8)
     @test all(z .≈ 1f0)
+
+    ce_mlp = PXDesign.ProtenixMini.ConstraintEmbedder(
+        8;
+        substructure_enable = true,
+        substructure_architecture = :mlp,
+        substructure_hidden_dim = 16,
+        substructure_n_layers = 3,
+        initialize_method = :zero,
+        rng = MersenneTwister(2),
+    )
+    z_mlp = ce_mlp(Dict("substructure" => zeros(Float32, 3, 3, 4)))
+    @test z_mlp !== nothing
+    @test size(z_mlp) == (3, 3, 8)
+
+    ce_tr = PXDesign.ProtenixMini.ConstraintEmbedder(
+        8;
+        substructure_enable = true,
+        substructure_architecture = :transformer,
+        substructure_hidden_dim = 8,
+        substructure_n_layers = 1,
+        substructure_n_heads = 4,
+        initialize_method = :zero,
+        rng = MersenneTwister(3),
+    )
+    z_tr = ce_tr(Dict("substructure" => zeros(Float32, 3, 3, 4)))
+    @test z_tr !== nothing
+    @test size(z_tr) == (3, 3, 8)
 
     bundle = PXDesign.ProtenixMini.build_sequence_feature_bundle("ACDE"; task_name = "constraint_typed")
     feat = copy(bundle["input_feature_dict"])

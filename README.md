@@ -89,8 +89,9 @@ Current Julia `predict` infer-JSON path supports mixed entities:
 Still pending in this path:
 
 - full `constraint` conditioning parity with Python
-  - implemented now: `constraint.contact` and `constraint.pocket` ingestion into `constraint_feature`
-  - pending: full Protenix training/inference parity for `constraint.structure` and exact substructure embedder behavior
+  - implemented now: `constraint.contact`/`constraint.pocket` ingestion + typed constraint embedder plumbing
+  - `constraint.structure` is accepted for JSON inference and currently treated as a no-op to match current Python v0.5 behavior
+  - pending: validation against real constraint checkpoints for full substructure numerical parity
 
 ### Typed Protenix Features (Julia-first runtime path)
 
