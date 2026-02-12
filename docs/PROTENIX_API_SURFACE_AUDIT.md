@@ -60,6 +60,7 @@ Recognized and runnable in Julia when `esm_token_embedding` is provided (automat
 Current remaining deltas in this infer path:
 
 - `constraint` conditioning is not yet wired into runtime model inputs.
+- Julia now fails loudly when `task.constraint` is present, instead of silently ignoring it.
 - `SMILES` ligand handling is Julia-native and currently not RDKit-equivalent in conformer generation/chemistry normalization.
 
 Template note (v0.5 parity): upstream Protenix v0.5 keeps `TemplateEmbedder` disabled (`forward` returns zero). Julia mirrors this behavior; template features are not an active signal path for these checkpoints.

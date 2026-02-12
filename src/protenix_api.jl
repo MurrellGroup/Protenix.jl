@@ -1728,6 +1728,21 @@ function _inject_task_esm_token_embedding!(
     return feat
 end
 
+function _ensure_constraint_not_silent!(
+    task::AbstractDict{<:Any, <:Any},
+    params::NamedTuple,
+    context::AbstractString,
+)
+    haskey(task, "constraint") || return nothing
+    c = task["constraint"]
+    is_empty = (c isa AbstractDict && isempty(c)) || (c isa AbstractVector && isempty(c))
+    is_empty && return nothing
+    error(
+        "task.constraint was provided for $context, but constraint feature injection is not yet implemented in Julia runtime. " *
+        "Use Python reference for constraint-conditioned runs until this path is ported.",
+    )
+end
+
 function _validate_required_model_inputs!(
     params::NamedTuple,
     feat::AbstractDict{<:AbstractString, <:Any},
@@ -1967,6 +1982,11 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                 )
                 _inject_task_template_features!(bundle["input_feature_dict"], task)
                 _inject_task_esm_token_embedding!(bundle["input_feature_dict"], task)
+                _ensure_constraint_not_silent!(
+                    task,
+                    params,
+                    "task '$task_name' in $(basename(json_path))",
+                )
                 _validate_required_model_inputs!(
                     params,
                     bundle["input_feature_dict"],

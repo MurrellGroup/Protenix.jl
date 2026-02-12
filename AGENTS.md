@@ -71,3 +71,5 @@ Use the pinned Julia binary directly in sandbox to avoid launcher network checks
 1. Work autonomously: keep coding through implementation and validation loops without pausing for status updates.
 2. Stop only when the task is fully done end-to-end or 100% blocked by a concrete external dependency.
 3. If blocked, report the blocker with the minimum context needed and immediately propose the exact unblock step.
+4. Assume the user may be asleep; do not return control early because that causes no progress.
+5. Continue execution until complete or truly blocked, so deliverables are ready by morning.

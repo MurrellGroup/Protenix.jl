@@ -89,6 +89,7 @@ Current Julia `predict` infer-JSON path supports mixed entities:
 Still pending in this path:
 
 - full `constraint` conditioning parity with Python
+- runtime currently raises an explicit error if `task.constraint` is provided (to avoid silent no-op behavior)
 
 ### Typed Protenix Features (Julia-first runtime path)
 

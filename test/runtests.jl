@@ -263,6 +263,12 @@ END
         @test haskey(parsed_file.entity_atom_map, 1)
         @test !isempty(parsed_file.entity_atom_map[1])
     end
+
+    @test_throws ErrorException PXDesign.ProtenixAPI._ensure_constraint_not_silent!(
+        Dict{String, Any}("constraint" => Dict("contact" => Any[Dict("foo" => 1)])),
+        PXDesign.recommended_params("protenix_base_constraint_v0.5.0"),
+        "constraint_smoke",
+    )
 end
 
 @testset "Protenix precomputed MSA ingestion" begin
