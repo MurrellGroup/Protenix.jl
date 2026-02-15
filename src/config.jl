@@ -213,13 +213,13 @@ function _default_config_spec(project_root::AbstractString)
         ccd_rdkit_file,
         joinpath(data_root, "clusters-by-entity-40.txt"),
     )
-    infer_setting = InferSettingConfig(10)
+    infer_setting = InferSettingConfig(1)
     eta_schedule = EtaScheduleConfig("piecewise_65", 1.0, 2.5)
     sample_diffusion = SampleDiffusionConfig(1.0, 0.01, 1.003, 400, 100, eta_schedule)
     noise_scheduler = InferenceNoiseSchedulerConfig(160.0, 4e-4, 7.0, 16.0)
     model_scaffold = ModelScaffoldConfig(
-        false,
-        false,
+        true,
+        true,
         true,
         128,
         16,
@@ -246,7 +246,7 @@ function _default_config_spec(project_root::AbstractString)
         false,
         "",
         "",
-        false,
+        true,
         true,
         false,
         false,

@@ -1,6 +1,6 @@
 # Developer Handoff Notes
 
-Last updated: 2026-02-12
+Last updated: 2026-02-15
 
 This document is the practical handoff for the mixed Python + Julia PXDesign workspace at:
 
@@ -366,6 +366,62 @@ These consume diagnostics at:
 
 Use only when those artifacts are intentionally generated.
 
+### 9.5 Input tensor parity caveats (`compare_python_input_tensors.jl`)
+
+The script `/Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl/scripts/compare_python_input_tensors.jl` now has two important controls:
+
+- `--allow-ref-pos-rigid-equiv true|false` (default `true`)
+- `--strict-keyset true|false` (default `true`)
+
+Why this exists:
+
+- In Protenix Python inference, `ref_pos` can be SE(3)-transformed per residue in the JSON featurizer path, so direct coordinate values can differ even when residue-internal geometry is equivalent.
+- With `--allow-ref-pos-rigid-equiv true`, `ref_pos` is accepted when per-`ref_space_uid` pairwise distances match within tolerance, and reported as `float_rigid_equivalent`.
+- This avoids false negatives from augmentation-style coordinate transforms while still catching geometry drift.
+
+Recommended local parity invocation (value parity focus):
+
+```bash
+cd /Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl
+JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
+JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
+scripts/compare_python_input_tensors.jl \
+  --input-json output/input_tensor_parity_full/input_single_chain.json \
+  --python-dump-dir output/input_tensor_parity_full/python_dumps \
+  --model-name protenix_base_default_v0.5.0 \
+  --seed 101 \
+  --use-default-params true \
+  --use-msa false \
+  --ref-pos-augment false \
+  --allow-ref-pos-rigid-equiv true \
+  --strict-keyset false
+```
+
+For ESM models in network-restricted environments, inject Python-dumped ESM embeddings to avoid HF fetches:
+
+- add `--inject-python-esm true`
+
+### 9.6 Official Python parity runner (guarded)
+
+Use:
+
+- `/Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl/scripts/run_input_tensor_parity_official.sh`
+
+What it enforces:
+
+- Uses official `.external/Protenix` runner pipeline.
+- Fails fast if `.external/Protenix` has any code changes other than:
+  - `M runner/inference.py` (tensor-dump instrumentation only)
+  - `?? esm_embeddings/` (cache artifacts)
+
+What it produces:
+
+- Python dumps: `/Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl/output/input_tensor_parity_official/python_dumps`
+- Raw reports: `/Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl/output/input_tensor_parity_official/reports_raw`
+- Rigid-equivalent reports: `/Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl/output/input_tensor_parity_official/reports_rigid`
+- Logs: `/Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl/output/input_tensor_parity_official/logs`
+
 ## 10) Weight Conversion Utilities
 
 ### 10.1 Export `.pt` to raw bundle
@@ -517,4 +573,3 @@ JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
 ```
 
 4. Run one small end-to-end fold/design and geometry-check the CIF.
-

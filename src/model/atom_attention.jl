@@ -13,6 +13,11 @@ _feat(input::AbstractDict{<:AbstractString, <:Any}, key::String) = input[key]
 _feat(input::NamedTuple, key::String) = getproperty(input, Symbol(key))
 
 function _matrix_f32(x, name::String)
+    if name == "ref_atom_name_chars" && x isa AbstractArray && ndims(x) == 3 && size(x, 2) == 4 && size(x, 3) == 64
+        # Match Python flatten order: (pos-1)*64 + bucket.
+        xp = permutedims(Float32.(x), (1, 3, 2))
+        return reshape(xp, size(x, 1), 256)
+    end
     x isa AbstractMatrix || error("$name must be a matrix, got $(typeof(x))")
     return Float32.(x)
 end

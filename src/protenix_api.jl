@@ -162,7 +162,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         5,
         true,
-        true,
+        false,
     ),
     "protenix_mini_esm_v0.5.0" => ProtenixModelSpec(
         "protenix_mini_esm_v0.5.0",

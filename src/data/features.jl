@@ -4,6 +4,7 @@ using Random
 
 import ...Schema: InputTask, MSAChainOptions
 import ...Schema: GenerationSpec
+import ...JSONLite: parse_json
 import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELEMS, STD_RESIDUES_PROTENIX
 import ..Tokenizer: AtomRecord, Token, TokenArray, centre_atom_indices, tokenize_atoms
 import ..Design: canonical_resname_for_atom, restype_onehot_encoded
@@ -16,6 +17,7 @@ const CCDRefEntry = NamedTuple{
     Tuple{Dict{String, Int}, Matrix{Float32}, Vector{Float32}, Vector{Int}},
 }
 const _CCD_REF_CACHE = Dict{String, CCDRefEntry}()
+const _CCD_STD_REF_CACHE_LOADED = Ref(false)
 
 function _ordered_restype_names()
     max_id = maximum(values(STD_RESIDUES_WITH_GAP))
@@ -230,25 +232,31 @@ function _residue_runs(atoms::Vector{AtomRecord})
     return runs
 end
 
-function _random_transform_points(points::Matrix{Float32}, rng::AbstractRNG)
+function _random_transform_points(points::Matrix{Float32}, rng::AbstractRNG; apply_augmentation::Bool = true)
     transformed = copy(points)
     if size(transformed, 1) > 0
         centre = vec(sum(transformed; dims = 1) ./ size(transformed, 1))
         transformed .-= reshape(centre, 1, :)
     end
+    apply_augmentation || return transformed
     translation = 2f0 .* rand(rng, Float32, 3) .- 1f0
     rot = _random_rotation_matrix(rng)
     transformed .= (transformed .+ reshape(translation, 1, :)) * transpose(rot)
     return transformed
 end
 
-function _ref_pos_with_augmentation(base_ref_pos::Matrix{Float32}, ref_space_uid::Vector{Int}, rng::AbstractRNG)
+function _ref_pos_with_augmentation(
+    base_ref_pos::Matrix{Float32},
+    ref_space_uid::Vector{Int},
+    rng::AbstractRNG;
+    apply_augmentation::Bool = true,
+)
     size(base_ref_pos, 1) == length(ref_space_uid) || error("ref_pos/ref_space_uid length mismatch.")
     out = copy(base_ref_pos)
     for uid in sort(unique(ref_space_uid))
         idx = findall(==(uid), ref_space_uid)
         isempty(idx) && continue
-        out[idx, :] = _random_transform_points(out[idx, :], rng)
+        out[idx, :] = _random_transform_points(out[idx, :], rng; apply_augmentation = apply_augmentation)
     end
     return out
 end
@@ -319,6 +327,63 @@ function _default_ccd_components_path()
     p2 = joinpath(project_root, "release_data", "ccd_cache", "components.cif")
     isfile(p2) && return p2
     return ""
+end
+
+function _default_ccd_std_ref_path()
+    if haskey(ENV, "PROTENIX_DATA_ROOT_DIR")
+        root = ENV["PROTENIX_DATA_ROOT_DIR"]
+        p = joinpath(root, "ref_coords_std.json")
+        isfile(p) && return p
+    end
+    project_root = normpath(joinpath(@__DIR__, "..", ".."))
+    p = joinpath(project_root, "release_data", "ccd_cache", "ref_coords_std.json")
+    isfile(p) && return p
+    return ""
+end
+
+function _load_ccd_std_ref_cache!()
+    _CCD_STD_REF_CACHE_LOADED[] && return
+    _CCD_STD_REF_CACHE_LOADED[] = true
+    p = _default_ccd_std_ref_path()
+    isempty(p) && return
+
+    raw = parse_json(read(p, String))
+    raw isa AbstractDict || return
+    for (code_any, entry_any) in raw
+        code = uppercase(String(code_any))
+        entry_any isa AbstractDict || continue
+        entry = entry_any
+        haskey(entry, "atom_map") || continue
+        haskey(entry, "coord") || continue
+        haskey(entry, "charge") || continue
+        haskey(entry, "mask") || continue
+
+        atom_map_raw = entry["atom_map"]
+        atom_map_raw isa AbstractDict || continue
+        atom_map = Dict{String, Int}(String(k) => Int(v) + 1 for (k, v) in atom_map_raw)
+
+        coord_raw = entry["coord"]
+        coord_raw isa AbstractArray || continue
+        n_atom = length(coord_raw)
+        coords = zeros(Float32, n_atom, 3)
+        for i in 1:n_atom
+            row = coord_raw[i]
+            row isa AbstractArray || continue
+            length(row) == 3 || continue
+            coords[i, 1] = Float32(row[1])
+            coords[i, 2] = Float32(row[2])
+            coords[i, 3] = Float32(row[3])
+        end
+
+        charge = Float32.(entry["charge"])
+        mask = Int.(entry["mask"])
+        _CCD_REF_CACHE[code] = (
+            atom_map = atom_map,
+            coords = coords,
+            charge = charge,
+            mask = mask,
+        )
+    end
 end
 
 function _finalize_ccd_entry(rows::Vector{Vector{String}}, idx_atom::Int, idx_charge::Int, idx_x::Int, idx_y::Int, idx_z::Int, idx_xi::Int, idx_yi::Int, idx_zi::Int)
@@ -446,6 +511,7 @@ function _scan_ccd_for_codes!(needed_codes::Set{String}, ccd_path::AbstractStrin
 end
 
 function _ensure_ccd_ref_entries!(codes::Set{String})
+    _load_ccd_std_ref_cache!()
     missing = Set{String}()
     for c in codes
         haskey(_CCD_REF_CACHE, c) || push!(missing, c)
@@ -456,7 +522,12 @@ function _ensure_ccd_ref_entries!(codes::Set{String})
     _scan_ccd_for_codes!(missing, ccd_path)
 end
 
-function _ccd_reference_features(atoms::Vector{AtomRecord}, ref_space_uid::Vector{Int}, rng::AbstractRNG)
+function _ccd_reference_features(
+    atoms::Vector{AtomRecord},
+    ref_space_uid::Vector{Int},
+    rng::AbstractRNG;
+    ref_pos_augment::Bool = true,
+)
     n = length(atoms)
     base_pos = hcat([a.x for a in atoms], [a.y for a in atoms], [a.z for a in atoms])
     ref_charge = zeros(Float32, n)
@@ -476,7 +547,7 @@ function _ccd_reference_features(atoms::Vector{AtomRecord}, ref_space_uid::Vecto
         @inbounds ref_mask[i] = entry.mask[atom_idx]
     end
 
-    ref_pos = _ref_pos_with_augmentation(base_pos, ref_space_uid, rng)
+    ref_pos = _ref_pos_with_augmentation(base_pos, ref_space_uid, rng; apply_augmentation = ref_pos_augment)
     return ref_pos, ref_charge, ref_mask
 end
 
@@ -495,9 +566,15 @@ function _basic_atom_features(
     atom_to_token_idx::Vector{Int},
     n_token::Int,
     rng::AbstractRNG,
+    ref_pos_augment::Bool,
 )
     n = length(atoms)
-    ref_pos, ref_charge, ref_mask = _ccd_reference_features(atoms, atom_to_token_idx, rng)
+    ref_pos, ref_charge, ref_mask = _ccd_reference_features(
+        atoms,
+        atom_to_token_idx,
+        rng;
+        ref_pos_augment = ref_pos_augment,
+    )
     return Dict(
         "is_protein" => [a.mol_type == "protein" for a in atoms],
         "is_ligand" => [a.mol_type == "ligand" for a in atoms],
@@ -528,7 +605,7 @@ end
 
 function _ref_atom_name_chars_onehot(atoms::Vector{AtomRecord})
     n = length(atoms)
-    out = zeros(Float32, n, 256) # 4 chars × 64-way one-hot
+    out = zeros(Float32, n, 4, 64)
     for (i, a) in enumerate(atoms)
         padded = rpad(uppercase(a.atom_name), 4)
         for pos in 1:4
@@ -536,7 +613,7 @@ function _ref_atom_name_chars_onehot(atoms::Vector{AtomRecord})
             code = Int(c) - 32
             (0 <= code <= 63) || error("Atom name character out of supported ASCII range [32,95]: '$c' in '$(a.atom_name)'")
             bucket = code + 1
-            out[i, (pos - 1) * 64 + bucket] = 1f0
+            out[i, pos, bucket] = 1f0
         end
     end
     return out
@@ -547,6 +624,7 @@ function _build_feature_dict(
     tokens::TokenArray,
     task::InputTask,
     rng::AbstractRNG,
+    ref_pos_augment::Bool,
 )
     n_token = length(tokens)
     n_atom = length(atoms)
@@ -582,7 +660,7 @@ function _build_feature_dict(
     for (i, tok) in enumerate(tokens)
         ok, frame = _frame_for_token(tok, centre_atoms[i])
         has_frame[i] = ok
-        frame_atom_index[i, :] = frame
+        frame_atom_index[i, :] = ifelse.(frame .>= 0, frame .- 1, frame)
     end
 
     feat = Dict{String, Any}(
@@ -599,9 +677,9 @@ function _build_feature_dict(
         "deletion_value" => deletion_value,
         "deletion_mean" => deletion_mean,
         "profile" => profile,
-        "template_restype" => fill(STD_RESIDUES_WITH_GAP["-"], 1, n_token),
-        "template_all_atom_mask" => zeros(Float32, 1, n_token, 37),
-        "template_all_atom_positions" => zeros(Float32, 1, n_token, 37, 3),
+        "template_restype" => fill(STD_RESIDUES_WITH_GAP["-"], 4, n_token),
+        "template_all_atom_mask" => zeros(Float32, 4, n_token, 37),
+        "template_all_atom_positions" => zeros(Float32, 4, n_token, 37, 3),
         "has_frame" => has_frame,
         "frame_atom_index" => frame_atom_index,
         "design_token_mask" => design_token_mask,
@@ -615,12 +693,16 @@ function _build_feature_dict(
         "ref_space_uid" => copy(atom_to_token_idx),
     )
 
-    merge!(feat, _basic_atom_features(atoms, tokens, atom_to_token_idx, n_token, rng))
+    merge!(feat, _basic_atom_features(atoms, tokens, atom_to_token_idx, n_token, rng, ref_pos_augment))
     dims = Dict("N_token" => n_token, "N_atom" => n_atom, "N_msa" => n_msa)
     return feat, dims
 end
 
-function build_basic_feature_bundle(task::InputTask; rng::AbstractRNG = Random.default_rng())
+function build_basic_feature_bundle(
+    task::InputTask;
+    rng::AbstractRNG = Random.default_rng(),
+    ref_pos_augment::Bool = true,
+)
     isempty(task.generation) && error("Task $(task.name) has empty generation.")
     binder_gen = task.generation[end]
     binder_gen.type == "protein" || error("Only protein generation is supported right now.")
@@ -641,7 +723,7 @@ function build_basic_feature_bundle(task::InputTask; rng::AbstractRNG = Random.d
 
     atoms = vcat(target_atoms, binder_atoms)
     tokens = tokenize_atoms(atoms)
-    feat, dims = _build_feature_dict(atoms, tokens, task, rng)
+    feat, dims = _build_feature_dict(atoms, tokens, task, rng, ref_pos_augment)
 
     return Dict(
         "task_name" => task.name,
@@ -657,6 +739,7 @@ function build_feature_bundle_from_atoms(
     task_name::AbstractString = "custom",
     hotspots::Dict{String, Vector{Int}} = Dict{String, Vector{Int}}(),
     rng::AbstractRNG = Random.default_rng(),
+    ref_pos_augment::Bool = true,
 )
     tokens = tokenize_atoms(atoms)
     task = InputTask(
@@ -668,7 +751,7 @@ function build_feature_bundle_from_atoms(
         Dict{String, MSAChainOptions}(),
         GenerationSpec[],
     )
-    feat, dims = _build_feature_dict(atoms, tokens, task, rng)
+    feat, dims = _build_feature_dict(atoms, tokens, task, rng, ref_pos_augment)
     return Dict(
         "task_name" => String(task_name),
         "atoms" => atoms,

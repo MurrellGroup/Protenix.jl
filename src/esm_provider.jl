@@ -107,6 +107,10 @@ function hf_hub_download_file(
     cache::Bool = true,
     local_files_only::Bool = false,
 )
+    # Allow explicit local-file override for offline/debug parity workflows.
+    if isfile(String(filename))
+        return abspath(String(filename))
+    end
     ESMFold = _esmfold_module()
     return Base.invokelatest(
         ESMFold.hf_hub_download,

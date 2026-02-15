@@ -3,6 +3,7 @@
 using PXDesign
 using Random
 using Statistics
+using LinearAlgebra
 
 const PA = PXDesign.ProtenixAPI
 
@@ -32,6 +33,9 @@ function _parse_args(argv::Vector{String})
         "use-msa" => "auto",
         "force-needs-esm" => "auto",
         "inject-python-esm" => "false",
+        "ref-pos-augment" => "true",
+        "allow-ref-pos-rigid-equiv" => "false",
+        "strict-keyset" => "true",
         "atol" => "1e-5",
         "rtol" => "1e-5",
     )
@@ -58,6 +62,9 @@ function _parse_args(argv::Vector{String})
         use_msa = String(opts["use-msa"]),
         force_needs_esm = String(opts["force-needs-esm"]),
         inject_python_esm = _parse_bool(opts["inject-python-esm"]),
+        ref_pos_augment = _parse_bool(opts["ref-pos-augment"]),
+        allow_ref_pos_rigid_equiv = _parse_bool(opts["allow-ref-pos-rigid-equiv"]),
+        strict_keyset = _parse_bool(opts["strict-keyset"]),
         atol = Float32(parse(Float64, opts["atol"])),
         rtol = Float32(parse(Float64, opts["rtol"])),
         report = get(opts, "report", ""),
@@ -197,6 +204,7 @@ function _build_julia_feature_dict(
     use_msa_override::Union{Nothing, Bool},
     force_needs_esm::Union{Nothing, Bool},
     python_esm_embedding::Union{Nothing, AbstractArray{<:Real}},
+    ref_pos_augment::Bool,
 )
     params = PA.recommended_params(
         model_name;
@@ -218,7 +226,12 @@ function _build_julia_feature_dict(
     chain_sequences = PA._protein_chain_sequence_map(parsed_task.protein_specs)
 
     rng = MersenneTwister(seed)
-    bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = task_name, rng = rng)
+    bundle = PXDesign.Data.build_feature_bundle_from_atoms(
+        atoms;
+        task_name = task_name,
+        rng = rng,
+        ref_pos_augment = ref_pos_augment,
+    )
     token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
     feat = bundle["input_feature_dict"]
     PA._normalize_protenix_feature_dict!(feat)
@@ -308,6 +321,39 @@ function _key_report_int(key::AbstractString, py_arr, jl_arr)
     )
 end
 
+function _ref_pos_pairwise_report(py_ref_pos, jl_ref_pos, ref_space_uid, atol::Float32, rtol::Float32)
+    p = Float32.(py_ref_pos)
+    q = Float32.(jl_ref_pos)
+    uid = Int.(ref_space_uid)
+    size(p) == size(q) || return (pass = false, pairwise_max_abs = Inf32, pairwise_max_rel = Inf32)
+    length(uid) == size(p, 1) || return (pass = false, pairwise_max_abs = Inf32, pairwise_max_rel = Inf32)
+
+    max_abs = 0f0
+    max_rel = 0f0
+    for u in sort!(unique(uid))
+        idx = findall(==(u), uid)
+        n = length(idx)
+        n <= 1 && continue
+        for i in 1:(n - 1)
+            ii = idx[i]
+            pi = @view p[ii, :]
+            qi = @view q[ii, :]
+            for j in (i + 1):n
+                jj = idx[j]
+                dp = norm(pi .- @view(p[jj, :]))
+                dq = norm(qi .- @view(q[jj, :]))
+                d = abs(dp - dq)
+                denom = max(abs(dp), 1f-6)
+                r = d / denom
+                max_abs = max(max_abs, d)
+                max_rel = max(max_rel, r)
+            end
+        end
+    end
+    pass = max_abs <= (atol + rtol)
+    return (pass = pass, pairwise_max_abs = max_abs, pairwise_max_rel = max_rel)
+end
+
 function main(argv::Vector{String})
     isempty(argv) && (_usage(); return 1)
     opts = _parse_args(argv)
@@ -337,6 +383,7 @@ function main(argv::Vector{String})
         use_msa_override = use_msa_override,
         force_needs_esm = force_needs_esm,
         python_esm_embedding = py_esm_emb,
+        ref_pos_augment = opts.ref_pos_augment,
     )
 
     py_keys = Set(String.(collect(keys(py_feat_raw))))
@@ -346,6 +393,13 @@ function main(argv::Vector{String})
     only_jl = sort!(collect(setdiff(jl_keys, py_keys)))
 
     reports = NamedTuple[]
+    py_ref_uid = nothing
+    if haskey(py_feat_raw, "ref_space_uid")
+        py_ref_uid_entry = py_feat_raw["ref_space_uid"]
+        if py_ref_uid_entry isa AbstractDict
+            py_ref_uid, _ = _py_entry_to_array(py_ref_uid_entry)
+        end
+    end
     for k in shared
         py_entry_any = py_feat_raw[k]
         py_entry_any isa AbstractDict || continue
@@ -366,13 +420,41 @@ function main(argv::Vector{String})
         end
 
         if occursin("float", py_dtype) || occursin("half", py_dtype) || occursin("double", py_dtype) || occursin("bfloat", py_dtype)
-            push!(reports, _key_report_float(k, py_arr, jl_arr, opts.atol, opts.rtol))
+            rep = _key_report_float(k, py_arr, jl_arr, opts.atol, opts.rtol)
+            if opts.allow_ref_pos_rigid_equiv && k == "ref_pos" && !rep.pass && py_ref_uid !== nothing && haskey(jl_feat, "ref_space_uid")
+                rigid = _ref_pos_pairwise_report(py_arr, jl_arr, py_ref_uid, opts.atol, opts.rtol)
+                if rigid.pass
+                    rep = (
+                        key = rep.key,
+                        kind = "float_rigid_equivalent",
+                        pass = true,
+                        max_abs = rep.max_abs,
+                        mean_abs = rep.mean_abs,
+                        max_rel = rep.max_rel,
+                        pairwise_max_abs = rigid.pairwise_max_abs,
+                        pairwise_max_rel = rigid.pairwise_max_rel,
+                    )
+                else
+                    rep = (
+                        key = rep.key,
+                        kind = rep.kind,
+                        pass = rep.pass,
+                        max_abs = rep.max_abs,
+                        mean_abs = rep.mean_abs,
+                        max_rel = rep.max_rel,
+                        pairwise_max_abs = rigid.pairwise_max_abs,
+                        pairwise_max_rel = rigid.pairwise_max_rel,
+                    )
+                end
+            end
+            push!(reports, rep)
         else
             push!(reports, _key_report_int(k, py_arr, jl_arr))
         end
     end
 
     failed = filter(r -> !Bool(getfield(r, :pass)), reports)
+    rigid_equiv = filter(r -> (:kind in fieldnames(typeof(r))) && (String(getfield(r, :kind)) == "float_rigid_equivalent"), reports)
 
     println("model_name=$(opts.model_name)")
     println("python_dump=$(py_dump_path)")
@@ -380,6 +462,8 @@ function main(argv::Vector{String})
     println("keys_only_python=$(length(only_py))")
     println("keys_only_julia=$(length(only_jl))")
     println("keys_failed=$(length(failed))")
+    println("keys_rigid_equivalent=$(length(rigid_equiv))")
+    println("allow_ref_pos_rigid_equiv=$(opts.allow_ref_pos_rigid_equiv)")
     if !isempty(only_py)
         n = min(length(only_py), 20)
         println("only_python_keys=$(join(first(only_py, n), ','))")
@@ -396,12 +480,19 @@ function main(argv::Vector{String})
                 println(
                     "  $(r.key): kind=$(r.kind) max_abs=$(r.max_abs) max_rel=$(r.max_rel) mean_abs=$(r.mean_abs)",
                 )
+                if :pairwise_max_abs in fieldnames(typeof(r))
+                    println("    pairwise_max_abs=$(r.pairwise_max_abs) pairwise_max_rel=$(r.pairwise_max_rel)")
+                end
             elseif :mismatch in fieldnames(typeof(r))
                 println("  $(r.key): kind=$(r.kind) mismatch=$(r.mismatch)/$(r.total)")
             else
                 println("  $(r.key): kind=$(r.kind) py_shape=$(r.py_shape) jl_shape=$(r.jl_shape)")
             end
         end
+    end
+    if !isempty(rigid_equiv)
+        n = min(length(rigid_equiv), 20)
+        println("rigid_equivalent_keys=$(join([r.key for r in first(rigid_equiv, n)], ','))")
     end
 
     if !isempty(opts.report)
@@ -417,7 +508,8 @@ function main(argv::Vector{String})
         PXDesign.JSONLite.write_json(opts.report, rep)
     end
 
-    return isempty(failed) && isempty(only_py) && isempty(only_jl) ? 0 : 2
+    keyset_ok = !opts.strict_keyset || (isempty(only_py) && isempty(only_jl))
+    return isempty(failed) && keyset_ok ? 0 : 2
 end
 
 exit(main(ARGS))

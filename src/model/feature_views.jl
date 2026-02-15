@@ -18,6 +18,11 @@ function _to_f32_vector(x, key::AbstractString)
 end
 
 function _to_f32_matrix(x, key::AbstractString)
+    if key == "ref_atom_name_chars" && x isa AbstractArray && ndims(x) == 3 && size(x, 2) == 4 && size(x, 3) == 64
+        # Match Python flatten order: (pos-1)*64 + bucket.
+        xp = permutedims(Float32.(x), (1, 3, 2))
+        return reshape(xp, size(x, 1), 256)
+    end
     x isa AbstractMatrix || error("Feature '$key' must be a matrix.")
     return Float32.(x)
 end

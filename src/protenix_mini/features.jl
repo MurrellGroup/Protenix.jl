@@ -48,6 +48,15 @@ _as_f_vec(x, name::String) = x isa AbstractVector ? Float32.(x) : error("$name m
 _as_b_vec(x, name::String) = x isa AbstractVector ? Bool.(x) : error("$name must be a vector")
 _as_i_mat(x, name::String) = x isa AbstractMatrix ? Int.(x) : error("$name must be a matrix")
 _as_f_mat(x, name::String) = x isa AbstractMatrix ? Float32.(x) : error("$name must be a matrix")
+function _as_ref_atom_name_chars_mat(x)
+    if x isa AbstractArray && ndims(x) == 3 && size(x, 2) == 4 && size(x, 3) == 64
+        # Python flattens [N,4,64] with channel index (pos-1)*64 + bucket.
+        # In Julia, preserve that order explicitly before reshape.
+        xp = permutedims(Float32.(x), (1, 3, 2))
+        return reshape(xp, size(x, 1), 256)
+    end
+    return _as_f_mat(x, "ref_atom_name_chars")
+end
 
 function _optional_f_mat(feat::AbstractDict{<:AbstractString, <:Any}, key::String)
     return haskey(feat, key) ? _as_f_mat(feat[key], key) : nothing
@@ -146,7 +155,7 @@ function as_protenix_features(feat::AbstractDict{<:AbstractString, <:Any})
         _as_f_vec(feat["ref_charge"], "ref_charge"),
         _as_f_vec(feat["ref_mask"], "ref_mask"),
         _as_f_mat(feat["ref_element"], "ref_element"),
-        _as_f_mat(feat["ref_atom_name_chars"], "ref_atom_name_chars"),
+        _as_ref_atom_name_chars_mat(feat["ref_atom_name_chars"]),
         _as_i_vec(feat["ref_space_uid"], "ref_space_uid"),
         _as_i_vec(feat["atom_to_token_idx"], "atom_to_token_idx"),
         _as_i_vec(feat["atom_to_tokatom_idx"], "atom_to_tokatom_idx"),
