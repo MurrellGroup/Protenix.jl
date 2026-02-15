@@ -2,7 +2,7 @@ module Features
 
 using Random
 
-import ...Schema: InputTask
+import ...Schema: InputTask, MSAChainOptions
 import ...Schema: GenerationSpec
 import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELEMS, STD_RESIDUES_PROTENIX
 import ..Tokenizer: AtomRecord, Token, TokenArray, centre_atom_indices, tokenize_atoms
@@ -665,7 +665,7 @@ function build_feature_bundle_from_atoms(
         String[],
         Dict{String, String}(),
         hotspots,
-        Dict{String, Dict{String, Any}}(),
+        Dict{String, MSAChainOptions}(),
         GenerationSpec[],
     )
     feat, dims = _build_feature_dict(atoms, tokens, task, rng)

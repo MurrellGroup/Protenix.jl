@@ -132,7 +132,7 @@ Success gate:
 Blocker notes:
 - Checkpoint index is now available in-repo at `docs/checkpoint_index.json` and fully covered by prefix-map assertions.
 - Tensor-value load/mapping into Julia model structs is implemented for infer-only model trees (`732/732` keys covered in strict mode with current raw bundle).
-- Remaining gap is collecting committed Python reference snapshot tensors for numeric forward parity CI gating.
+- Remaining gap is expanding local Python reference snapshot coverage for numeric forward parity confidence.
 
 ### Phase 5: Output Serialization and UX
 
@@ -163,8 +163,8 @@ Reuse criteria:
 ## Immediate Next Coding Slices
 
 1. Expand feature parity from reduced set toward Python-complete `Featurizer` coverage (CCD/ref-space/permutation features).
-2. Generate deterministic Python reference snapshot bundles for representative tasks.
-3. Wire snapshot comparisons into CI using `tensor_parity_report` / `scripts/compare_parity_raw.jl`.
+2. Generate deterministic Python reference snapshot bundles for representative tasks (local parity validation).
+3. Wire snapshot comparisons into local validation workflows using `tensor_parity_report` / `scripts/compare_parity_raw.jl`.
 4. Port confidence heads/output channels and add parity assertions for those tensors.
 
 ## Known Deltas (Tracked)
@@ -172,4 +172,4 @@ Reuse criteria:
 1. YAML parsing is now native Julia via `YAML.jl`; parity checks against `python3 + PyYAML` are kept in tests when available.
 2. Non-dry-run infer uses the typed diffusion forward path with condition atoms clamped to template coordinates to preserve scaffold constraints.
 3. Feature generation consumes structure-derived atoms from mmCIF/PDB, but does not yet include full Python `Featurizer`/CCD feature coverage.
-4. Numeric parity harness is implemented, but reference snapshot artifacts are not yet checked into this repo.
+4. Numeric parity harness is implemented; parity artifacts are validated locally and are intentionally not checked into this repo.

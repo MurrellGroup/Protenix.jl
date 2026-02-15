@@ -76,7 +76,7 @@ Not yet implemented:
 
 - full 3) Python-complete feature set (CCD/ref/permutation/mask suite)
 - confidence/ranking heads beyond infer-only diffusion coordinates
-- committed Python numeric snapshot artifacts for CI parity checks
+- committed Python numeric snapshot artifacts for CI parity checks (local parity validation is used instead)
 
 ## Hard Blockers In Current Environment
 

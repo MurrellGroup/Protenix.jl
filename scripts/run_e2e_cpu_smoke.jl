@@ -61,9 +61,6 @@ end
 
 function main()
     project_root = normpath(joinpath(@__DIR__, ".."))
-    raw_dir = joinpath(project_root, "weights_raw")
-    isdir(raw_dir) || error("weights_raw directory is required for strict e2e smoke: $raw_dir")
-    isfile(joinpath(raw_dir, "manifest.json")) || error("weights_raw/manifest.json missing: $raw_dir")
 
     mktempdir() do d
         target_cif = joinpath(d, "target.cif")
@@ -80,7 +77,6 @@ function main()
         cfg["sample_diffusion"]["N_step"] = 2
         cfg["sample_diffusion"]["eta_schedule"] = Dict("type" => "const", "min" => 1.0, "max" => 1.0)
         cfg["infer_setting"]["sample_diffusion_chunk_size"] = 1
-        cfg["raw_weights_dir"] = raw_dir
         cfg["strict_weight_load"] = true
         cfg["model_scaffold"]["enabled"] = true
         cfg["model_scaffold"]["auto_dims_from_weights"] = true

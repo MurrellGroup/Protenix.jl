@@ -68,11 +68,11 @@ This file maps Python reference model blocks to checkpoint key namespaces and Ju
 - Missing for parity:
   - trunked local atom attention is implemented with loop-based kernels; optimized fused kernels from Python are not yet ported
   - memory-optimized chunk/checkpoint behavior from Python is not yet mirrored
-  - reference numeric parity snapshots from Python are not yet committed in-repo
+  - parity snapshots are validated locally; committed snapshot artifacts are intentionally out of scope
 
 ## Implementation Order
 
 1. Done: Replace dense atom-pair attention with local trunked attention parity (`rearrange_*` + local masks).
 2. Done: Add strict key-coverage assertion: every checkpoint key consumed or allowlisted.
 3. Done (tooling): Add reference-vs-Julia numeric parity harness for representative inference snapshots (`tensor_parity_report`, `scripts/compare_parity_raw.jl`).
-4. Pending (data): generate and check in representative Python snapshot bundles for CI parity gating.
+4. Ongoing (local validation): generate representative Python snapshot bundles locally and compare with Julia parity harness.

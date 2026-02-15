@@ -4,6 +4,19 @@ using LinearAlgebra
 using Statistics
 using PXDesign
 
+const ROOT = normpath(joinpath(@__DIR__, ".."))
+
+function _default_weights_dir(dirname::AbstractString)
+    candidates = (
+        joinpath(ROOT, "release_data", dirname),
+        joinpath(ROOT, dirname),
+    )
+    for path in candidates
+        isdir(path) && return path
+    end
+    return first(candidates)
+end
+
 function _nested_dims(x)
     dims = Int[]
     cur = x
@@ -104,7 +117,12 @@ function main()
     resolved_py = _to_array_f32(raw["resolved"])
     n_cycle = Int(round(Float64(raw["n_cycle"])))
 
-    w = PXDesign.Model.load_safetensors_weights(joinpath(pwd(), "weights_safetensors_protenix_base_default_v0.5.0"))
+    weights_dir = get(
+        ENV,
+        "PBASE_WEIGHTS_DIR",
+        _default_weights_dir("weights_safetensors_protenix_base_default_v0.5.0"),
+    )
+    w = PXDesign.Model.load_safetensors_weights(weights_dir)
     m = PXDesign.ProtenixBase.build_protenix_base_model(w)
     PXDesign.ProtenixBase.load_protenix_base_model!(m, w; strict = true)
 

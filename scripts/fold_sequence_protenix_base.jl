@@ -21,10 +21,9 @@ function main(args::Vector{String})
     n_sample = length(args) >= 4 ? parse(Int, args[4]) : 1
     seed = length(args) >= 5 ? parse(Int, args[5]) : 0
 
-    weights_dir = joinpath(pwd(), "weights_safetensors_protenix_base_default_v0.5.0")
-    isdir(weights_dir) || error("Missing weights directory: $weights_dir")
-
-    weights = PXDesign.Model.load_safetensors_weights(weights_dir)
+    model_name = "protenix_base_default_v0.5.0"
+    weights_ref = PXDesign.default_weights_path(model_name)
+    weights = PXDesign.Model.load_safetensors_weights(weights_ref)
     model = PXDesign.ProtenixBase.build_protenix_base_model(weights)
     PXDesign.ProtenixBase.load_protenix_base_model!(model, weights; strict = true)
 

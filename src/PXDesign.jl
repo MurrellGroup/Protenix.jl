@@ -7,6 +7,8 @@ include("cache.jl")
 include("inputs.jl")
 include("schema.jl")
 include("data.jl")
+include("esm_provider.jl")
+include("weights_hub.jl")
 include("model.jl")
 include("protenix_mini.jl")
 include("protenix_base.jl")
@@ -20,6 +22,7 @@ using .Infer: run_infer
 using .Schema: parse_tasks
 using .Ranges: parse_ranges, format_ranges
 using .Model: InferenceNoiseScheduler, sample_diffusion
+using .WeightsHub: resolve_weight_source, download_model_weights
 using .ProtenixMini: ProtenixMiniModel, run_inference, build_sequence_atoms, build_sequence_feature_bundle, fold_sequence
 using .ProtenixBase:
     ProtenixBaseModel,
@@ -61,5 +64,6 @@ export ProtenixModelSpec,
     predict_sequence,
     convert_structure_to_infer_json,
     add_precomputed_msa_to_json
+export resolve_weight_source, download_model_weights
 
 end # module PXDesign

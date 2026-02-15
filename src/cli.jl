@@ -54,7 +54,7 @@ function _usage(io::IO = stdout)
     println(io, "  --sequence <AA_SEQUENCE>")
     println(io, "  --out_dir <dir>                 (default: ./output)")
     println(io, "  --model_name <name>             (default: protenix_base_default_v0.5.0)")
-    println(io, "  --weights_path <dir>")
+    println(io, "  --weights_path <dir>            (disabled; HuggingFace-only weight loading)")
     println(io, "  --seeds <i,j,k>                 (default: 101)")
     println(io, "  --cycle <int>")
     println(io, "  --step <int>")
@@ -95,84 +95,121 @@ function _require_value(args::Vector{String}, i::Int, opt::String)
     return args[i + 1], i + 1
 end
 
+struct InferCLIOptions
+    input::String
+    dump_dir::String
+    model_name::String
+    load_checkpoint_dir::Union{Nothing, String}
+    dtype::String
+    N_sample::Int
+    N_step::Int
+    eta_type::String
+    eta_min::Float64
+    eta_max::Float64
+    seed::Vector{Int}
+    use_fast_ln::Bool
+    use_deepspeed_evo_attention::Bool
+    include_protenix_checkpoints::Bool
+    dry_run::Bool
+    set::Vector{String}
+end
+
 function _parse_infer_args(args::Vector{String})
-    parsed = Dict{String, Any}(
-        "model_name" => "pxdesign_v0.1.0",
-        "dtype" => "bf16",
-        "N_sample" => 5,
-        "N_step" => 400,
-        "eta_type" => "const",
-        "eta_min" => 2.5,
-        "eta_max" => 2.5,
-        "seed" => Int[],
-        "use_fast_ln" => true,
-        "use_deepspeed_evo_attention" => false,
-        "include_protenix_checkpoints" => false,
-        "dry_run" => false,
-        "set" => String[],
-    )
+    input = nothing
+    dump_dir = nothing
+    model_name = "pxdesign_v0.1.0"
+    load_checkpoint_dir = nothing
+    dtype = "bf16"
+    N_sample = 5
+    N_step = 400
+    eta_type = "const"
+    eta_min = 2.5
+    eta_max = 2.5
+    seed = Int[]
+    use_fast_ln = true
+    use_deepspeed_evo_attention = false
+    include_protenix_checkpoints = false
+    dry_run = false
+    set = String[]
 
     i = 1
     while i <= length(args)
         arg = args[i]
         if arg == "-i" || arg == "--input"
             value, i = _require_value(args, i, arg)
-            parsed["input"] = value
+            input = value
         elseif arg == "-o" || arg == "--dump_dir"
             value, i = _require_value(args, i, arg)
-            parsed["dump_dir"] = value
+            dump_dir = value
         elseif arg == "--model_name"
             value, i = _require_value(args, i, arg)
-            parsed["model_name"] = value
+            model_name = value
         elseif arg == "--load_checkpoint_dir"
             value, i = _require_value(args, i, arg)
-            parsed["load_checkpoint_dir"] = value
+            load_checkpoint_dir = value
         elseif arg == "--dtype"
             value, i = _require_value(args, i, arg)
-            parsed["dtype"] = value
+            dtype = value
         elseif arg == "--N_sample"
             value, i = _require_value(args, i, arg)
-            parsed["N_sample"] = parse(Int, value)
+            N_sample = parse(Int, value)
         elseif arg == "--N_step"
             value, i = _require_value(args, i, arg)
-            parsed["N_step"] = parse(Int, value)
+            N_step = parse(Int, value)
         elseif arg == "--eta_type"
             value, i = _require_value(args, i, arg)
-            parsed["eta_type"] = value
+            eta_type = value
         elseif arg == "--eta_min"
             value, i = _require_value(args, i, arg)
-            parsed["eta_min"] = parse(Float64, value)
+            eta_min = parse(Float64, value)
         elseif arg == "--eta_max"
             value, i = _require_value(args, i, arg)
-            parsed["eta_max"] = parse(Float64, value)
+            eta_max = parse(Float64, value)
         elseif arg == "--seed"
             value, i = _require_value(args, i, arg)
-            push!(parsed["seed"], parse(Int, value))
+            push!(seed, parse(Int, value))
         elseif arg == "--use_fast_ln"
             value, i = _require_value(args, i, arg)
-            parsed["use_fast_ln"] = _parse_bool(value)
+            use_fast_ln = _parse_bool(value)
         elseif arg == "--use_deepspeed_evo_attention"
             value, i = _require_value(args, i, arg)
-            parsed["use_deepspeed_evo_attention"] = _parse_bool(value)
+            use_deepspeed_evo_attention = _parse_bool(value)
         elseif arg == "--include_protenix_checkpoints"
-            parsed["include_protenix_checkpoints"] = true
+            include_protenix_checkpoints = true
         elseif arg == "--dry_run"
-            parsed["dry_run"] = true
+            dry_run = true
         elseif arg == "--set"
             value, i = _require_value(args, i, arg)
-            push!(parsed["set"], value)
+            push!(set, value)
         elseif arg == "--help" || arg == "-h"
             _usage()
-            return Dict{String, Any}("__help__" => true)
+            return nothing
         else
             error("Unknown option: $arg")
         end
         i += 1
     end
 
-    !haskey(parsed, "input") && error("Missing required option: --input/-i")
-    !haskey(parsed, "dump_dir") && error("Missing required option: --dump_dir/-o")
-    return parsed
+    input === nothing && error("Missing required option: --input/-i")
+    dump_dir === nothing && error("Missing required option: --dump_dir/-o")
+    return InferCLIOptions(
+        String(input),
+        String(dump_dir),
+        String(model_name),
+        load_checkpoint_dir === nothing ? nothing : String(load_checkpoint_dir),
+        String(dtype),
+        N_sample,
+        N_step,
+        String(eta_type),
+        eta_min,
+        eta_max,
+        Int.(seed),
+        use_fast_ln,
+        use_deepspeed_evo_attention,
+        include_protenix_checkpoints,
+        dry_run,
+        String.(set),
+    )
 end
 
 function _apply_set_overrides!(cfg::Dict{String, Any}, pairs::Vector{String})
@@ -185,66 +222,72 @@ function _apply_set_overrides!(cfg::Dict{String, Any}, pairs::Vector{String})
     end
 end
 
-function _run_infer(parsed::Dict{String, Any})
+function _run_infer(parsed::InferCLIOptions)
     project_root = abspath(joinpath(@__DIR__, ".."))
     cfg = default_config(; project_root = project_root)
 
-    set_by_key!(cfg, "input_json_path", parsed["input"])
-    set_by_key!(cfg, "dump_dir", parsed["dump_dir"])
-    set_by_key!(cfg, "model_name", parsed["model_name"])
-    set_by_key!(cfg, "dtype", parsed["dtype"])
-    set_by_key!(cfg, "N_sample", parsed["N_sample"])
-    set_by_key!(cfg, "N_step", parsed["N_step"])
-    set_by_key!(cfg, "eta_type", parsed["eta_type"])
-    set_by_key!(cfg, "eta_min", parsed["eta_min"])
-    set_by_key!(cfg, "eta_max", parsed["eta_max"])
-    set_by_key!(cfg, "use_fast_ln", parsed["use_fast_ln"])
-    set_by_key!(cfg, "use_deepspeed_evo_attention", parsed["use_deepspeed_evo_attention"])
-    set_by_key!(cfg, "include_protenix_checkpoints", parsed["include_protenix_checkpoints"])
+    set_by_key!(cfg, "input_json_path", parsed.input)
+    set_by_key!(cfg, "dump_dir", parsed.dump_dir)
+    set_by_key!(cfg, "model_name", parsed.model_name)
+    set_by_key!(cfg, "dtype", parsed.dtype)
+    set_by_key!(cfg, "N_sample", parsed.N_sample)
+    set_by_key!(cfg, "N_step", parsed.N_step)
+    set_by_key!(cfg, "eta_type", parsed.eta_type)
+    set_by_key!(cfg, "eta_min", parsed.eta_min)
+    set_by_key!(cfg, "eta_max", parsed.eta_max)
+    set_by_key!(cfg, "use_fast_ln", parsed.use_fast_ln)
+    set_by_key!(cfg, "use_deepspeed_evo_attention", parsed.use_deepspeed_evo_attention)
+    set_by_key!(cfg, "include_protenix_checkpoints", parsed.include_protenix_checkpoints)
 
-    if haskey(parsed, "load_checkpoint_dir")
-        set_by_key!(cfg, "load_checkpoint_dir", parsed["load_checkpoint_dir"])
+    if parsed.load_checkpoint_dir !== nothing
+        set_by_key!(cfg, "load_checkpoint_dir", parsed.load_checkpoint_dir::String)
     end
 
-    if !isempty(parsed["seed"])
-        cfg["seeds"] = Int.(parsed["seed"])
+    if !isempty(parsed.seed)
+        cfg["seeds"] = parsed.seed
     end
 
-    _apply_set_overrides!(cfg, parsed["set"])
-    return run_infer(cfg; dry_run = parsed["dry_run"])
+    _apply_set_overrides!(cfg, parsed.set)
+    return run_infer(cfg; dry_run = parsed.dry_run)
+end
+
+struct ParityCLIOptions
+    reference_raw_dir::String
+    actual_raw_dir::String
+    atol::Float32
+    rtol::Float32
+    top::Int
 end
 
 function _parse_parity_args(args::Vector{String})
     length(args) >= 2 || error("Usage: pxdesign parity-check <reference_raw_dir> <actual_raw_dir> [--atol <float>] [--rtol <float>] [--top <int>]")
-    parsed = Dict{String, Any}(
-        "reference_raw_dir" => args[1],
-        "actual_raw_dir" => args[2],
-        "atol" => 1f-5,
-        "rtol" => 1f-4,
-        "top" => 20,
-    )
+    reference_raw_dir = args[1]
+    actual_raw_dir = args[2]
+    atol = 1f-5
+    rtol = 1f-4
+    top = 20
     i = 3
     while i <= length(args)
         arg = args[i]
         if arg == "--atol"
             value, i = _require_value(args, i, arg)
-            parsed["atol"] = Float32(parse(Float64, value))
+            atol = Float32(parse(Float64, value))
         elseif arg == "--rtol"
             value, i = _require_value(args, i, arg)
-            parsed["rtol"] = Float32(parse(Float64, value))
+            rtol = Float32(parse(Float64, value))
         elseif arg == "--top"
             value, i = _require_value(args, i, arg)
-            parsed["top"] = parse(Int, value)
+            top = parse(Int, value)
         elseif arg == "--help" || arg == "-h"
             _usage()
-            return Dict{String, Any}("__help__" => true)
+            return nothing
         else
             error("Unknown option: $arg")
         end
         i += 1
     end
-    parsed["top"] > 0 || error("--top must be positive.")
-    return parsed
+    top > 0 || error("--top must be positive.")
+    return ParityCLIOptions(String(reference_raw_dir), String(actual_raw_dir), atol, rtol, top)
 end
 
 function _parse_seeds_csv(raw::AbstractString)
@@ -259,87 +302,128 @@ function _parse_seeds_csv(raw::AbstractString)
     return out
 end
 
+struct PredictCLIOptions
+    input::Union{Nothing, String}
+    sequence::Union{Nothing, String}
+    out_dir::String
+    model_name::String
+    weights_path::String
+    seeds::Vector{Int}
+    use_default_params::Bool
+    cycle::Union{Nothing, Int}
+    step::Union{Nothing, Int}
+    sample::Union{Nothing, Int}
+    use_msa::Union{Nothing, Bool}
+    strict::Bool
+    task_name::String
+    chain_id::String
+    list_models::Bool
+    esm_token_embedding_json::Union{Nothing, String}
+end
+
 function _parse_predict_args(args::Vector{String})
-    parsed = Dict{String, Any}(
-        "out_dir" => "./output",
-        "model_name" => "protenix_base_default_v0.5.0",
-        "weights_path" => "",
-        "seeds" => [101],
-        "use_default_params" => true,
-        "strict" => true,
-        "task_name" => "protenix_sequence",
-        "chain_id" => "A0",
-        "list_models" => false,
-    )
+    input = nothing
+    sequence = nothing
+    out_dir = "./output"
+    model_name = "protenix_base_default_v0.5.0"
+    weights_path = ""
+    seeds = [101]
+    use_default_params = true
+    cycle = nothing
+    step = nothing
+    sample = nothing
+    use_msa = nothing
+    strict = true
+    task_name = "protenix_sequence"
+    chain_id = "A0"
+    list_models = false
+    esm_token_embedding_json = nothing
 
     i = 1
     while i <= length(args)
         arg = args[i]
         if arg == "--input"
             value, i = _require_value(args, i, arg)
-            parsed["input"] = value
+            input = value
         elseif arg == "--sequence"
             value, i = _require_value(args, i, arg)
-            parsed["sequence"] = value
+            sequence = value
         elseif arg == "--out_dir"
             value, i = _require_value(args, i, arg)
-            parsed["out_dir"] = value
+            out_dir = value
         elseif arg == "--model_name"
             value, i = _require_value(args, i, arg)
-            parsed["model_name"] = value
+            model_name = value
         elseif arg == "--weights_path"
             value, i = _require_value(args, i, arg)
-            parsed["weights_path"] = value
+            weights_path = value
         elseif arg == "--seeds"
             value, i = _require_value(args, i, arg)
-            parsed["seeds"] = _parse_seeds_csv(value)
+            seeds = _parse_seeds_csv(value)
         elseif arg == "--cycle"
             value, i = _require_value(args, i, arg)
-            parsed["cycle"] = parse(Int, value)
+            cycle = parse(Int, value)
         elseif arg == "--step"
             value, i = _require_value(args, i, arg)
-            parsed["step"] = parse(Int, value)
+            step = parse(Int, value)
         elseif arg == "--sample"
             value, i = _require_value(args, i, arg)
-            parsed["sample"] = parse(Int, value)
+            sample = parse(Int, value)
         elseif arg == "--use_msa"
             value, i = _require_value(args, i, arg)
-            parsed["use_msa"] = _parse_bool(value)
+            use_msa = _parse_bool(value)
         elseif arg == "--use_default_params"
             value, i = _require_value(args, i, arg)
-            parsed["use_default_params"] = _parse_bool(value)
+            use_default_params = _parse_bool(value)
         elseif arg == "--strict"
             value, i = _require_value(args, i, arg)
-            parsed["strict"] = _parse_bool(value)
+            strict = _parse_bool(value)
         elseif arg == "--list-models"
-            parsed["list_models"] = true
+            list_models = true
         elseif arg == "--task_name"
             value, i = _require_value(args, i, arg)
-            parsed["task_name"] = value
+            task_name = value
         elseif arg == "--chain_id"
             value, i = _require_value(args, i, arg)
-            parsed["chain_id"] = value
+            chain_id = value
         elseif arg == "--esm_token_embedding_json"
             value, i = _require_value(args, i, arg)
-            parsed["esm_token_embedding_json"] = value
+            esm_token_embedding_json = value
         elseif arg == "--help" || arg == "-h"
             _usage()
-            return Dict{String, Any}("__help__" => true)
+            return nothing
         else
             error("Unknown option: $arg")
         end
         i += 1
     end
 
-    has_input = haskey(parsed, "input")
-    has_seq = haskey(parsed, "sequence")
-    if parsed["list_models"]
+    has_input = input !== nothing
+    has_seq = sequence !== nothing
+    if list_models
         !(has_input || has_seq) || error("--list-models cannot be combined with --input/--sequence")
     else
         (has_input || has_seq) || error("predict requires either --input or --sequence")
         !(has_input && has_seq) || error("predict accepts only one of --input or --sequence")
     end
-    return parsed
+    return PredictCLIOptions(
+        input === nothing ? nothing : String(input),
+        sequence === nothing ? nothing : String(sequence),
+        String(out_dir),
+        String(model_name),
+        String(weights_path),
+        Int.(seeds),
+        use_default_params,
+        cycle,
+        step,
+        sample,
+        use_msa,
+        strict,
+        String(task_name),
+        String(chain_id),
+        list_models,
+        esm_token_embedding_json === nothing ? nothing : String(esm_token_embedding_json),
+    )
 end
 
 function _load_embedding_json_matrix(path::AbstractString)
@@ -365,8 +449,8 @@ function _load_embedding_json_matrix(path::AbstractString)
     return out
 end
 
-function _run_predict(parsed::Dict{String, Any})
-    if parsed["list_models"]
+function _run_predict(parsed::PredictCLIOptions)
+    if parsed.list_models
         println("supported_models:")
         for spec in list_supported_models()
             println(
@@ -377,29 +461,27 @@ function _run_predict(parsed::Dict{String, Any})
     end
 
     common_kwargs = (
-        out_dir = parsed["out_dir"],
-        model_name = parsed["model_name"],
-        weights_path = parsed["weights_path"],
-        seeds = parsed["seeds"],
-        use_default_params = parsed["use_default_params"],
-        cycle = get(parsed, "cycle", nothing),
-        step = get(parsed, "step", nothing),
-        sample = get(parsed, "sample", nothing),
-        use_msa = get(parsed, "use_msa", nothing),
-        strict = parsed["strict"],
+        out_dir = parsed.out_dir,
+        model_name = parsed.model_name,
+        weights_path = parsed.weights_path,
+        seeds = parsed.seeds,
+        use_default_params = parsed.use_default_params,
+        cycle = parsed.cycle,
+        step = parsed.step,
+        sample = parsed.sample,
+        use_msa = parsed.use_msa,
+        strict = parsed.strict,
     )
 
-    if haskey(parsed, "sequence")
-        emb = haskey(parsed, "esm_token_embedding_json") ?
-              _load_embedding_json_matrix(String(parsed["esm_token_embedding_json"])) :
-              nothing
+    if parsed.sequence !== nothing
+        emb = parsed.esm_token_embedding_json === nothing ? nothing : _load_embedding_json_matrix(parsed.esm_token_embedding_json)
         records = predict_sequence(
-            parsed["sequence"];
+            parsed.sequence;
             out_dir = common_kwargs.out_dir,
             model_name = common_kwargs.model_name,
             weights_path = common_kwargs.weights_path,
-            task_name = parsed["task_name"],
-            chain_id = parsed["chain_id"],
+            task_name = parsed.task_name,
+            chain_id = parsed.chain_id,
             seeds = common_kwargs.seeds,
             use_default_params = common_kwargs.use_default_params,
             cycle = common_kwargs.cycle,
@@ -420,7 +502,7 @@ function _run_predict(parsed::Dict{String, Any})
     end
 
     records = predict_json(
-        parsed["input"];
+        parsed.input::String;
         out_dir = common_kwargs.out_dir,
         model_name = common_kwargs.model_name,
         weights_path = common_kwargs.weights_path,
@@ -441,92 +523,106 @@ function _run_predict(parsed::Dict{String, Any})
     end
 end
 
+struct ToJSONCLIOptions
+    input::String
+    out_dir::String
+    altloc::String
+    assembly_id::Union{Nothing, String}
+end
+
 function _parse_tojson_args(args::Vector{String})
-    parsed = Dict{String, Any}(
-        "out_dir" => "./output",
-        "altloc" => "first",
-    )
+    out_dir = "./output"
+    altloc = "first"
+    input = nothing
+    assembly_id = nothing
     i = 1
     while i <= length(args)
         arg = args[i]
         if arg == "--input"
             value, i = _require_value(args, i, arg)
-            parsed["input"] = value
+            input = value
         elseif arg == "--out_dir"
             value, i = _require_value(args, i, arg)
-            parsed["out_dir"] = value
+            out_dir = value
         elseif arg == "--altloc"
             value, i = _require_value(args, i, arg)
-            parsed["altloc"] = value
+            altloc = value
         elseif arg == "--assembly_id"
             value, i = _require_value(args, i, arg)
-            parsed["assembly_id"] = value
+            assembly_id = value
         elseif arg == "--help" || arg == "-h"
             _usage()
-            return Dict{String, Any}("__help__" => true)
+            return nothing
         else
             error("Unknown option: $arg")
         end
         i += 1
     end
-    haskey(parsed, "input") || error("tojson requires --input")
-    return parsed
+    input === nothing && error("tojson requires --input")
+    return ToJSONCLIOptions(String(input), String(out_dir), String(altloc), assembly_id === nothing ? nothing : String(assembly_id))
 end
 
-function _run_tojson(parsed::Dict{String, Any})
+function _run_tojson(parsed::ToJSONCLIOptions)
     out_paths = convert_structure_to_infer_json(
-        parsed["input"];
-        out_dir = parsed["out_dir"],
-        altloc = parsed["altloc"],
-        assembly_id = get(parsed, "assembly_id", nothing),
+        parsed.input;
+        out_dir = parsed.out_dir,
+        altloc = parsed.altloc,
+        assembly_id = parsed.assembly_id,
     )
     for p in out_paths
         println("json_path=$(p)")
     end
 end
 
+struct MSACLIOptions
+    input::String
+    precomputed_msa_dir::String
+    pairing_db::String
+    out_dir::String
+end
+
 function _parse_msa_args(args::Vector{String})
-    parsed = Dict{String, Any}(
-        "out_dir" => "./output",
-        "pairing_db" => "uniref100",
-    )
+    input = nothing
+    precomputed_msa_dir = nothing
+    pairing_db = "uniref100"
+    out_dir = "./output"
     i = 1
     while i <= length(args)
         arg = args[i]
         if arg == "--input"
             value, i = _require_value(args, i, arg)
-            parsed["input"] = value
+            input = value
         elseif arg == "--precomputed_msa_dir"
             value, i = _require_value(args, i, arg)
-            parsed["precomputed_msa_dir"] = value
+            precomputed_msa_dir = value
         elseif arg == "--pairing_db"
             value, i = _require_value(args, i, arg)
-            parsed["pairing_db"] = value
+            pairing_db = value
         elseif arg == "--out_dir"
             value, i = _require_value(args, i, arg)
-            parsed["out_dir"] = value
+            out_dir = value
         elseif arg == "--help" || arg == "-h"
             _usage()
-            return Dict{String, Any}("__help__" => true)
+            return nothing
         else
             error("Unknown option: $arg")
         end
         i += 1
     end
-    haskey(parsed, "input") || error("msa requires --input")
-    haskey(parsed, "precomputed_msa_dir") || error("msa requires --precomputed_msa_dir")
-    return parsed
+    input === nothing && error("msa requires --input")
+    precomputed_msa_dir === nothing && error("msa requires --precomputed_msa_dir")
+    return MSACLIOptions(String(input), String(precomputed_msa_dir), String(pairing_db), String(out_dir))
 end
 
-function _run_msa(parsed::Dict{String, Any})
-    input_path = String(parsed["input"])
+function _run_msa(parsed::MSACLIOptions)
+    input_path = parsed.input
     ext = lowercase(splitext(input_path)[2])
     if ext == ".json"
         out_path = add_precomputed_msa_to_json(
             input_path;
-            out_dir = parsed["out_dir"],
-            precomputed_msa_dir = parsed["precomputed_msa_dir"],
-            pairing_db = parsed["pairing_db"],
+            out_dir = parsed.out_dir,
+            precomputed_msa_dir = parsed.precomputed_msa_dir,
+            pairing_db = parsed.pairing_db,
         )
         println("updated_json=$(out_path)")
         return
@@ -539,12 +635,12 @@ function _run_msa(parsed::Dict{String, Any})
     error("msa currently supports JSON input only. Got: $input_path")
 end
 
-function _run_parity_check(parsed::Dict{String, Any}; io::IO = stdout)
+function _run_parity_check(parsed::ParityCLIOptions; io::IO = stdout)
     report = compare_raw_weight_dirs(
-        parsed["reference_raw_dir"],
-        parsed["actual_raw_dir"];
-        atol = parsed["atol"],
-        rtol = parsed["rtol"],
+        parsed.reference_raw_dir,
+        parsed.actual_raw_dir;
+        atol = parsed.atol,
+        rtol = parsed.rtol,
     )
     println(io, "Parity report:")
     println(io, "  compared: $(length(report.compared))")
@@ -553,7 +649,7 @@ function _run_parity_check(parsed::Dict{String, Any}; io::IO = stdout)
     println(io, "  missing_in_reference: $(length(report.missing_in_reference))")
     println(io, @sprintf("  tolerances: atol=%.3e rtol=%.3e", report.atol, report.rtol))
 
-    top = parsed["top"]
+    top = parsed.top
     if !isempty(report.failed)
         nshow = min(length(report.failed), top)
         println(io, "Top failed tensors by max_abs:")
@@ -604,9 +700,7 @@ function main(argv::Vector{String} = copy(ARGS))
         return 0
     elseif cmd == "infer"
         parsed = _parse_infer_args(argv[2:end])
-        if haskey(parsed, "__help__")
-            return 0
-        end
+        parsed === nothing && return 0
         _run_infer(parsed)
         return 0
     elseif cmd == "check-input"
@@ -618,21 +712,21 @@ function main(argv::Vector{String} = copy(ARGS))
         return 0
     elseif cmd == "parity-check"
         parsed = _parse_parity_args(argv[2:end])
-        haskey(parsed, "__help__") && return 0
+        parsed === nothing && return 0
         return _run_parity_check(parsed)
     elseif cmd == "predict"
         parsed = _parse_predict_args(argv[2:end])
-        haskey(parsed, "__help__") && return 0
+        parsed === nothing && return 0
         _run_predict(parsed)
         return 0
     elseif cmd == "tojson"
         parsed = _parse_tojson_args(argv[2:end])
-        haskey(parsed, "__help__") && return 0
+        parsed === nothing && return 0
         _run_tojson(parsed)
         return 0
     elseif cmd == "msa"
         parsed = _parse_msa_args(argv[2:end])
-        haskey(parsed, "__help__") && return 0
+        parsed === nothing && return 0
         _run_msa(parsed)
         return 0
     end

@@ -6,6 +6,11 @@ import ..Data: AtomRecord
 
 export dump_prediction_bundle
 
+const ResidueRun = NamedTuple{
+    (:chain_id, :res_id, :res_name, :start_idx, :stop_idx),
+    Tuple{String, Int, String, Int, Int},
+}
+
 function _chain_order(atoms::Vector{AtomRecord})
     order = String[]
     seen = Set{String}()
@@ -40,8 +45,8 @@ function _strand_id(asym_id::String)
 end
 
 function _residue_runs(atoms::Vector{AtomRecord})
-    isempty(atoms) && return NamedTuple[]
-    runs = NamedTuple[]
+    isempty(atoms) && return ResidueRun[]
+    runs = ResidueRun[]
     start_idx = 1
     for i in 2:length(atoms)
         a = atoms[i - 1]
@@ -76,7 +81,7 @@ end
 
 function _residue_has_atom(
     atoms::Vector{AtomRecord},
-    run::NamedTuple{(:chain_id, :res_id, :res_name, :start_idx, :stop_idx)},
+    run::ResidueRun,
     atom_name::String,
 )
     for i in run.start_idx:run.stop_idx

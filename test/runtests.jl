@@ -18,6 +18,74 @@ end
 
 include("layer_regression.jl")
 
+@testset "Config defaults and overrides" begin
+    mktempdir() do d
+        data_root = joinpath(d, "data_root")
+        mkpath(data_root)
+        comp = joinpath(data_root, "components.cif")
+        rdkit = joinpath(data_root, "components.cif.rdkit_mol.pkl")
+        write(comp, "cif")
+        write(rdkit, "rdkit")
+
+        old_root = get(ENV, "PROTENIX_DATA_ROOT_DIR", nothing)
+        ENV["PROTENIX_DATA_ROOT_DIR"] = data_root
+        try
+            cfg = PXDesign.Config.default_config(project_root = d)
+            @test cfg["dump_dir"] == joinpath(d, "output")
+            @test cfg["load_checkpoint_dir"] == joinpath(d, "release_data", "checkpoint")
+            @test cfg["model_name"] == "pxdesign_v0.1.0"
+            @test cfg["data"]["ccd_components_file"] == comp
+            @test cfg["data"]["ccd_components_rdkit_mol_file"] == rdkit
+            @test cfg["data"]["pdb_cluster_file"] == joinpath(data_root, "clusters-by-entity-40.txt")
+            @test cfg["sample_diffusion"]["N_step"] == 400
+            @test cfg["sample_diffusion"]["eta_schedule"]["type"] == "piecewise_65"
+            @test cfg["inference_noise_scheduler"]["sigma_data"] == 16.0
+            @test cfg["model_scaffold"]["c_s_inputs"] == 128
+
+            push!(cfg["seeds"], 7)
+            cfg2 = PXDesign.Config.default_config(project_root = d)
+            @test isempty(cfg2["seeds"])
+        finally
+            if old_root === nothing
+                delete!(ENV, "PROTENIX_DATA_ROOT_DIR")
+            else
+                ENV["PROTENIX_DATA_ROOT_DIR"] = old_root
+            end
+        end
+    end
+
+    mktempdir() do d
+        cfg = PXDesign.Config.default_config(project_root = d)
+        PXDesign.Config.set_by_key!(cfg, "N_sample", "9")
+        PXDesign.Config.set_by_key!(cfg, "eta_type", "const")
+        PXDesign.Config.set_by_key!(cfg, "eta_min", "1.25")
+        PXDesign.Config.set_by_key!(cfg, "eta_max", "2.75")
+        PXDesign.Config.set_by_key!(cfg, "sample_diffusion_chunk_size", "3")
+        PXDesign.Config.set_nested!(cfg, "model_scaffold.enabled", true)
+
+        @test cfg["sample_diffusion"]["N_sample"] == 9
+        @test cfg["sample_diffusion"]["eta_schedule"]["type"] == "const"
+        @test cfg["sample_diffusion"]["eta_schedule"]["min"] == 1.25
+        @test cfg["sample_diffusion"]["eta_schedule"]["max"] == 2.75
+        @test cfg["infer_setting"]["sample_diffusion_chunk_size"] == 3
+        @test cfg["model_scaffold"]["enabled"] == true
+    end
+
+    cfg_preserve = Dict{String, Any}(
+        "sample_diffusion" => Dict("existing_key" => 11),
+    )
+    PXDesign.Config.set_nested!(cfg_preserve, "sample_diffusion.N_step", 17)
+    @test cfg_preserve["sample_diffusion"]["existing_key"] == 11
+    @test cfg_preserve["sample_diffusion"]["N_step"] == 17
+
+    @test PXDesign.Config.parse_override_value("true") == true
+    @test PXDesign.Config.parse_override_value("False") == false
+    @test PXDesign.Config.parse_override_value("none") === nothing
+    @test PXDesign.Config.parse_override_value("17") == 17
+    @test PXDesign.Config.parse_override_value("3.5") == 3.5
+    @test PXDesign.Config.parse_override_value("abc") == "abc"
+end
+
 @testset "Protenix API surface" begin
     models = PXDesign.list_supported_models()
     @test length(models) >= 5
@@ -68,18 +136,17 @@ include("layer_regression.jl")
 
     @test_throws ErrorException PXDesign.resolve_model_spec("not_a_model")
 
-    mktempdir() do droot
-        tiny_dir = joinpath(droot, "weights_safetensors_protenix_tiny_default_v0.5.0")
-        mkpath(tiny_dir)
-        @test PXDesign.default_weights_path(
-            "protenix_tiny_default_v0.5.0";
-            project_root = droot,
-        ) == tiny_dir
-        @test_throws ErrorException PXDesign.default_weights_path(
-            "protenix_base_constraint_v0.5.0";
-            project_root = droot,
-        )
-    end
+    tiny_src = PXDesign.resolve_weight_source("protenix_tiny_default_v0.5.0")
+    @test tiny_src.layout == :single
+    @test tiny_src.filename == "weights_safetensors_protenix_tiny_default_v0.5.0/protenix_tiny_default_v0.5.0.safetensors"
+    @test tiny_src.repo_id == get(ENV, "PXDESIGN_WEIGHTS_REPO_ID", "MurrellLab/PXDesign.jl")
+    mini_esm_src = PXDesign.resolve_weight_source("protenix_mini_esm_v0.5.0")
+    @test mini_esm_src.layout == :single
+    @test mini_esm_src.filename == "weights_safetensors_protenix_mini_esm_v0.5.0/protenix_mini_esm_v0.5.0.safetensors"
+    mini_ism_src = PXDesign.resolve_weight_source("protenix_mini_ism_v0.5.0")
+    @test mini_ism_src.layout == :single
+    @test mini_ism_src.filename == "weights_safetensors_protenix_mini_ism_v0.5.0/protenix_mini_ism_v0.5.0.safetensors"
+    @test_throws ErrorException PXDesign.resolve_weight_source("not_a_model_for_hf")
 
     mktempdir() do d
         pdb_path = joinpath(d, "tiny.pdb")
@@ -191,6 +258,114 @@ _pdbx_struct_assembly_gen.asym_id_list
         @test parsed_msa[1]["sequences"][1]["proteinChain"]["msa"]["precomputed_msa_dir"] == "/tmp/precomp_msa"
         @test !haskey(parsed_msa[1]["sequences"][2], "proteinChain")
 
+        in_json_object = joinpath(d, "input_object.json")
+        PXDesign.JSONLite.write_json(
+            in_json_object,
+            Dict(
+                "name" => "msa_demo_object",
+                "sequences" => Any[
+                    Dict("proteinChain" => Dict("sequence" => "ACD", "count" => 1)),
+                    Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+                ],
+            ),
+        )
+        msa_out_object = PXDesign.add_precomputed_msa_to_json(
+            in_json_object;
+            out_dir = joinpath(d, "msa_out_object"),
+            precomputed_msa_dir = "/tmp/precomp_msa",
+        )
+        parsed_msa_object = PXDesign.JSONLite.parse_json(read(msa_out_object, String))
+        @test parsed_msa_object isa AbstractDict
+        @test parsed_msa_object["sequences"][1]["proteinChain"]["msa"]["precomputed_msa_dir"] == "/tmp/precomp_msa"
+
+        wrapper_json = joinpath(d, "input_wrapper.json")
+        PXDesign.JSONLite.write_json(
+            wrapper_json,
+            Dict(
+                "name" => "wrapper_payload",
+                "tasks" => Any[
+                    Dict(
+                        "name" => "msa_demo_wrapped",
+                        "sequences" => Any[
+                            Dict("proteinChain" => Dict("sequence" => "ACD", "count" => 1)),
+                            Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+                        ],
+                    ),
+                ],
+            ),
+        )
+        wrapped_tasks = PXDesign.ProtenixAPI._ensure_json_tasks(wrapper_json)
+        @test length(wrapped_tasks) == 1
+        @test wrapped_tasks[1]["name"] == "msa_demo_wrapped"
+        msa_out_wrapped = PXDesign.add_precomputed_msa_to_json(
+            wrapper_json;
+            out_dir = joinpath(d, "msa_out_wrapped"),
+            precomputed_msa_dir = "/tmp/precomp_msa",
+        )
+        @test isfile(msa_out_wrapped)
+        parsed_msa_wrapped = PXDesign.JSONLite.parse_json(read(msa_out_wrapped, String))
+        @test parsed_msa_wrapped isa AbstractDict
+        @test haskey(parsed_msa_wrapped, "tasks")
+        @test parsed_msa_wrapped["name"] == "wrapper_payload"
+        @test parsed_msa_wrapped["tasks"][1]["sequences"][1]["proteinChain"]["msa"]["precomputed_msa_dir"] == "/tmp/precomp_msa"
+
+        bad_wrapper_json = joinpath(d, "input_wrapper_bad.json")
+        PXDesign.JSONLite.write_json(
+            bad_wrapper_json,
+            Dict(
+                "name" => "wrapper_payload_bad",
+                "tasks" => Dict("name" => "not_an_array"),
+            ),
+        )
+        @test_throws ErrorException PXDesign.ProtenixAPI._ensure_json_tasks(bad_wrapper_json)
+
+        mini_weights = try
+            PXDesign.default_weights_path("protenix_mini_default_v0.5.0")
+        catch
+            nothing
+        end
+        if mini_weights === nothing
+            @test_skip "Skipping predict_json wrapper smoke: protenix_mini_default_v0.5.0 safetensors not found."
+        else
+            pred_opts = PXDesign.ProtenixPredictOptions(
+                out_dir = joinpath(d, "predict_out_wrapped"),
+                model_name = "protenix_mini_default_v0.5.0",
+                seeds = [7],
+                use_default_params = false,
+                cycle = 1,
+                step = 1,
+                sample = 1,
+                use_msa = false,
+                strict = true,
+            )
+            pred_records = PXDesign.predict_json(wrapper_json, pred_opts)
+            @test pred_records isa Vector{PXDesign.ProtenixAPI.PredictJSONRecord}
+            @test length(pred_records) == 1
+            @test pred_records[1].task_name == "msa_demo_wrapped"
+            @test !isempty(pred_records[1].cif_paths)
+            @test isfile(pred_records[1].cif_paths[1])
+
+            seq_records = PXDesign.predict_sequence(
+                "ACD";
+                out_dir = joinpath(d, "predict_seq_out"),
+                model_name = "protenix_mini_default_v0.5.0",
+                seeds = [9],
+                use_default_params = false,
+                cycle = 1,
+                step = 1,
+                sample = 1,
+                use_msa = false,
+                strict = true,
+                task_name = "seq_wrapper_smoke",
+                chain_id = "A0",
+            )
+            @test seq_records isa Vector{PXDesign.ProtenixAPI.PredictSequenceRecord}
+            @test length(seq_records) == 1
+            @test seq_records[1].task_name == "seq_wrapper_smoke"
+            @test !isempty(seq_records[1].cif_paths)
+            @test isfile(seq_records[1].cif_paths[1])
+        end
+
         @test PXDesign.main(["tojson", "--input", pdb_path, "--out_dir", joinpath(d, "cli_tojson")]) == 0
         @test PXDesign.main([
             "msa",
@@ -295,6 +470,94 @@ end
     @test !isempty(lig_cols)
     @test any(feat_smiles["token_bonds"][i, j] == 1 for i in prot_cols, j in lig_cols)
 
+    smiles_prefix_task = Dict{String, Any}(
+        "name" => "smiles_prefix_smoke",
+        "sequences" => Any[
+            Dict("ligand" => Dict("ligand" => "SMILES_CCO", "count" => 1)),
+        ],
+    )
+    parsed_smiles_prefix = PXDesign.ProtenixAPI._parse_task_entities(smiles_prefix_task)
+    @test any(a -> a.element == "C", parsed_smiles_prefix.atoms)
+    @test any(a -> a.element == "O", parsed_smiles_prefix.atoms)
+    @test_throws Exception PXDesign.ProtenixAPI._parse_task_entities(
+        Dict{String, Any}(
+            "name" => "smiles_prefix_empty",
+            "sequences" => Any[Dict("ligand" => Dict("ligand" => "SMILES_", "count" => 1))],
+        ),
+    )
+    parsed_condition_smiles = PXDesign.ProtenixAPI._parse_task_entities(
+        Dict{String, Any}(
+            "name" => "condition_smiles_prefix_smoke",
+            "sequences" => Any[
+                Dict("condition_ligand" => Dict("ligand" => "SMILES_CCO", "count" => 1)),
+            ],
+        ),
+    )
+    @test any(a -> a.element == "C", parsed_condition_smiles.atoms)
+    @test any(a -> a.element == "O", parsed_condition_smiles.atoms)
+
+    parsed_ion_ccd = PXDesign.ProtenixAPI._parse_task_entities(
+        Dict{String, Any}(
+            "name" => "ion_ccd_prefix_smoke",
+            "sequences" => Any[
+                Dict("ion" => Dict("ion" => "CCD_MG", "count" => 1)),
+            ],
+        ),
+    )
+    @test any(a -> uppercase(a.element) == "MG", parsed_ion_ccd.atoms)
+    @test any(a -> uppercase(a.atom_name) == "MG", parsed_ion_ccd.atoms)
+
+    mixed_runtime_task = Dict{String, Any}(
+        "name" => "mixed_runtime_smoke",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "ACD", "count" => 1)),
+            Dict("dnaSequence" => Dict("sequence" => "AG", "count" => 1)),
+            Dict("rnaSequence" => Dict("sequence" => "CU", "count" => 1)),
+            Dict("ligand" => Dict("ligand" => "SMILES_CCO", "count" => 1)),
+            Dict("ion" => Dict("ion" => "MG", "count" => 1)),
+        ],
+    )
+    parsed_mixed = PXDesign.ProtenixAPI._parse_task_entities(mixed_runtime_task)
+    bundle_mixed = PXDesign.Data.build_feature_bundle_from_atoms(parsed_mixed.atoms; task_name = "mixed_runtime_smoke")
+    feat_mixed = bundle_mixed["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_mixed)
+    typed_mixed = PXDesign.ProtenixMini.as_protenix_features(feat_mixed)
+    @test typed_mixed.constraint_feature === nothing
+
+    mixed_model = PXDesign.ProtenixMini.ProtenixMiniModel(
+        32,
+        32,
+        16,
+        8,
+        97;
+        c_atom = 16,
+        c_atompair = 8,
+        n_cycle = 1,
+        pairformer_blocks = 1,
+        msa_blocks = 1,
+        diffusion_transformer_blocks = 1,
+        diffusion_atom_encoder_blocks = 1,
+        diffusion_atom_decoder_blocks = 1,
+        confidence_max_atoms_per_token = 128,
+        sample_gamma0 = 0.0,
+        sample_gamma_min = 1.0,
+        sample_noise_scale_lambda = 1.0,
+        sample_step_scale_eta = 0.0,
+        sample_n_step = 1,
+        sample_n_sample = 1,
+        rng = MersenneTwister(4444),
+    )
+    pred_mixed = PXDesign.ProtenixMini.run_inference(
+        mixed_model,
+        typed_mixed;
+        n_cycle = 1,
+        n_step = 1,
+        n_sample = 1,
+        rng = MersenneTwister(5555),
+    )
+    @test size(pred_mixed.coordinate) == (1, length(bundle_mixed["atoms"]), 3)
+    @test all(isfinite, pred_mixed.coordinate)
+
     mktempdir() do d
         lig_pdb = joinpath(d, "ligand.pdb")
         write(
@@ -351,6 +614,81 @@ END
     substructure = cf isa NamedTuple ? cf.substructure : cf["substructure"]
     @test size(contact) == (size(feat_constraint["restype"], 1), size(feat_constraint["restype"], 1), 2)
     @test sum(abs, substructure) == 0f0
+
+    bad_contact_same_chain = Dict{String, Any}(
+        "name" => "constraint_bad_contact_same_chain",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+        ],
+        "constraint" => Dict(
+            "contact" => Any[
+                Dict("residue1" => Any[1, 1, 1], "residue2" => Any[1, 1, 2], "max_distance" => 10.0),
+            ],
+        ),
+    )
+    parsed_bad_contact = PXDesign.ProtenixAPI._parse_task_entities(bad_contact_same_chain)
+    bundle_bad_contact = PXDesign.Data.build_feature_bundle_from_atoms(parsed_bad_contact.atoms; task_name = "constraint_bad_contact_same_chain")
+    feat_bad_contact = bundle_bad_contact["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_bad_contact)
+    @test_throws ErrorException PXDesign.ProtenixAPI._inject_task_constraint_feature!(
+        feat_bad_contact,
+        bad_contact_same_chain,
+        bundle_bad_contact["atoms"],
+        parsed_bad_contact.entity_chain_ids,
+        parsed_bad_contact.entity_atom_map,
+        "constraint_bad_contact_same_chain",
+    )
+
+    bad_contact_dist = Dict{String, Any}(
+        "name" => "constraint_bad_contact_dist",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1)),
+        ],
+        "constraint" => Dict(
+            "contact" => Any[
+                Dict("residue1" => Any[1, 1, 1], "residue2" => Any[2, 1, 1], "min_distance" => 12.0, "max_distance" => 10.0),
+            ],
+        ),
+    )
+    parsed_bad_dist = PXDesign.ProtenixAPI._parse_task_entities(bad_contact_dist)
+    bundle_bad_dist = PXDesign.Data.build_feature_bundle_from_atoms(parsed_bad_dist.atoms; task_name = "constraint_bad_contact_dist")
+    feat_bad_dist = bundle_bad_dist["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_bad_dist)
+    @test_throws ErrorException PXDesign.ProtenixAPI._inject_task_constraint_feature!(
+        feat_bad_dist,
+        bad_contact_dist,
+        bundle_bad_dist["atoms"],
+        parsed_bad_dist.entity_chain_ids,
+        parsed_bad_dist.entity_atom_map,
+        "constraint_bad_contact_dist",
+    )
+
+    bad_pocket_same_chain = Dict{String, Any}(
+        "name" => "constraint_bad_pocket_same_chain",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+        ],
+        "constraint" => Dict(
+            "pocket" => Dict(
+                "binder_chain" => Any[1, 1],
+                "contact_residues" => Any[Any[1, 1, 2]],
+                "max_distance" => 10.0,
+            ),
+        ),
+    )
+    parsed_bad_pocket = PXDesign.ProtenixAPI._parse_task_entities(bad_pocket_same_chain)
+    bundle_bad_pocket = PXDesign.Data.build_feature_bundle_from_atoms(parsed_bad_pocket.atoms; task_name = "constraint_bad_pocket_same_chain")
+    feat_bad_pocket = bundle_bad_pocket["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_bad_pocket)
+    @test_throws ErrorException PXDesign.ProtenixAPI._inject_task_constraint_feature!(
+        feat_bad_pocket,
+        bad_pocket_same_chain,
+        bundle_bad_pocket["atoms"],
+        parsed_bad_pocket.entity_chain_ids,
+        parsed_bad_pocket.entity_atom_map,
+        "constraint_bad_pocket_same_chain",
+    )
 end
 
 @testset "Protenix precomputed MSA ingestion" begin
@@ -459,6 +797,124 @@ A-D
         @test msa[5, a_cols] == q_a
         @test msa[5, b_cols] == nonpair_b
     end
+
+    mktempdir() do d
+        msa_a = joinpath(d, "msa", "0")
+        msa_b = joinpath(d, "msa", "1")
+        mkpath(msa_a)
+        mkpath(msa_b)
+        write(joinpath(msa_a, "pairing.a3m"), ">query\nAC\n>h1 TaxID=111\nAA\n>h2 TaxID=222\nCC\n")
+        write(joinpath(msa_a, "non_pairing.a3m"), ">query\nAC\n>n1\nAG\n")
+        write(joinpath(msa_b, "pairing.a3m"), ">query\nGG\n>x2 TaxID=222\nTT\n>x1 TaxID=111\nAA\n")
+        write(joinpath(msa_b, "non_pairing.a3m"), ">query\nGG\n>n1\nGT\n")
+
+        task = Dict{String, Any}(
+            "name" => "msa_pair_merge_taxid",
+            "sequences" => Any[
+                Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1, "msa" => Dict("precomputed_msa_dir" => "msa/0"))),
+                Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1, "msa" => Dict("precomputed_msa_dir" => "msa/1"))),
+            ],
+        )
+        input_json = joinpath(d, "input_pair_merge_taxid.json")
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        parsed = PXDesign.ProtenixAPI._parse_task_entities(task; json_dir = d)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed.atoms; task_name = "msa_pair_merge_taxid")
+        feat = bundle["input_feature_dict"]
+        token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(
+            feat,
+            task,
+            input_json;
+            use_msa = true,
+            chain_specs = parsed.protein_specs,
+            token_chain_ids = token_chain_ids,
+        )
+
+        msa = Int.(feat["msa"])
+        a_cols = findall(==("A0"), token_chain_ids)
+        b_cols = findall(==("B0"), token_chain_ids)
+        q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
+        q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
+        tax111_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
+        tax111_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
+        tax222_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("CC")
+        tax222_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("TT")
+        nonpair_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AG")
+        nonpair_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GT")
+
+        @test size(msa) == (5, 4)
+        @test msa[1, a_cols] == q_a
+        @test msa[1, b_cols] == q_b
+        @test msa[2, a_cols] == tax111_a
+        @test msa[2, b_cols] == tax111_b
+        @test msa[3, a_cols] == tax222_a
+        @test msa[3, b_cols] == tax222_b
+        @test msa[4, a_cols] == nonpair_a
+        @test msa[4, b_cols] == q_b
+        @test msa[5, a_cols] == q_a
+        @test msa[5, b_cols] == nonpair_b
+    end
+
+    mktempdir() do d
+        msa_a = joinpath(d, "msa", "0")
+        msa_b = joinpath(d, "msa", "1")
+        mkpath(msa_a)
+        mkpath(msa_b)
+        write(joinpath(msa_a, "pairing.a3m"), ">query\nAC\n>a1 OS=Homo sapiens\nAA\n>a2 OS=Mus musculus\nCC\n")
+        write(joinpath(msa_a, "non_pairing.a3m"), ">query\nAC\n>n1\nAG\n")
+        write(joinpath(msa_b, "pairing.a3m"), ">query\nGG\n>b2 OS=Mus musculus\nTT\n>b1 OS=Homo sapiens\nAA\n")
+        write(joinpath(msa_b, "non_pairing.a3m"), ">query\nGG\n>n1\nGT\n")
+
+        task = Dict{String, Any}(
+            "name" => "msa_pair_merge_species_name",
+            "sequences" => Any[
+                Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1, "msa" => Dict("precomputed_msa_dir" => "msa/0"))),
+                Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1, "msa" => Dict("precomputed_msa_dir" => "msa/1"))),
+            ],
+        )
+        input_json = joinpath(d, "input_pair_merge_species_name.json")
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        parsed = PXDesign.ProtenixAPI._parse_task_entities(task; json_dir = d)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed.atoms; task_name = "msa_pair_merge_species_name")
+        feat = bundle["input_feature_dict"]
+        token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(
+            feat,
+            task,
+            input_json;
+            use_msa = true,
+            chain_specs = parsed.protein_specs,
+            token_chain_ids = token_chain_ids,
+        )
+
+        msa = Int.(feat["msa"])
+        a_cols = findall(==("A0"), token_chain_ids)
+        b_cols = findall(==("B0"), token_chain_ids)
+        q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
+        q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
+        homo_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
+        homo_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
+        mus_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("CC")
+        mus_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("TT")
+        nonpair_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AG")
+        nonpair_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GT")
+
+        @test size(msa) == (5, 4)
+        @test msa[1, a_cols] == q_a
+        @test msa[1, b_cols] == q_b
+        @test msa[2, a_cols] == homo_a
+        @test msa[2, b_cols] == homo_b
+        @test msa[3, a_cols] == mus_a
+        @test msa[3, b_cols] == mus_b
+        @test msa[4, a_cols] == nonpair_a
+        @test msa[4, b_cols] == q_b
+        @test msa[5, a_cols] == q_a
+        @test msa[5, b_cols] == nonpair_b
+    end
 end
 
 @testset "Protenix template feature ingestion" begin
@@ -508,6 +964,35 @@ end
 end
 
 @testset "Protenix ESM token embedding injection" begin
+    old_ism_repo = get(ENV, "PXDESIGN_ESM_ISM_REPO_ID", nothing)
+    old_ism_file = get(ENV, "PXDESIGN_ESM_ISM_FILENAME", nothing)
+    old_ism_rev = get(ENV, "PXDESIGN_ESM_ISM_REVISION", nothing)
+    old_ism_loader = get(ENV, "PXDESIGN_ESM_ISM_LOADER", nothing)
+    old_weights_repo = get(ENV, "PXDESIGN_WEIGHTS_REPO_ID", nothing)
+    old_weights_rev = get(ENV, "PXDESIGN_WEIGHTS_REVISION", nothing)
+    try
+        pop!(ENV, "PXDESIGN_ESM_ISM_REPO_ID", nothing)
+        pop!(ENV, "PXDESIGN_ESM_ISM_FILENAME", nothing)
+        pop!(ENV, "PXDESIGN_ESM_ISM_REVISION", nothing)
+        pop!(ENV, "PXDESIGN_ESM_ISM_LOADER", nothing)
+        ENV["PXDESIGN_WEIGHTS_REPO_ID"] = "MurrellLab/PXDesign.jl"
+        ENV["PXDESIGN_WEIGHTS_REVISION"] = "main"
+
+        ism_src = PXDesign.ESMProvider._resolve_source(:esm2_3b_ism)
+        @test ism_src.repo_id == "MurrellLab/PXDesign.jl"
+        @test ism_src.revision == "main"
+        @test ism_src.filename ==
+              "weights_safetensors_esm2_t36_3B_UR50D_ism/esm2_t36_3B_UR50D_ism.safetensors"
+        @test ism_src.loader_kind == :fair_esm2
+    finally
+        old_ism_repo === nothing ? pop!(ENV, "PXDESIGN_ESM_ISM_REPO_ID", nothing) : (ENV["PXDESIGN_ESM_ISM_REPO_ID"] = old_ism_repo)
+        old_ism_file === nothing ? pop!(ENV, "PXDESIGN_ESM_ISM_FILENAME", nothing) : (ENV["PXDESIGN_ESM_ISM_FILENAME"] = old_ism_file)
+        old_ism_rev === nothing ? pop!(ENV, "PXDESIGN_ESM_ISM_REVISION", nothing) : (ENV["PXDESIGN_ESM_ISM_REVISION"] = old_ism_rev)
+        old_ism_loader === nothing ? pop!(ENV, "PXDESIGN_ESM_ISM_LOADER", nothing) : (ENV["PXDESIGN_ESM_ISM_LOADER"] = old_ism_loader)
+        old_weights_repo === nothing ? pop!(ENV, "PXDESIGN_WEIGHTS_REPO_ID", nothing) : (ENV["PXDESIGN_WEIGHTS_REPO_ID"] = old_weights_repo)
+        old_weights_rev === nothing ? pop!(ENV, "PXDESIGN_WEIGHTS_REVISION", nothing) : (ENV["PXDESIGN_WEIGHTS_REVISION"] = old_weights_rev)
+    end
+
     task = Dict{String, Any}(
         "name" => "esm_inject",
         "sequences" => Any[
@@ -540,6 +1025,65 @@ end
         feat_missing,
         "missing esm",
     )
+
+    auto_task = Dict{String, Any}(
+        "name" => "esm_auto_inject",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+        ],
+    )
+    parsed_auto = PXDesign.ProtenixAPI._parse_task_entities(auto_task)
+    auto_bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed_auto.atoms; task_name = "esm_auto_inject")
+    auto_feat = auto_bundle["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(auto_feat)
+
+    PXDesign.ESMProvider.set_sequence_embedder_override!((sequence, variant) -> begin
+        n = length(sequence)
+        out = zeros(Float32, n, 2)
+        bias = variant == :esm2_3b ? 10f0 : 20f0
+        for i in 1:n
+            out[i, 1] = Float32(i)
+            out[i, 2] = bias + Float32(i)
+        end
+        out
+    end)
+    try
+        PXDesign.ProtenixAPI._inject_auto_esm_token_embedding!(
+            auto_feat,
+            auto_bundle["atoms"],
+            auto_bundle["tokens"],
+            Dict("A0" => "AC"),
+            params,
+            "auto esm test",
+        )
+        @test haskey(auto_feat, "esm_token_embedding")
+        @test size(auto_feat["esm_token_embedding"], 1) == size(auto_feat["restype"], 1)
+        @test size(auto_feat["esm_token_embedding"], 2) == 2
+
+        centre_atoms = [auto_bundle["atoms"][tok.centre_atom_index] for tok in auto_bundle["tokens"]]
+        for (i, atom) in enumerate(centre_atoms)
+            if atom.mol_type == "protein"
+                @test auto_feat["esm_token_embedding"][i, 1] == Float32(atom.res_id)
+            else
+                @test all(auto_feat["esm_token_embedding"][i, :] .== 0f0)
+            end
+        end
+
+        frozen = copy(auto_feat["esm_token_embedding"])
+        PXDesign.ProtenixAPI._inject_auto_esm_token_embedding!(
+            auto_feat,
+            auto_bundle["atoms"],
+            auto_bundle["tokens"],
+            Dict("A0" => "AC"),
+            params,
+            "auto esm no-overwrite",
+        )
+        @test auto_feat["esm_token_embedding"] == frozen
+    finally
+        PXDesign.ESMProvider.set_sequence_embedder_override!(nothing)
+        PXDesign.ESMProvider.clear_esm_cache!()
+    end
 end
 
 @testset "ProtenixBase sequence wrappers" begin
@@ -630,6 +1174,89 @@ end
         cif_text = read(cif_path, String)
         @test occursin("_entity_poly.", cif_text)
         @test occursin("_struct_conn.", cif_text)
+    end
+end
+
+@testset "Protenix base-constraint end-to-end smoke" begin
+    task = Dict{String, Any}(
+        "name" => "constraint_e2e",
+        "sequences" => Any[
+            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+            Dict("proteinChain" => Dict("sequence" => "GG", "count" => 1)),
+        ],
+        "constraint" => Dict(
+            "contact" => Any[
+                Dict("residue1" => Any[1, 1, 1], "residue2" => Any[2, 1, 1], "max_distance" => 10.0),
+            ],
+            "pocket" => Dict(
+                "binder_chain" => Any[1, 1],
+                "contact_residues" => Any[Any[2, 1, 1]],
+                "max_distance" => 12.0,
+            ),
+        ),
+    )
+    parsed = PXDesign.ProtenixAPI._parse_task_entities(task)
+    bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed.atoms; task_name = "constraint_e2e")
+    feat = bundle["input_feature_dict"]
+    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+    PXDesign.ProtenixAPI._inject_task_constraint_feature!(
+        feat,
+        task,
+        bundle["atoms"],
+        parsed.entity_chain_ids,
+        parsed.entity_atom_map,
+        "constraint_e2e",
+    )
+    typed = PXDesign.ProtenixMini.as_protenix_features(feat)
+    @test typed.constraint_feature !== nothing
+
+    model = PXDesign.ProtenixMini.ProtenixMiniModel(
+        32,
+        32,
+        16,
+        8,
+        97;
+        c_atom = 16,
+        c_atompair = 8,
+        n_cycle = 1,
+        pairformer_blocks = 1,
+        msa_blocks = 1,
+        diffusion_transformer_blocks = 1,
+        diffusion_atom_encoder_blocks = 1,
+        diffusion_atom_decoder_blocks = 1,
+        confidence_max_atoms_per_token = 20,
+        sample_gamma0 = 0.0,
+        sample_gamma_min = 1.0,
+        sample_noise_scale_lambda = 1.0,
+        sample_step_scale_eta = 0.0,
+        sample_n_step = 1,
+        sample_n_sample = 1,
+        constraint_enable = true,
+        constraint_substructure_enable = true,
+        constraint_substructure_architecture = :linear,
+        rng = MersenneTwister(222),
+    )
+    pred = PXDesign.ProtenixBase.run_inference(
+        model,
+        typed;
+        n_cycle = 1,
+        n_step = 1,
+        n_sample = 1,
+        rng = MersenneTwister(333),
+    )
+    @test size(pred.coordinate) == (1, length(bundle["atoms"]), 3)
+    @test all(isfinite, pred.coordinate)
+
+    mktempdir() do d
+        pred_dir = PXDesign.Output.dump_prediction_bundle(
+            joinpath(d, "constraint"),
+            "protenix_constraint_e2e",
+            bundle["atoms"],
+            pred.coordinate,
+        )
+        cif_path = joinpath(pred_dir, "protenix_constraint_e2e_sample_0.cif")
+        @test isfile(cif_path)
+        @test filesize(cif_path) > 0
     end
 end
 
@@ -826,6 +1453,19 @@ end
     @test parsed["ok"] == true
     @test parsed["arr"][2] == 2.5
     @test parsed["obj"]["k"] == "v"
+
+    io = IOBuffer()
+    PXDesign.JSONLite.write_json(
+        io,
+        (name = "nt", n = 7, ok = true, arr = [1, 2], obj = (k = "v",)),
+    )
+    encoded = String(take!(io))
+    parsed_nt = PXDesign.JSONLite.parse_json(encoded)
+    @test parsed_nt["name"] == "nt"
+    @test parsed_nt["n"] == 7
+    @test parsed_nt["ok"] == true
+    @test parsed_nt["arr"][2] == 2
+    @test parsed_nt["obj"]["k"] == "v"
 end
 
 @testset "Range utils" begin
@@ -1985,12 +2625,7 @@ ATOM 4 O O . ALA A 1 1 ? 3.000 0.200 0.000 1.00 10.00 ? 1 ALA A O 1
         cfg2["sample_diffusion"]["N_step"] = 2
         cfg2["sample_diffusion"]["eta_schedule"] = Dict("type" => "const", "min" => 1.0, "max" => 1.0)
         cfg2["model_scaffold"]["enabled"] = true
-        cfg2["model_scaffold"]["c_token"] = 8
-        cfg2["model_scaffold"]["c_s"] = 8
-        cfg2["model_scaffold"]["c_z"] = 4
-        cfg2["model_scaffold"]["c_s_inputs"] = 16
-        cfg2["model_scaffold"]["n_blocks"] = 1
-        cfg2["model_scaffold"]["n_heads"] = 2
+        cfg2["model_scaffold"]["auto_dims_from_weights"] = true
 
         result2 = PXDesign.Infer.run_infer(cfg2; dry_run = false, io = devnull)
         @test result2["status"] == "ok_scaffold_model"
@@ -2005,120 +2640,26 @@ ATOM 4 O O . ALA A 1 1 ? 3.000 0.200 0.000 1.00 10.00 ? 1 ALA A O 1
         cif_files2 = filter(f -> endswith(f, ".cif"), readdir(pred_dir2))
         @test length(cif_files2) == 1
 
-        # Model scaffold + raw weight directory path with auto dim inference.
-        rwdir = joinpath(d, "rw")
-        mkpath(rwdir)
-        wt = fill(1f0, 8) # diffusion_module.layernorm_s.weight (c_s=8)
-        open(joinpath(rwdir, "tensor_000000.bin"), "w") do io
-            write(io, reinterpret(UInt8, wt))
-        end
-        open(joinpath(rwdir, "tensor_000001.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.1f0, 4, 139))))
-        end
-        open(joinpath(rwdir, "tensor_000002.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.2f0, 8, 8))))
-        end
-        open(joinpath(rwdir, "tensor_000003.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.3f0, 8, 16))))
-        end
-        open(joinpath(rwdir, "tensor_000004.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.4f0, 2, 4))))
-        end
-        open(joinpath(rwdir, "tensor_000005.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.5f0, 8, 3))))
-        end
-        open(joinpath(rwdir, "tensor_000006.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.6f0, 4, 3))))
-        end
-        open(joinpath(rwdir, "tensor_000007.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.7f0, 2, 4))))
-        end
-        open(joinpath(rwdir, "tensor_000008.bin"), "w") do io
-            write(io, reinterpret(UInt8, vec(fill(0.8f0, 2, 4))))
-        end
-        write(
-            joinpath(rwdir, "manifest.json"),
-            """
-{
-  "num_tensors": 9,
-  "tensors": [
-    {"key":"diffusion_module.layernorm_s.weight","dtype":"float32","shape":[8],"file":"tensor_000000.bin"},
-    {"key":"diffusion_module.diffusion_conditioning.relpe.linear_no_bias.weight","dtype":"float32","shape":[4,139],"file":"tensor_000001.bin"},
-    {"key":"diffusion_module.linear_no_bias_s.weight","dtype":"float32","shape":[8,8],"file":"tensor_000002.bin"},
-    {"key":"diffusion_module.diffusion_conditioning.linear_no_bias_s.weight","dtype":"float32","shape":[8,16],"file":"tensor_000003.bin"},
-    {"key":"diffusion_module.diffusion_transformer.blocks.0.attention_pair_bias.linear_nobias_z.weight","dtype":"float32","shape":[2,4],"file":"tensor_000004.bin"},
-    {"key":"diffusion_module.atom_attention_encoder.linear_no_bias_ref_pos.weight","dtype":"float32","shape":[8,3],"file":"tensor_000005.bin"},
-    {"key":"diffusion_module.atom_attention_encoder.linear_no_bias_d.weight","dtype":"float32","shape":[4,3],"file":"tensor_000006.bin"},
-    {"key":"diffusion_module.atom_attention_encoder.atom_transformer.diffusion_transformer.blocks.0.attention_pair_bias.linear_nobias_z.weight","dtype":"float32","shape":[2,4],"file":"tensor_000007.bin"},
-    {"key":"diffusion_module.atom_attention_decoder.atom_transformer.diffusion_transformer.blocks.0.attention_pair_bias.linear_nobias_z.weight","dtype":"float32","shape":[2,4],"file":"tensor_000008.bin"}
-  ]
-}
-""",
-        )
-
+        # Local raw/safetensors paths are intentionally disabled in runtime.
         cfg3 = PXDesign.Config.default_config(project_root = d)
         cfg3["input_json_path"] = input_json
-        cfg3["dump_dir"] = joinpath(d, "out_model_scaffold_rw")
+        cfg3["dump_dir"] = joinpath(d, "out_model_scaffold_raw_blocked")
         cfg3["download_cache"] = false
         cfg3["seeds"] = [9]
-        cfg3["sample_diffusion"]["N_sample"] = 1
-        cfg3["sample_diffusion"]["N_step"] = 2
-        cfg3["sample_diffusion"]["eta_schedule"] = Dict("type" => "const", "min" => 1.0, "max" => 1.0)
         cfg3["model_scaffold"]["enabled"] = true
-        cfg3["model_scaffold"]["c_token"] = 12
-        cfg3["model_scaffold"]["c_s"] = 10
-        cfg3["model_scaffold"]["c_z"] = 6
-        cfg3["model_scaffold"]["c_s_inputs"] = 20
-        cfg3["model_scaffold"]["n_blocks"] = 3
-        cfg3["model_scaffold"]["n_heads"] = 3
         cfg3["model_scaffold"]["auto_dims_from_weights"] = true
-        cfg3["raw_weights_dir"] = rwdir
+        cfg3["raw_weights_dir"] = joinpath(d, "rw_disabled")
         cfg3["strict_weight_load"] = false
+        @test_throws ErrorException PXDesign.Infer.run_infer(cfg3; dry_run = false, io = devnull)
 
-        result3 = PXDesign.Infer.run_infer(cfg3; dry_run = false, io = devnull)
-        @test result3["status"] == "ok_scaffold_model"
-        pred_dir3 = joinpath(
-            cfg3["dump_dir"],
-            "global_run_0",
-            "demo_infer",
-            "seed_9",
-            "predictions",
-        )
-        @test isdir(pred_dir3)
-        @test length(filter(f -> endswith(f, ".cif"), readdir(pred_dir3))) == 1
-
-        # Strict real-weight tiny CPU smoke (optional).
-        repo_root = dirname(@__DIR__)
-        real_raw = joinpath(repo_root, "weights_raw")
-        if isdir(real_raw) && isfile(joinpath(real_raw, "manifest.json"))
-            cfg4 = PXDesign.Config.default_config(project_root = d)
-            cfg4["input_json_path"] = input_json
-            cfg4["dump_dir"] = joinpath(d, "out_model_scaffold_real_strict")
-            cfg4["download_cache"] = false
-            cfg4["seeds"] = [13]
-            cfg4["sample_diffusion"]["N_sample"] = 1
-            cfg4["sample_diffusion"]["N_step"] = 2
-            cfg4["sample_diffusion"]["eta_schedule"] = Dict("type" => "const", "min" => 1.0, "max" => 1.0)
-            cfg4["infer_setting"]["sample_diffusion_chunk_size"] = 1
-            cfg4["model_scaffold"]["enabled"] = true
-            cfg4["model_scaffold"]["auto_dims_from_weights"] = true
-            cfg4["model_scaffold"]["use_design_condition_embedder"] = true
-            cfg4["raw_weights_dir"] = real_raw
-            cfg4["strict_weight_load"] = true
-
-            result4 = PXDesign.Infer.run_infer(cfg4; dry_run = false, io = devnull)
-            @test result4["status"] == "ok_scaffold_model"
-            pred_dir4 = joinpath(
-                cfg4["dump_dir"],
-                "global_run_0",
-                "demo_infer",
-                "seed_13",
-                "predictions",
-            )
-            @test isdir(pred_dir4)
-            @test length(filter(f -> endswith(f, ".cif"), readdir(pred_dir4))) == 1
-        else
-            @test_skip "Skipping strict real-weight e2e smoke: weights_raw/manifest.json not present."
-        end
+        cfg4 = PXDesign.Config.default_config(project_root = d)
+        cfg4["input_json_path"] = input_json
+        cfg4["dump_dir"] = joinpath(d, "out_model_scaffold_st_blocked")
+        cfg4["download_cache"] = false
+        cfg4["seeds"] = [13]
+        cfg4["model_scaffold"]["enabled"] = true
+        cfg4["model_scaffold"]["auto_dims_from_weights"] = true
+        cfg4["safetensors_weights_path"] = joinpath(d, "weights_disabled.safetensors")
+        @test_throws ErrorException PXDesign.Infer.run_infer(cfg4; dry_run = false, io = devnull)
     end
 end

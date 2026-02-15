@@ -61,8 +61,6 @@ end
 
 function main()
     project_root = normpath(joinpath(@__DIR__, ".."))
-    st_dir = joinpath(project_root, "weights_safetensors")
-    isdir(st_dir) || error("weights_safetensors directory is required: $st_dir")
 
     out_dir = joinpath(project_root, "output", "safetensors_smoke")
     mkpath(out_dir)
@@ -82,8 +80,6 @@ function main()
         cfg["sample_diffusion"]["N_step"] = 2
         cfg["sample_diffusion"]["eta_schedule"] = Dict("type" => "const", "min" => 1.0, "max" => 1.0)
         cfg["infer_setting"]["sample_diffusion_chunk_size"] = 1
-        cfg["safetensors_weights_path"] = st_dir
-        cfg["raw_weights_dir"] = ""
         cfg["strict_weight_load"] = true
         cfg["model_scaffold"]["enabled"] = true
         cfg["model_scaffold"]["auto_dims_from_weights"] = true

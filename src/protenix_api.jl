@@ -10,10 +10,14 @@ import ..Model: load_safetensors_weights
 import ..Output: dump_prediction_bundle
 import ..ProtenixBase
 import ..ProtenixMini
+import ..ESMProvider
+import ..WeightsHub: download_model_weights
 
 export ProtenixModelSpec,
     ProtenixPredictOptions,
     ProtenixSequenceOptions,
+    PredictJSONRecord,
+    PredictSequenceRecord,
     MODEL_SPECS,
     resolve_model_spec,
     recommended_params,
@@ -94,6 +98,16 @@ struct ProtenixSequenceOptions
     esm_token_embedding::Union{Nothing, Matrix{Float32}}
 end
 
+const PredictJSONRecord = NamedTuple{
+    (:input_json, :task_name, :seed, :prediction_dir, :cif_paths),
+    Tuple{String, String, Int, String, Vector{String}},
+}
+
+const PredictSequenceRecord = NamedTuple{
+    (:task_name, :seed, :prediction_dir, :cif_paths),
+    Tuple{String, Int, String, Vector{String}},
+}
+
 function ProtenixSequenceOptions(;
     common::ProtenixPredictOptions = ProtenixPredictOptions(),
     task_name::AbstractString = "protenix_sequence",
@@ -148,7 +162,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         5,
         true,
-        false,
+        true,
     ),
     "protenix_mini_esm_v0.5.0" => ProtenixModelSpec(
         "protenix_mini_esm_v0.5.0",
@@ -168,13 +182,6 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         false,
         true,
     ),
-)
-
-const _MODEL_DEFAULT_SAFETENSORS_DIR = Dict(
-    "protenix_base_default_v0.5.0" => "weights_safetensors_protenix_base_default_v0.5.0",
-    "protenix_base_constraint_v0.5.0" => "weights_safetensors_protenix_base_constraint_v0.5.0",
-    "protenix_mini_default_v0.5.0" => "weights_safetensors_protenix_mini_default_v0.5.0",
-    "protenix_mini_tmpl_v0.5.0" => "weights_safetensors_protenix_mini_tmpl_v0.5.0",
 )
 
 const _AA3_TO_1 = let
@@ -302,6 +309,47 @@ const _HHBLITS_TO_PROTENIX = let
     out
 end
 
+const ChainMSABlock = NamedTuple{
+    (:msa, :has_deletion, :deletion_value, :deletion_mean, :profile),
+    Tuple{Matrix{Int}, Matrix{Float32}, Matrix{Float32}, Vector{Float32}, Matrix{Float32}},
+}
+
+const ChainMSAFeatures = NamedTuple{
+    (:combined, :non_pairing, :pairing, :pairing_keys),
+    Tuple{
+        ChainMSABlock,
+        ChainMSABlock,
+        Union{Nothing, ChainMSABlock},
+        Union{Nothing, Vector{String}},
+    },
+}
+
+const ChainSequenceRecord = NamedTuple{
+    (:chain_id, :sequence),
+    Tuple{String, String},
+}
+
+const ChainResidueRecord = NamedTuple{
+    (:res_id, :res_name),
+    Tuple{Int, String},
+}
+
+function _chain_msa_block(
+    msa::AbstractMatrix{<:Integer},
+    has_deletion::AbstractMatrix{<:Real},
+    deletion_value::AbstractMatrix{<:Real},
+    deletion_mean::AbstractVector{<:Real},
+    profile::AbstractMatrix{<:Real},
+)::ChainMSABlock
+    return (
+        msa = Int.(msa),
+        has_deletion = Float32.(has_deletion),
+        deletion_value = Float32.(deletion_value),
+        deletion_mean = Float32.(deletion_mean),
+        profile = Float32.(profile),
+    )
+end
+
 function resolve_model_spec(model_name::AbstractString)
     key = String(model_name)
     haskey(MODEL_SPECS, key) && return MODEL_SPECS[key]
@@ -357,27 +405,27 @@ function list_supported_models()
 end
 
 function default_weights_path(model_name::AbstractString; project_root::AbstractString = normpath(joinpath(@__DIR__, "..")))
-    key = String(model_name)
-    direct = joinpath(project_root, "weights_safetensors_" * key)
-    isdir(direct) && return direct
-    if haskey(_MODEL_DEFAULT_SAFETENSORS_DIR, key)
-        mapped = joinpath(project_root, _MODEL_DEFAULT_SAFETENSORS_DIR[key])
-        isdir(mapped) && return mapped
+    _ = project_root
+    return download_model_weights(model_name)
+end
+
+function _load_json_task_payload(path::AbstractString)
+    value = _as_string_dict(parse_json(read(path, String)))
+    if value isa AbstractVector
+        return (tasks = Any[value...], shape = :array, root = nothing)
+    elseif value isa AbstractDict
+        if haskey(value, "tasks")
+            tasks = value["tasks"]
+            tasks isa AbstractVector || error("Input JSON field 'tasks' must be an array of task objects: $path")
+            return (tasks = Any[tasks...], shape = :tasks_wrapper, root = value)
+        end
+        return (tasks = Any[value], shape = :object, root = nothing)
     end
-    error(
-        "No default safetensors path found for model '$key'. " *
-        "Looked for: $(abspath(direct)). Pass weights_path explicitly or convert/checkpoint this model first.",
-    )
+    error("Input JSON must be an object or array of objects: $path")
 end
 
 function _ensure_json_tasks(path::AbstractString)
-    value = parse_json(read(path, String))
-    if value isa AbstractVector
-        return Any[value...]
-    elseif value isa AbstractDict
-        return Any[value]
-    end
-    error("Input JSON must be an object or array of objects: $path")
+    return _load_json_task_payload(path).tasks
 end
 
 function _chain_letters(n::Int)
@@ -1180,6 +1228,8 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 end
                 atom_map = isempty(provided_map) ? inferred_map : provided_map
             else
+                smiles_str = startswith(ligand_uc, "SMILES_") ? strip(ligand_str[8:end]) : ligand_str
+                isempty(smiles_str) && error("Task.sequences[$entity_idx].$lig_key.ligand SMILES payload must be non-empty")
                 provided_map = haskey(lig, "atom_map_to_atom_name") ? _normalize_ligand_atom_map(
                     lig["atom_map_to_atom_name"],
                     "Task.sequences[$entity_idx].$lig_key",
@@ -1189,7 +1239,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                     chain_id = _chain_id_from_index(chain_idx)
                     chain_idx += 1
                     push!(chain_ids, chain_id)
-                    lig_atoms, built_atom_map = _build_ligand_atoms_from_smiles(ligand_str; chain_id = chain_id)
+                    lig_atoms, built_atom_map = _build_ligand_atoms_from_smiles(smiles_str; chain_id = chain_id)
                     append!(atoms, lig_atoms)
                     isempty(inferred_map) && (inferred_map = built_atom_map)
                 end
@@ -1316,25 +1366,113 @@ function _aligned_and_deletions_from_a3m(sequences::Vector{String})
     return aligned, deletion_matrix
 end
 
+function _pairing_key_from_description(desc::AbstractString, row_idx::Int)
+    row_idx == 1 && return "__query__"
+    s = lowercase(String(desc))
+    for pat in (
+        r"taxid[=\s:]+([0-9]+)",
+        r"ncbi_taxid[=\s:]+([0-9]+)",
+        r"\box=([0-9]+)",
+    )
+        m = match(pat, s)
+        m === nothing && continue
+        id = m.captures[1]
+        isempty(id) || return "taxid:" * id
+    end
+    m_tax = match(r"\btax=([^\s;|]+)", s)
+    if m_tax !== nothing
+        tax = strip(m_tax.captures[1])
+        isempty(tax) || return "tax:" * tax
+    end
+    m_os = match(r"\bos=([^=]+?)(?:\box=|\bgn=|\bpe=|\bsv=|$)", s)
+    if m_os !== nothing
+        os = replace(strip(m_os.captures[1]), r"\s+" => " ")
+        isempty(os) || return "os:" * os
+    end
+    return ""
+end
+
+function _dedup_aligned_deletion_rows(
+    aligned::Vector{String},
+    deletion_matrix::Vector{Vector{Float32}};
+    row_keys::Union{Nothing, Vector{String}} = nothing,
+)
+    if row_keys !== nothing && length(row_keys) != length(aligned)
+        error("row_keys length mismatch for MSA deduplication.")
+    end
+    seen = Set{String}()
+    dedup_aligned = String[]
+    dedup_del = Vector{Vector{Float32}}()
+    dedup_keys = row_keys === nothing ? nothing : String[]
+    for i in eachindex(aligned)
+        seq = aligned[i]
+        seq in seen && continue
+        push!(seen, seq)
+        push!(dedup_aligned, seq)
+        push!(dedup_del, deletion_matrix[i])
+        if dedup_keys !== nothing
+            push!(dedup_keys, (row_keys::Vector{String})[i])
+        end
+    end
+    return dedup_aligned, dedup_del, dedup_keys
+end
+
+function _pairing_row_plan(chain_features::Vector{ChainMSAFeatures})
+    n_chain = length(chain_features)
+    n_chain > 1 || return nothing
+    all(cf -> cf.pairing !== nothing && cf.pairing_keys !== nothing, chain_features) || return nothing
+
+    row_lookup = Vector{Dict{String, Vector{Int}}}(undef, n_chain)
+    ordered_keys = Vector{Vector{String}}(undef, n_chain)
+    for i in 1:n_chain
+        pairing = chain_features[i].pairing::ChainMSABlock
+        keys = chain_features[i].pairing_keys::Vector{String}
+        size(pairing.msa, 1) == length(keys) || return nothing
+        lookup = Dict{String, Vector{Int}}()
+        for (r, key) in enumerate(keys)
+            isempty(key) && continue
+            push!(get!(lookup, key, Int[]), r)
+        end
+        row_lookup[i] = lookup
+        ordered_keys[i] = keys
+    end
+
+    plan = Vector{Vector{Int}}()
+    if all(haskey(row_lookup[i], "__query__") && !isempty(row_lookup[i]["__query__"]) for i in 1:n_chain)
+        push!(plan, [popfirst!(row_lookup[i]["__query__"]) for i in 1:n_chain])
+    end
+
+    seen = Set{String}()
+    for key in ordered_keys[1]
+        (isempty(key) || key == "__query__" || key in seen) && continue
+        push!(seen, key)
+        while all(haskey(row_lookup[i], key) && !isempty(row_lookup[i][key]) for i in 1:n_chain)
+            push!(plan, [popfirst!(row_lookup[i][key]) for i in 1:n_chain])
+        end
+    end
+
+    # Require at least query + one taxonomically paired row before enabling key-based merge.
+    length(plan) >= 2 || return nothing
+    return plan
+end
+
 function _build_chain_msa_features(
     sequence::AbstractString,
     aligned::Vector{String},
     deletion_matrix::Vector{Vector{Float32}},
-)
+    ;
+    dedup_rows::Bool = true,
+)::ChainMSABlock
     if isempty(aligned)
         query = uppercase(strip(sequence))
         push!(aligned, query)
         push!(deletion_matrix, zeros(Float32, length(query)))
     end
 
-    seen = Set{String}()
-    dedup_aligned = String[]
-    dedup_del = Vector{Vector{Float32}}()
-    for (seq, del) in zip(aligned, deletion_matrix)
-        seq in seen && continue
-        push!(seen, seq)
-        push!(dedup_aligned, seq)
-        push!(dedup_del, del)
+    dedup_aligned = aligned
+    dedup_del = deletion_matrix
+    if dedup_rows
+        dedup_aligned, dedup_del, _ = _dedup_aligned_deletion_rows(aligned, deletion_matrix)
     end
 
     n_row = length(dedup_aligned)
@@ -1371,13 +1509,7 @@ function _build_chain_msa_features(
     deletion_value = (2f0 / Float32(pi)) .* atan.(deletion_mat ./ 3f0)
     deletion_mean = vec(mean(deletion_mat; dims = 1))
 
-    return (
-        msa = Int.(msa),
-        has_deletion = Float32.(has_deletion),
-        deletion_value = Float32.(deletion_value),
-        deletion_mean = Float32.(deletion_mean),
-        profile = Float32.(profile),
-    )
+    return _chain_msa_block(msa, has_deletion, deletion_value, deletion_mean, profile)
 end
 
 function _chain_msa_features(
@@ -1385,26 +1517,26 @@ function _chain_msa_features(
     msa_cfg::NamedTuple{(:precomputed_msa_dir, :pairing_db), Tuple{Union{Nothing, String}, String}},
     json_dir::AbstractString;
     require_pairing::Bool,
-)
+)::ChainMSAFeatures
     function _query_only_features()
         query_idx = _sequence_to_protenix_indices(sequence)
         profile = zeros(Float32, length(query_idx), 32)
         for (i, x) in enumerate(query_idx)
             profile[i, x + 1] = 1f0
         end
-        return (
-            msa = reshape(query_idx, 1, :),
-            has_deletion = zeros(Float32, 1, length(query_idx)),
-            deletion_value = zeros(Float32, 1, length(query_idx)),
-            deletion_mean = zeros(Float32, length(query_idx)),
-            profile = profile,
+        return _chain_msa_block(
+            permutedims(query_idx),
+            zeros(Float32, 1, length(query_idx)),
+            zeros(Float32, 1, length(query_idx)),
+            zeros(Float32, length(query_idx)),
+            profile,
         )
     end
 
     msa_dir_any = msa_cfg.precomputed_msa_dir
     if msa_dir_any === nothing || isempty(strip(String(msa_dir_any)))
         base = _query_only_features()
-        return (combined = base, non_pairing = base, pairing = nothing)
+        return (combined = base, non_pairing = base, pairing = nothing, pairing_keys = nothing)
     end
 
     msa_dir_raw = String(msa_dir_any)
@@ -1421,12 +1553,16 @@ function _chain_msa_features(
     end
 
     pairing = nothing
+    pairing_keys = nothing
     if require_pairing
         pair_path = joinpath(msa_dir, "pairing.a3m")
         isfile(pair_path) || error("No pairing-MSA found at $pair_path for multi-chain assembly.")
-        seqs, _ = _parse_a3m(pair_path; seq_limit = -1)
+        seqs, desc = _parse_a3m(pair_path; seq_limit = -1)
         aln, del = _aligned_and_deletions_from_a3m(seqs)
-        pairing = _build_chain_msa_features(sequence, aln, del)
+        row_keys = [_pairing_key_from_description(d, i) for (i, d) in enumerate(desc)]
+        aln_d, del_d, keys_d = _dedup_aligned_deletion_rows(aln, del; row_keys = row_keys)
+        pairing = _build_chain_msa_features(sequence, aln_d, del_d; dedup_rows = false)
+        pairing_keys = keys_d
     end
 
     if pairing === nothing
@@ -1446,7 +1582,7 @@ function _chain_msa_features(
         )
     end
 
-    return (combined = combined, non_pairing = non_pairing, pairing = pairing)
+    return (combined = combined, non_pairing = non_pairing, pairing = pairing, pairing_keys = pairing_keys)
 end
 
 function _inject_task_msa_features!(
@@ -1480,16 +1616,13 @@ function _inject_task_msa_features!(
     chain_sequences = [s.sequence for s in local_specs]
     is_homomer_or_monomer = length(Set(chain_sequences)) == 1
     json_dir = dirname(abspath(json_path))
-    chain_features = NamedTuple[]
-    for spec in local_specs
-        push!(
-            chain_features,
-            _chain_msa_features(
-                spec.sequence,
-                spec.msa_cfg,
-                json_dir;
-                require_pairing = !is_homomer_or_monomer,
-            ),
+    chain_features = Vector{ChainMSAFeatures}(undef, length(local_specs))
+    for (i, spec) in enumerate(local_specs)
+        chain_features[i] = _chain_msa_features(
+            spec.sequence,
+            spec.msa_cfg,
+            json_dir;
+            require_pairing = !is_homomer_or_monomer,
         )
     end
 
@@ -1500,8 +1633,9 @@ function _inject_task_msa_features!(
     end
 
     heteromer_pairing_merge = !is_homomer_or_monomer && all(cf -> cf.pairing !== nothing, chain_features)
+    pairing_plan = heteromer_pairing_merge ? _pairing_row_plan(chain_features) : nothing
     total_rows = if heteromer_pairing_merge
-        paired_rows = minimum(size(cf.pairing.msa, 1) for cf in chain_features)
+        paired_rows = pairing_plan === nothing ? minimum(size(cf.pairing.msa, 1) for cf in chain_features) : length(pairing_plan)
         nonpair_extra_rows = sum(max(size(cf.non_pairing.msa, 1) - 1, 0) for cf in chain_features)
         paired_rows + nonpair_extra_rows
     else
@@ -1516,17 +1650,31 @@ function _inject_task_msa_features!(
     deletion_mean = zeros(Float32, n_tok)
 
     if heteromer_pairing_merge
-        paired_rows = minimum(size(cf.pairing.msa, 1) for cf in chain_features)
         row = 1
-
-        # Paired rows are merged across chains at the same row index.
-        for r in 1:paired_rows
-            for (cf, cols) in zip(chain_features, chain_token_cols)
-                msa[row, cols] .= cf.pairing.msa[r, :]
-                has_deletion[row, cols] .= cf.pairing.has_deletion[r, :]
-                deletion_value[row, cols] .= cf.pairing.deletion_value[r, :]
+        if pairing_plan === nothing
+            paired_rows = minimum(size(cf.pairing.msa, 1) for cf in chain_features)
+            # Fallback mode: pair by row index when taxonomic keys are unavailable.
+            for r in 1:paired_rows
+                for (cf, cols) in zip(chain_features, chain_token_cols)
+                    msa[row, cols] .= cf.pairing.msa[r, :]
+                    has_deletion[row, cols] .= cf.pairing.has_deletion[r, :]
+                    deletion_value[row, cols] .= cf.pairing.deletion_value[r, :]
+                end
+                row += 1
             end
-            row += 1
+        else
+            # Preferred mode: pair rows by inferred species/taxonomic keys.
+            for row_indices in pairing_plan
+                for i in eachindex(chain_features)
+                    cf = chain_features[i]
+                    cols = chain_token_cols[i]
+                    r = row_indices[i]
+                    msa[row, cols] .= cf.pairing.msa[r, :]
+                    has_deletion[row, cols] .= cf.pairing.has_deletion[r, :]
+                    deletion_value[row, cols] .= cf.pairing.deletion_value[r, :]
+                end
+                row += 1
+            end
         end
 
         # Append non-pairing rows chain-wise (excluding duplicate query row).
@@ -1723,13 +1871,13 @@ function _nested_shape(x)
     return (length(x), s0...)
 end
 
-function _flatten_nested!(dst::Vector{Any}, x)
+function _flatten_nested!(dst::Vector{T}, x) where {T}
     if x isa AbstractArray
         for y in x
             _flatten_nested!(dst, y)
         end
     else
-        push!(dst, x)
+        push!(dst, T(x))
     end
     return dst
 end
@@ -1740,10 +1888,10 @@ function _to_dense_array(x, ::Type{T}) where {T}
         return T.(x)
     end
     shape = _nested_shape(x)
-    flat = Any[]
+    flat = T[]
     _flatten_nested!(flat, x)
     isempty(shape) && return T.(flat)
-    return reshape(T.(flat), shape...)
+    return reshape(flat, shape...)
 end
 
 function _to_int_array(x)
@@ -1932,6 +2080,12 @@ function _inject_constraint_feature_from_json!(
             p2 = right[3] isa Integer ? Int(right[3]) : parse(Int, strip(String(right[3])))
             a2 = right_is_atom ? right[4] : nothing
 
+            copy1 = c1 isa Integer ? Int(c1) : parse(Int, strip(String(c1)))
+            copy2 = c2 isa Integer ? Int(c2) : parse(Int, strip(String(c2)))
+            if e1 == e2 && copy1 == copy2
+                error("A contact pair can not be specified on the same chain")
+            end
+
             chains1 = _resolve_bond_chains(entity_chain_ids, e1, c1, "task.constraint.contact[$i] side1")
             chains2 = _resolve_bond_chains(entity_chain_ids, e2, c2, "task.constraint.contact[$i] side2")
             toks1 = _constraint_side_tokens(
@@ -1959,6 +2113,7 @@ function _inject_constraint_feature_from_json!(
 
             max_dist = Float32(pair["max_distance"])
             min_dist = haskey(pair, "min_distance") ? Float32(pair["min_distance"]) : 0f0
+            max_dist >= min_dist || error("max_distance must be greater than or equal to min_distance")
             target = left_is_atom ? contact_atom : contact
             for t1 in toks1, t2 in toks2
                 target[t1, t2, 1] = min_dist
@@ -1981,6 +2136,7 @@ function _inject_constraint_feature_from_json!(
             length(binder) == 2 || error("task.constraint.pocket.binder_chain must have length 2 [entity,copy]")
             be = binder[1] isa Integer ? Int(binder[1]) : parse(Int, strip(String(binder[1])))
             bc = binder[2]
+            bc_i = bc isa Integer ? Int(bc) : parse(Int, strip(String(bc)))
             bchains = _resolve_bond_chains(entity_chain_ids, be, bc, "task.constraint.pocket binder")
             btoks = Int[]
             for chain in bchains
@@ -1998,7 +2154,11 @@ function _inject_constraint_feature_from_json!(
                 length(r) == 3 || error("task.constraint.pocket.contact_residues[$j] must have length 3 [entity,copy,position]")
                 re = r[1] isa Integer ? Int(r[1]) : parse(Int, strip(String(r[1])))
                 rc = r[2]
+                rc_i = rc isa Integer ? Int(rc) : parse(Int, strip(String(rc)))
                 rp = r[3] isa Integer ? Int(r[3]) : parse(Int, strip(String(r[3])))
+                if be == re && bc_i == rc_i
+                    error("Pockets can not be the same chain with the binder")
+                end
                 rchains = _resolve_bond_chains(entity_chain_ids, re, rc, "task.constraint.pocket.contact_residues[$j]")
                 rtoks = _constraint_side_tokens(
                     token_lookup,
@@ -2082,9 +2242,76 @@ function _validate_required_model_inputs!(
     if params.needs_esm_embedding && !haskey(feat, "esm_token_embedding")
         error(
             "Model $(params.model_name) requires esm_token_embedding for $context. " *
-            "Provide task.esm_token_embedding [N_token,D] in JSON, or pass esm_token_embedding directly in sequence mode.",
+            "Provide task.esm_token_embedding [N_token,D], pass esm_token_embedding in sequence mode, " *
+            "or configure automatic ESM generation via ESMFold.jl.",
         )
     end
+    return feat
+end
+
+function _esm_variant_for_model(model_name::AbstractString)
+    name = lowercase(strip(String(model_name)))
+    return occursin("ism", name) ? :esm2_3b_ism : :esm2_3b
+end
+
+function _protein_chain_sequence_map(specs::AbstractVector{<:ProteinChainSpec})
+    out = Dict{String, String}()
+    for spec in specs
+        out[spec.chain_id] = spec.sequence
+    end
+    return out
+end
+
+function _inject_auto_esm_token_embedding!(
+    feat::Dict{String, Any},
+    atoms::Vector{AtomRecord},
+    tokens,
+    chain_sequences::Dict{String, String},
+    params::NamedTuple,
+    context::AbstractString,
+)
+    haskey(feat, "esm_token_embedding") && return feat
+    params.needs_esm_embedding || return feat
+    isempty(chain_sequences) && error("No protein sequences available for automatic ESM embedding ($context).")
+
+    n_tok = size(feat["restype"], 1)
+    length(tokens) == n_tok || error(
+        "Token/feature length mismatch while generating esm_token_embedding for $context.",
+    )
+
+    variant = _esm_variant_for_model(params.model_name)
+    unique_sequences = sort!(collect(Set(values(chain_sequences))))
+    seq_embeddings = Dict{String, Matrix{Float32}}()
+    emb_dim = 0
+    for seq in unique_sequences
+        emb = ESMProvider.embed_sequence(seq; variant = variant)
+        emb_dim = emb_dim == 0 ? size(emb, 2) : emb_dim
+        size(emb, 2) == emb_dim || error("Inconsistent ESM embedding dimensions for $context.")
+        seq_embeddings[seq] = emb
+    end
+    emb_dim > 0 || error("Failed to infer ESM embedding dimension for $context.")
+
+    x_esm = zeros(Float32, n_tok, emb_dim)
+    has_protein_token = false
+    for (tok_idx, tok) in enumerate(tokens)
+        centre_atom = atoms[tok.centre_atom_index]
+        centre_atom.mol_type == "protein" || continue
+        has_protein_token = true
+
+        sequence = get(chain_sequences, centre_atom.chain_id, nothing)
+        sequence === nothing && error(
+            "Missing protein sequence for chain '$(centre_atom.chain_id)' while building esm_token_embedding ($context).",
+        )
+        emb = seq_embeddings[sequence]
+        (1 <= centre_atom.res_id <= size(emb, 1)) || error(
+            "Residue index $(centre_atom.res_id) out of range for chain '$(centre_atom.chain_id)' " *
+            "with sequence length $(size(emb, 1)) while building esm_token_embedding ($context).",
+        )
+        @views x_esm[tok_idx, :] .= emb[centre_atom.res_id, :]
+    end
+
+    has_protein_token || error("No protein tokens found while generating esm_token_embedding for $context.")
+    feat["esm_token_embedding"] = x_esm
     return feat
 end
 
@@ -2098,9 +2325,9 @@ function _protein_chain_sequences(atoms::Vector{AtomRecord})
         end
     end
 
-    out = NamedTuple{(:chain_id, :sequence)}[]
+    out = ChainSequenceRecord[]
     for chain_id in chain_ids
-        residues = NamedTuple{(:res_id, :res_name)}[]
+        residues = ChainResidueRecord[]
         seen_res = Set{Int}()
         for a in atoms
             a.chain_id == chain_id || continue
@@ -2472,17 +2699,17 @@ function _write_confidence_summaries(
         pde_i = Array{Float32, 3}(pred.pde[sample_idx, :, :, :])
         resolved_i = Array{Float32, 2}(pred.resolved[sample_idx, :, :])
 
-        summary = Dict{String, Any}(
-            "model_output" => "julia_protenix",
-            "sample_name" => String(task_name),
-            "seed" => seed,
-            "sample_idx" => sample_idx - 1,
-            "plddt_logits_shape" => [size(plddt_i, 1), size(plddt_i, 2)],
-            "pae_logits_shape" => [size(pae_i, 1), size(pae_i, 2), size(pae_i, 3)],
-            "pde_logits_shape" => [size(pde_i, 1), size(pde_i, 2), size(pde_i, 3)],
-            "resolved_logits_shape" => [size(resolved_i, 1), size(resolved_i, 2)],
-            "plddt_logits_maxprob_mean" => _confidence_proxy(plddt_i),
-            "resolved_logits_maxprob_mean" => _confidence_proxy(resolved_i),
+        summary = (
+            model_output = "julia_protenix",
+            sample_name = String(task_name),
+            seed = Int(seed),
+            sample_idx = sample_idx - 1,
+            plddt_logits_shape = [size(plddt_i, 1), size(plddt_i, 2)],
+            pae_logits_shape = [size(pae_i, 1), size(pae_i, 2), size(pae_i, 3)],
+            pde_logits_shape = [size(pde_i, 1), size(pde_i, 2), size(pde_i, 3)],
+            resolved_logits_shape = [size(resolved_i, 1), size(resolved_i, 2)],
+            plddt_logits_maxprob_mean = _confidence_proxy(plddt_i),
+            resolved_logits_maxprob_mean = _confidence_proxy(resolved_i),
         )
 
         summary_path = joinpath(
@@ -2508,9 +2735,12 @@ function _resolve_predict_runtime(opts::ProtenixPredictOptions)
         use_msa = opts.use_msa,
     )
     mkpath(opts.out_dir)
-    local_weights = isempty(opts.weights_path) ? default_weights_path(opts.model_name) : abspath(opts.weights_path)
-    isdir(local_weights) || error("weights_path does not exist: $local_weights")
-    loaded = _load_model(opts.model_name, local_weights; strict = opts.strict)
+    isempty(opts.weights_path) || error(
+        "Local weights_path is disabled. Use HuggingFace model weights via " *
+        "PXDESIGN_WEIGHTS_REPO_ID/PXDESIGN_WEIGHTS_REVISION (and PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY for offline mode).",
+    )
+    weights_ref = default_weights_path(opts.model_name)
+    loaded = _load_model(opts.model_name, weights_ref; strict = opts.strict)
     return (params = params, loaded = loaded)
 end
 
@@ -2519,7 +2749,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
     params = runtime.params
     loaded = runtime.loaded
     json_paths = _collect_input_paths(input; exts = (".json",))
-    records = NamedTuple[]
+    records = PredictJSONRecord[]
 
     for json_path in json_paths
         tasks = _ensure_json_tasks(json_path)
@@ -2529,6 +2759,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
             task_name = haskey(task, "name") ? String(task["name"]) : "$(_default_task_name(json_path))_$(task_idx - 1)"
             parsed_task = _parse_task_entities(task; json_dir = dirname(abspath(json_path)))
             atoms = parsed_task.atoms
+            chain_sequences = _protein_chain_sequence_map(parsed_task.protein_specs)
 
             for seed in opts.seeds
                 rng = MersenneTwister(seed)
@@ -2552,6 +2783,14 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                 )
                 _inject_task_template_features!(bundle["input_feature_dict"], task)
                 _inject_task_esm_token_embedding!(bundle["input_feature_dict"], task)
+                _inject_auto_esm_token_embedding!(
+                    bundle["input_feature_dict"],
+                    bundle["atoms"],
+                    bundle["tokens"],
+                    chain_sequences,
+                    params,
+                    "task '$task_name' in $(basename(json_path))",
+                )
                 _inject_task_constraint_feature!(
                     bundle["input_feature_dict"],
                     task,
@@ -2583,10 +2822,10 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                 push!(
                     records,
                     (
-                        input_json = json_path,
-                        task_name = task_name,
-                        seed = seed,
-                        prediction_dir = pred_dir,
+                        input_json = String(json_path),
+                        task_name = String(task_name),
+                        seed = Int(seed),
+                        prediction_dir = String(pred_dir),
                         cif_paths = cif_paths,
                     ),
                 )
@@ -2632,7 +2871,7 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
     runtime = _resolve_predict_runtime(opts.common)
     params = runtime.params
     loaded = runtime.loaded
-    records = NamedTuple[]
+    records = PredictSequenceRecord[]
 
     for seed in opts.common.seeds
         rng = MersenneTwister(seed)
@@ -2646,6 +2885,14 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
             )
             bundle["input_feature_dict"]["esm_token_embedding"] = emb
         end
+        _inject_auto_esm_token_embedding!(
+            bundle["input_feature_dict"],
+            bundle["atoms"],
+            bundle["tokens"],
+            Dict(opts.chain_id => seq),
+            params,
+            "sequence task '$(opts.task_name)'",
+        )
         _validate_required_model_inputs!(
             params,
             bundle["input_feature_dict"],
@@ -2669,9 +2916,9 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
         push!(
             records,
             (
-                task_name = opts.task_name,
-                seed = seed,
-                prediction_dir = pred_dir,
+                task_name = String(opts.task_name),
+                seed = Int(seed),
+                prediction_dir = String(pred_dir),
                 cif_paths = cif_paths,
             ),
         )
@@ -2786,7 +3033,8 @@ function add_precomputed_msa_to_json(
     json_path = abspath(input_json)
     isfile(json_path) || error("input_json not found: $json_path")
 
-    tasks = _ensure_json_tasks(json_path)
+    payload = _load_json_task_payload(json_path)
+    tasks = payload.tasks
     for (task_idx, task_any) in enumerate(tasks)
         task_any isa AbstractDict || error("Task $(task_idx) in $json_path is not an object")
         task = task_any
@@ -2810,7 +3058,16 @@ function add_precomputed_msa_to_json(
     mkpath(out_dir)
     stem = splitext(basename(json_path))[1] * "_with_msa"
     out_path = _next_available_json_path(out_dir, stem)
-    write_json(out_path, tasks)
+    output_payload = if payload.shape == :tasks_wrapper
+        root = copy(payload.root)
+        root["tasks"] = tasks
+        root
+    elseif payload.shape == :object
+        length(tasks) == 1 ? tasks[1] : tasks
+    else
+        tasks
+    end
+    write_json(out_path, output_payload)
     return out_path
 end
 

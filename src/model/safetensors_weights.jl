@@ -22,8 +22,6 @@ Load safetensors weights from either:
 function load_safetensors_weights(path::AbstractString; mmap::Bool = true)
     p = abspath(path)
     if isfile(p)
-        endswith(lowercase(p), ".safetensors") ||
-            error("Expected a .safetensors file, got: $p")
         return _as_f32_weights(SafeTensors.load_safetensors(p; mmap = mmap))
     elseif isdir(p)
         index_file = joinpath(p, "model.safetensors.index.json")

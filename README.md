@@ -25,10 +25,14 @@ Infer-only Julia port of PXDesign.
     - `scripts/compare_parity_raw.jl`
 - In progress:
   - exact Python model architecture port (`pxdesign/model/*.py`)
-  - committed Python reference snapshot artifacts for CI parity gating
   - ESM2 integration for Protenix-mini ESM/ISM variants:
-    - wire automatic `esm_token_embedding` production from our Julia ESM2/ESMFold port
-    - current runtime supports ESM/ISM variants when `esm_token_embedding` is supplied from Julia (`[N_token, D]`)
+    - automatic `esm_token_embedding` production from Julia `ESMFold.jl` is implemented
+    - JSON/sequence API still accepts explicit user-provided `esm_token_embedding` (`[N_token, D]`) and uses it as override
+
+Parity policy:
+
+- Python-vs-Julia parity is validated locally via scripts/tests.
+- Reference parity artifacts are not committed and are out of scope for release packaging.
 
 ### Protenix v0.5 ESM Notes
 
@@ -36,9 +40,19 @@ Infer-only Julia port of PXDesign.
   - ESM enabled: `protenix_mini_esm_v0.5.0`, `protenix_mini_ism_v0.5.0`
   - ESM disabled by default: `protenix_base_default_v0.5.0`, `protenix_base_constraint_v0.5.0`, `protenix_mini_default_v0.5.0`, `protenix_mini_tmpl_v0.5.0`, `protenix_tiny_default_v0.5.0`
 - `esm2-3b-ism` refers to an ISM-tuned ESM2 checkpoint (ISM = Implicit Structure Model in the upstream cited work).
-- For ESM/ISM model variants, provide `esm_token_embedding` explicitly:
-  - JSON mode: add top-level `task.esm_token_embedding` (`[N_token, D]`)
-  - sequence mode: pass `--esm_token_embedding_json /path/to/embedding.json`
+- For ESM/ISM model variants:
+  - default behavior is automatic ESM embedding generation in Julia via `ESMFold.jl`
+  - explicit embeddings remain supported and take precedence over auto-generation:
+    - JSON mode: add top-level `task.esm_token_embedding` (`[N_token, D]`)
+    - sequence mode: pass `--esm_token_embedding_json /path/to/embedding.json`
+- ISM variant source configuration:
+  - default `esm2_3b` path uses `ESMFold.load_ESM` defaults (`facebook/esmfold_v1` safetensors)
+  - for `protenix_mini_ism_v0.5.0`, set:
+    - `PXDESIGN_ESM_ISM_REPO_ID`
+    - `PXDESIGN_ESM_ISM_FILENAME`
+    - `PXDESIGN_ESM_ISM_REVISION`
+  - optional offline mode:
+    - `PXDESIGN_ESM_LOCAL_FILES_ONLY=true`
 
 ### Protenix v0.5 User API (Julia)
 
@@ -68,7 +82,7 @@ bin/pxdesign msa --input /path/to/input.json \
 ```
 
 `predict --use_msa true` now consumes precomputed A3Ms from JSON `proteinChain.msa.precomputed_msa_dir` (reads `non_pairing.a3m`, and `pairing.a3m` for multi-chain tasks). Julia still does not run online/local MSA search.
-For heteromer assemblies, Julia merges `pairing.a3m` rows across chains by row index and appends non-pair rows chain-wise (still not full OpenFold species-pairing parity).
+For heteromer assemblies, Julia merges `pairing.a3m` rows across chains by inferred keys (`TaxID`/`ncbi_taxid`/`OX`/`Tax`/`OS`) when available, with fallback to row index; full OpenFold species/taxonomic pairing parity is currently out of scope.
 
 Detailed API coverage vs Python is documented in:
 
@@ -82,6 +96,7 @@ Current Julia `predict` infer-JSON path supports mixed entities:
 - `ligand`:
   - `CCD_*` ligands
   - `SMILES` ligands (Julia-native parser path)
+  - `SMILES_*` prefixed ligand strings (Python-compatible input alias)
   - `FILE_*` ligands (local structure-file ligand path)
   - `condition_ligand` alias is accepted for compatibility
 - `ion`
@@ -89,14 +104,27 @@ Current Julia `predict` infer-JSON path supports mixed entities:
   - atom-name fields (`left_atom`/`right_atom` or `atom1`/`atom2`)
   - numeric atom indices for ligand entities via `atom_map_to_atom_name`
 
+Input-shape compatibility note:
+
+- `predict` / `msa` accept task JSON as:
+  - a single task object
+  - an array of task objects
+  - a wrapper object with `tasks: [...]` (Python-compatible layout)
+- `msa` preserves the input task-container shape in its output JSON (object/array/tasks-wrapper).
+
 Constraint path status in this runtime:
 
 - `constraint.contact` / `constraint.pocket` ingestion + typed constraint embedder plumbing: implemented
+- constraint JSON validation now matches Python v0.5 semantics:
+  - same-chain `constraint.contact` pairs are rejected
+  - same-chain binder/contact residue in `constraint.pocket` is rejected
+  - `max_distance >= min_distance` is enforced
 - `constraint.structure`: accepted for JSON inference and treated as a no-op (matches current Python v0.5 behavior)
 - real checkpoint conversion/load coverage validated for `protenix_base_constraint_v0.5.0`
 - forward numerical parity checks are now wired:
   - `scripts/dump_python_protenix_base_constraint_trunk_denoise_parity.py`
   - `scripts/compare_protenix_base_constraint_trunk_denoise_parity.jl`
+- practical quality note: very shallow constraint sampling (for example `cycle=2, step=6`) can produce poor geometry in both Python and Julia; use recommended settings (`cycle=10, step=200`) for realistic folds.
 
 ### Typed Protenix Features (Julia-first runtime path)
 
@@ -149,7 +177,33 @@ Enable typed model-scaffold denoiser path:
 --set model_scaffold.enabled=true
 ```
 
-Checkpoint conversion bridge (for future exact weight loading):
+Model weights are now loaded from HuggingFace only (no local fallback directories).
+Default source:
+
+- `repo_id`: `MurrellLab/PXDesign.jl`
+- `revision`: `main`
+
+Configure weight source / offline mode with:
+
+```bash
+export PXDESIGN_WEIGHTS_REPO_ID=MurrellLab/PXDesign.jl
+export PXDESIGN_WEIGHTS_REVISION=main
+export PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=false
+```
+
+For fully offline execution after prefetching, set:
+
+```bash
+export PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=true
+```
+
+Legacy local weight overrides are intentionally disabled:
+
+- `predict --weights_path ...`
+- `infer --set raw_weights_dir=...`
+- `infer --set safetensors_weights_path=...`
+
+Checkpoint conversion bridge (for parity/audit workflows only):
 
 ```bash
 python3 scripts/export_checkpoint_raw.py \
@@ -158,9 +212,9 @@ python3 scripts/export_checkpoint_raw.py \
   --cast-float32
 ```
 
-Then load in Julia via `PXDesign.Model.load_raw_weights("./weights_raw")`.
+Then load in Julia via `PXDesign.Model.load_raw_weights("./weights_raw")` for conversion/parity scripts.
 
-Or convert raw weights to safetensors (single file or shards):
+Convert raw weights to safetensors (single file or shards):
 
 ```bash
 python3 scripts/convert_raw_to_safetensors.py \
@@ -168,20 +222,12 @@ python3 scripts/convert_raw_to_safetensors.py \
   --out-dir ./weights_safetensors
 ```
 
-To avoid manual scaffold shape mismatches, infer model dimensions directly from raw weights (diffusion + design embedder):
+To avoid manual scaffold shape mismatches during conversion checks, infer model dimensions directly from raw weights (diffusion + design embedder):
 
 ```bash
 --set model_scaffold.enabled=true \
 --set model_scaffold.auto_dims_from_weights=true \
 --set raw_weights_dir=./weights_raw
-```
-
-The same scaffold path can load safetensors weights:
-
-```bash
---set model_scaffold.enabled=true \
---set model_scaffold.auto_dims_from_weights=true \
---set safetensors_weights_path=./weights_safetensors
 ```
 
 Enforce strict key coverage (all expected keys present, no unexpected keys in the loaded model subtrees):
@@ -259,7 +305,13 @@ JULIA_DEPOT_PATH=$PWD/.julia_depot JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
 scripts/fold_sequence_protenix_base.jl "ACDEFGHIKLMNPQRSTVWY"
 ```
 
-Run a tiny end-to-end CPU smoke with strict real raw weights (`N_sample=1`, `N_step=2`):
+Both fold scripts resolve safetensors from HuggingFace (`MurrellLab/PXDesign.jl`) and accept source overrides via:
+
+- `PXDESIGN_WEIGHTS_REPO_ID`
+- `PXDESIGN_WEIGHTS_REVISION`
+- `PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY`
+
+Run a tiny end-to-end CPU smoke with strict safetensors loading (`N_sample=1`, `N_step=2`):
 
 ```bash
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
@@ -295,6 +347,14 @@ For Python-vs-Julia numeric checks across Protenix modules (MSA, pairformer, min
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
 scripts/run_protenix_parity_suite.jl
 ```
+
+Parity compare scripts still accept explicit local override env vars for parity workflows:
+
+- `MSA_WEIGHTS_DIR`
+- `PAIRFORMER_WEIGHTS_DIR`
+- `PMINI_WEIGHTS_DIR`
+- `PBASE_WEIGHTS_DIR`
+- `PBASE_CONSTRAINT_WEIGHTS_DIR`
 
 To run Python-backed parity checks inside `test/runtests.jl`, opt in explicitly:
 

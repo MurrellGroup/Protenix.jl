@@ -307,6 +307,17 @@ function _write_value(io::IO, x)
             _write_value(io, item)
         end
         write(io, ']')
+    elseif x isa NamedTuple
+        write(io, '{')
+        first = true
+        for (k, v) in pairs(x)
+            first || write(io, ',')
+            first = false
+            _write_escaped_string(io, String(k))
+            write(io, ':')
+            _write_value(io, v)
+        end
+        write(io, '}')
     elseif x isa AbstractDict
         write(io, '{')
         first = true

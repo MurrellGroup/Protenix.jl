@@ -4,6 +4,19 @@ using LinearAlgebra
 using Statistics
 using PXDesign
 
+const ROOT = normpath(joinpath(@__DIR__, ".."))
+
+function _default_weights_dir(dirname::AbstractString)
+    candidates = (
+        joinpath(ROOT, "release_data", dirname),
+        joinpath(ROOT, dirname),
+    )
+    for path in candidates
+        isdir(path) && return path
+    end
+    return first(candidates)
+end
+
 function _nested_dims(x)
     dims = Int[]
     cur = x
@@ -52,7 +65,7 @@ function main()
     weights_dir = get(
         ENV,
         "PAIRFORMER_WEIGHTS_DIR",
-        joinpath(pwd(), "weights_safetensors_protenix_mini_default_v0.5.0"),
+        _default_weights_dir("weights_safetensors_protenix_mini_default_v0.5.0"),
     )
     raw = PXDesign.JSONLite.parse_json(read(path, String))
     s_in = _to_array_f32(raw["s_in"])

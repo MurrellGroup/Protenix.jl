@@ -106,23 +106,19 @@ function (m::SubstructureSelfAttention)(x::AbstractArray{<:Real,3})
 
     n_heads = m.n_heads
     head_dim = fld(hidden, n_heads)
-    qh = permutedims(reshape(q, bsz, seq_len, n_heads, head_dim), (1, 3, 2, 4)) # [B,H,S,D]
-    kh = permutedims(reshape(k, bsz, seq_len, n_heads, head_dim), (1, 3, 2, 4))
-    vh = permutedims(reshape(v, bsz, seq_len, n_heads, head_dim), (1, 3, 2, 4))
-
-    out = Array{Float32}(undef, bsz, n_heads, seq_len, head_dim)
+    merged = Array{Float32}(undef, bsz, seq_len, hidden)
     scale = inv(sqrt(Float32(head_dim)))
     @inbounds for b in 1:bsz, hidx in 1:n_heads
-        qmat = reshape(@view(qh[b, hidx, :, :]), seq_len, head_dim)
-        kmat = reshape(@view(kh[b, hidx, :, :]), seq_len, head_dim)
-        vmat = reshape(@view(vh[b, hidx, :, :]), seq_len, head_dim)
+        head_start = (hidx - 1) * head_dim + 1
+        head_stop = hidx * head_dim
+        qmat = @view q[b, :, head_start:head_stop]
+        kmat = @view k[b, :, head_start:head_stop]
+        vmat = @view v[b, :, head_start:head_stop]
         scores = (qmat * transpose(kmat)) .* scale
         _row_softmax!(scores)
-        @view(out[b, hidx, :, :]) .= scores * vmat
+        @view(merged[b, :, head_start:head_stop]) .= scores * vmat
     end
 
-    merged = permutedims(out, (1, 3, 2, 4))
-    merged = reshape(merged, bsz, seq_len, hidden)
     return m.out_proj(merged)
 end
 

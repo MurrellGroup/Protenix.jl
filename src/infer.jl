@@ -19,13 +19,68 @@ import ..Model:
     infer_design_condition_embedder_dims,
     infer_model_scaffold_dims,
     load_design_condition_embedder!,
-    load_raw_weights,
     load_safetensors_weights,
     load_diffusion_module!
 import ..Output: dump_prediction_bundle
 import ..Schema: parse_tasks
+import ..WeightsHub: download_model_weights
 
 export run_infer, derive_seed
+
+struct RuntimeEnvOptions
+    use_fast_ln::Bool
+    use_deepspeed_evo_attention::Bool
+end
+
+struct NoiseSchedulerOptions
+    s_max::Float64
+    s_min::Float64
+    rho::Float64
+    sigma_data::Float64
+end
+
+struct EtaScheduleOptions
+    schedule_type::String
+    min::Float64
+    max::Float64
+end
+
+struct SampleDiffusionOptions
+    n_sample::Int
+    n_step::Int
+    gamma0::Float64
+    gamma_min::Float64
+    noise_scale_lambda::Float64
+    eta::EtaScheduleOptions
+end
+
+struct InferSettingOptions
+    sample_diffusion_chunk_size::Int
+end
+
+struct ModelScaffoldOptions
+    enabled::Bool
+    auto_dims_from_weights::Bool
+    use_design_condition_embedder::Bool
+    c_token::Int
+    c_s::Int
+    c_z::Int
+    c_s_inputs::Int
+    n_blocks::Int
+    n_heads::Int
+    c_atom::Int
+    c_atompair::Int
+    atom_encoder_blocks::Int
+    atom_encoder_heads::Int
+    atom_decoder_blocks::Int
+    atom_decoder_heads::Int
+end
+
+struct WeightLoadOptions
+    raw_weights_dir::String
+    safetensors_weights_path::String
+    strict_weight_load::Bool
+end
 
 function derive_seed(base_seed::Integer, rank::Integer = 0; digits::Int = 6)
     mod_base = 10^digits
@@ -38,12 +93,90 @@ function derive_seed(base_seed::Integer, rank::Integer = 0; digits::Int = 6)
     return Int(acc % UInt64(mod_base))
 end
 
-function _setup_runtime_env!(cfg::Dict{String, Any}; io::IO = stdout)
-    if get(cfg, "use_fast_ln", false)
+function _dict_string_any(x)::Dict{String, Any}
+    x isa AbstractDict || return Dict{String, Any}()
+    out = Dict{String, Any}()
+    for (k, v) in x
+        out[String(k)] = v
+    end
+    return out
+end
+
+function RuntimeEnvOptions(cfg::Dict{String, Any})
+    return RuntimeEnvOptions(
+        Bool(get(cfg, "use_fast_ln", false)),
+        Bool(get(cfg, "use_deepspeed_evo_attention", false)),
+    )
+end
+
+function NoiseSchedulerOptions(cfg::Dict{String, Any})
+    s_cfg = _dict_string_any(get(cfg, "inference_noise_scheduler", Dict{String, Any}()))
+    return NoiseSchedulerOptions(
+        Float64(get(s_cfg, "s_max", 160.0)),
+        Float64(get(s_cfg, "s_min", 4e-4)),
+        Float64(get(s_cfg, "rho", 7.0)),
+        Float64(get(s_cfg, "sigma_data", 16.0)),
+    )
+end
+
+function SampleDiffusionOptions(cfg::Dict{String, Any})
+    diff_cfg = _dict_string_any(get(cfg, "sample_diffusion", Dict{String, Any}()))
+    eta_cfg = _dict_string_any(get(diff_cfg, "eta_schedule", Dict{String, Any}("type" => "const", "min" => 1.5, "max" => 1.5)))
+    eta = EtaScheduleOptions(
+        String(get(eta_cfg, "type", "const")),
+        Float64(get(eta_cfg, "min", 1.5)),
+        Float64(get(eta_cfg, "max", 1.5)),
+    )
+    return SampleDiffusionOptions(
+        Int(get(diff_cfg, "N_sample", 1)),
+        Int(get(diff_cfg, "N_step", 40)),
+        Float64(get(diff_cfg, "gamma0", 1.0)),
+        Float64(get(diff_cfg, "gamma_min", 0.01)),
+        Float64(get(diff_cfg, "noise_scale_lambda", 1.003)),
+        eta,
+    )
+end
+
+function InferSettingOptions(cfg::Dict{String, Any})
+    infer_cfg = _dict_string_any(get(cfg, "infer_setting", Dict{String, Any}()))
+    return InferSettingOptions(Int(get(infer_cfg, "sample_diffusion_chunk_size", 0)))
+end
+
+function ModelScaffoldOptions(cfg::Dict{String, Any})
+    model_cfg = _dict_string_any(get(cfg, "model_scaffold", Dict{String, Any}()))
+    return ModelScaffoldOptions(
+        Bool(get(model_cfg, "enabled", false)),
+        Bool(get(model_cfg, "auto_dims_from_weights", false)),
+        Bool(get(model_cfg, "use_design_condition_embedder", true)),
+        Int(get(model_cfg, "c_token", 64)),
+        Int(get(model_cfg, "c_s", 64)),
+        Int(get(model_cfg, "c_z", 32)),
+        Int(get(model_cfg, "c_s_inputs", 128)),
+        Int(get(model_cfg, "n_blocks", 2)),
+        Int(get(model_cfg, "n_heads", 4)),
+        Int(get(model_cfg, "c_atom", 128)),
+        Int(get(model_cfg, "c_atompair", 16)),
+        Int(get(model_cfg, "atom_encoder_blocks", 3)),
+        Int(get(model_cfg, "atom_encoder_heads", 4)),
+        Int(get(model_cfg, "atom_decoder_blocks", 3)),
+        Int(get(model_cfg, "atom_decoder_heads", 4)),
+    )
+end
+
+function WeightLoadOptions(cfg::Dict{String, Any})
+    return WeightLoadOptions(
+        String(get(cfg, "raw_weights_dir", "")),
+        String(get(cfg, "safetensors_weights_path", "")),
+        Bool(get(cfg, "strict_weight_load", false)),
+    )
+end
+
+function _setup_runtime_env!(opts::RuntimeEnvOptions; io::IO = stdout)
+    if opts.use_fast_ln
         ENV["LAYERNORM_TYPE"] = "fast_layernorm"
     end
 
-    use_deepspeed_evo = get(cfg, "use_deepspeed_evo_attention", false)
+    use_deepspeed_evo = opts.use_deepspeed_evo_attention
     ENV["DEEPSPEED_EVO"] = use_deepspeed_evo ? "true" : "false"
 
     if use_deepspeed_evo
@@ -54,6 +187,10 @@ function _setup_runtime_env!(cfg::Dict{String, Any}; io::IO = stdout)
             println(io, "[warn] DeepSpeed Evo kernels may fail until CUTLASS v3.5.1 is installed.")
         end
     end
+end
+
+function _setup_runtime_env!(cfg::Dict{String, Any}; io::IO = stdout)
+    return _setup_runtime_env!(RuntimeEnvOptions(cfg); io = io)
 end
 
 function _persist_config(cfg::Dict{String, Any}, path::AbstractString)
@@ -101,12 +238,12 @@ function _to_matrix_f32(x)
 end
 
 function _make_scheduler(cfg::Dict{String, Any})
-    s_cfg = get(cfg, "inference_noise_scheduler", Dict{String, Any}())
+    s_cfg = NoiseSchedulerOptions(cfg)
     return InferenceNoiseScheduler(
-        s_max = Float64(get(s_cfg, "s_max", 160.0)),
-        s_min = Float64(get(s_cfg, "s_min", 4e-4)),
-        rho = Float64(get(s_cfg, "rho", 7.0)),
-        sigma_data = Float64(get(s_cfg, "sigma_data", 16.0)),
+        s_max = s_cfg.s_max,
+        s_min = s_cfg.s_min,
+        rho = s_cfg.rho,
+        sigma_data = s_cfg.sigma_data,
     )
 end
 
@@ -191,40 +328,31 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
     dims = feature_bundle["dims"]
 
     n_atom = Int(dims["N_atom"])
-    diff_cfg = cfg["sample_diffusion"]
+    sample_opts = SampleDiffusionOptions(cfg)
+    infer_opts = InferSettingOptions(cfg)
+    scaffold_opts = ModelScaffoldOptions(cfg)
+    weight_opts = WeightLoadOptions(cfg)
+    eta = (type = sample_opts.eta.schedule_type, min = sample_opts.eta.min, max = sample_opts.eta.max)
 
-    n_sample = Int(get(diff_cfg, "N_sample", 1))
-    n_step = Int(get(diff_cfg, "N_step", 40))
-    gamma0 = Float64(get(diff_cfg, "gamma0", 1.0))
-    gamma_min = Float64(get(diff_cfg, "gamma_min", 0.01))
-    noise_scale_lambda = Float64(get(diff_cfg, "noise_scale_lambda", 1.003))
-    eta = get(diff_cfg, "eta_schedule", Dict("type" => "const", "min" => 1.5, "max" => 1.5))
-    infer_setting = get(cfg, "infer_setting", Dict{String, Any}())
-    diffusion_chunk_size = Int(get(infer_setting, "sample_diffusion_chunk_size", 0))
-
-    model_scaffold_cfg = get(cfg, "model_scaffold", Dict{String, Any}())
-    use_model_scaffold = Bool(get(model_scaffold_cfg, "enabled", false))
+    use_model_scaffold = scaffold_opts.enabled
 
     typed_model = nothing
     model_inputs = nothing
     if use_model_scaffold
-        raw_weights_dir = String(get(cfg, "raw_weights_dir", ""))
-        safetensors_weights_path = String(get(cfg, "safetensors_weights_path", ""))
-        weights = nothing
-        if !isempty(raw_weights_dir) && !isempty(safetensors_weights_path)
-            error("Set only one of raw_weights_dir or safetensors_weights_path.")
-        end
-        if !isempty(safetensors_weights_path)
-            weights = load_safetensors_weights(safetensors_weights_path)
-        elseif !isempty(raw_weights_dir)
-            weights = load_raw_weights(raw_weights_dir)
-        end
+        raw_weights_dir = weight_opts.raw_weights_dir
+        safetensors_weights_path = weight_opts.safetensors_weights_path
+        isempty(raw_weights_dir) || error(
+            "Local raw_weights_dir is disabled. Configure PXDESIGN_WEIGHTS_* to fetch safetensors from HuggingFace.",
+        )
+        isempty(safetensors_weights_path) || error(
+            "Local safetensors_weights_path is disabled. Configure PXDESIGN_WEIGHTS_* to fetch safetensors from HuggingFace.",
+        )
+        model_name = String(get(cfg, "model_name", "pxdesign_v0.1.0"))
+        weights_ref = download_model_weights(model_name)
+        weights = load_safetensors_weights(weights_ref)
 
-        auto_dims_from_weights = Bool(get(model_scaffold_cfg, "auto_dims_from_weights", false))
+        auto_dims_from_weights = scaffold_opts.auto_dims_from_weights
         if auto_dims_from_weights
-            weights === nothing && error(
-                "model_scaffold.auto_dims_from_weights=true requires raw_weights_dir or safetensors_weights_path to be set.",
-            )
             inferred = infer_model_scaffold_dims(weights)
             c_token = inferred.c_token
             c_s = inferred.c_s
@@ -239,18 +367,18 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
             atom_decoder_blocks = inferred.atom_decoder_blocks
             atom_decoder_heads = inferred.atom_decoder_heads
         else
-            c_token = Int(get(model_scaffold_cfg, "c_token", 64))
-            c_s = Int(get(model_scaffold_cfg, "c_s", 64))
-            c_z = Int(get(model_scaffold_cfg, "c_z", 32))
-            c_s_inputs = Int(get(model_scaffold_cfg, "c_s_inputs", 128))
-            n_blocks = Int(get(model_scaffold_cfg, "n_blocks", 2))
-            n_heads = Int(get(model_scaffold_cfg, "n_heads", 4))
-            c_atom = Int(get(model_scaffold_cfg, "c_atom", 128))
-            c_atompair = Int(get(model_scaffold_cfg, "c_atompair", 16))
-            atom_encoder_blocks = Int(get(model_scaffold_cfg, "atom_encoder_blocks", 3))
-            atom_encoder_heads = Int(get(model_scaffold_cfg, "atom_encoder_heads", 4))
-            atom_decoder_blocks = Int(get(model_scaffold_cfg, "atom_decoder_blocks", 3))
-            atom_decoder_heads = Int(get(model_scaffold_cfg, "atom_decoder_heads", 4))
+            c_token = scaffold_opts.c_token
+            c_s = scaffold_opts.c_s
+            c_z = scaffold_opts.c_z
+            c_s_inputs = scaffold_opts.c_s_inputs
+            n_blocks = scaffold_opts.n_blocks
+            n_heads = scaffold_opts.n_heads
+            c_atom = scaffold_opts.c_atom
+            c_atompair = scaffold_opts.c_atompair
+            atom_encoder_blocks = scaffold_opts.atom_encoder_blocks
+            atom_encoder_heads = scaffold_opts.atom_encoder_heads
+            atom_decoder_blocks = scaffold_opts.atom_decoder_blocks
+            atom_decoder_heads = scaffold_opts.atom_decoder_heads
         end
 
         typed_model = DiffusionModule(
@@ -268,11 +396,9 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
             atom_decoder_heads = atom_decoder_heads,
             rng = MersenneTwister(seed + 17),
         )
-        if weights !== nothing
-            strict_weight_load = Bool(get(cfg, "strict_weight_load", false))
-            load_diffusion_module!(typed_model, weights; strict = strict_weight_load)
-        end
-        use_design_condition_embedder = Bool(get(model_scaffold_cfg, "use_design_condition_embedder", true))
+        strict_weight_load = weight_opts.strict_weight_load
+        load_diffusion_module!(typed_model, weights; strict = strict_weight_load)
+        use_design_condition_embedder = scaffold_opts.use_design_condition_embedder
         design_condition_embedder = nothing
         if use_design_condition_embedder
             design_c_token = c_token
@@ -300,16 +426,13 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
                 n_heads = design_n_heads,
                 rng = MersenneTwister(seed + 31),
             )
-            if weights !== nothing
-                strict_weight_load = Bool(get(cfg, "strict_weight_load", false))
-                load_design_condition_embedder!(
-                    design_condition_embedder,
-                    weights;
-                    strict = strict_weight_load,
-                )
-            end
+            load_design_condition_embedder!(
+                design_condition_embedder,
+                weights;
+                strict = weight_opts.strict_weight_load,
+            )
         end
-        if weights !== nothing && Bool(get(cfg, "strict_weight_load", false))
+        if weight_opts.strict_weight_load
             report = checkpoint_coverage_report(typed_model, design_condition_embedder, weights)
             if !isempty(report.missing) || !isempty(report.unused)
                 error(
@@ -346,18 +469,18 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
     end
 
     scheduler = _make_scheduler(cfg)
-    noise_schedule = scheduler(n_step; dtype = Float32)
+    noise_schedule = scheduler(sample_opts.n_step; dtype = Float32)
     rng = MersenneTwister(seed)
     return sample_diffusion(
         denoise_net;
         noise_schedule = noise_schedule,
-        N_sample = n_sample,
+        N_sample = sample_opts.n_sample,
         N_atom = n_atom,
-        gamma0 = gamma0,
-        gamma_min = gamma_min,
-        noise_scale_lambda = noise_scale_lambda,
+        gamma0 = sample_opts.gamma0,
+        gamma_min = sample_opts.gamma_min,
+        noise_scale_lambda = sample_opts.noise_scale_lambda,
         step_scale_eta = eta,
-        diffusion_chunk_size = diffusion_chunk_size,
+        diffusion_chunk_size = infer_opts.sample_diffusion_chunk_size,
         rng = rng,
     )
 end

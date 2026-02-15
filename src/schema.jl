@@ -2,7 +2,7 @@ module Schema
 
 import ..Ranges: parse_ranges
 
-export GenerationSpec, InputTask, parse_tasks
+export GenerationSpec, MSAChainOptions, InputTask, parse_tasks
 
 struct GenerationSpec
     type::String
@@ -10,13 +10,18 @@ struct GenerationSpec
     count::Int
 end
 
+const MSAChainOptions = NamedTuple{
+    (:precomputed_msa_dir, :pairing_db, :extra),
+    Tuple{Union{Nothing, String}, Union{Nothing, String}, Dict{String, String}},
+}
+
 struct InputTask
     name::String
     structure_file::String
     chain_ids::Vector{String}
     crop::Dict{String, String}
     hotspots::Dict{String, Vector{Int}}
-    msa::Dict{String, Dict{String, Any}}
+    msa::Dict{String, MSAChainOptions}
     generation::Vector{GenerationSpec}
 end
 
@@ -66,17 +71,25 @@ function _parse_hotspots(x)
 end
 
 function _parse_msa(x)
-    out = Dict{String, Dict{String, Any}}()
+    out = Dict{String, MSAChainOptions}()
     if !(x isa AbstractDict)
         return out
     end
     for (chain, cfg_any) in x
         cfg = _as_dict(cfg_any, "condition.msa.$(chain)")
-        chain_dict = Dict{String, Any}()
+        precomputed_msa_dir = haskey(cfg, "precomputed_msa_dir") ? String(cfg["precomputed_msa_dir"]) : nothing
+        pairing_db = haskey(cfg, "pairing_db") ? String(cfg["pairing_db"]) : nothing
+        chain_extra = Dict{String, String}()
         for (k, v) in cfg
-            chain_dict[String(k)] = v
+            ks = String(k)
+            (ks == "precomputed_msa_dir" || ks == "pairing_db") && continue
+            chain_extra[ks] = String(v)
         end
-        out[String(chain)] = chain_dict
+        out[String(chain)] = (
+            precomputed_msa_dir = precomputed_msa_dir,
+            pairing_db = pairing_db,
+            extra = chain_extra,
+        )
     end
     return out
 end
@@ -103,7 +116,7 @@ function parse_task(raw)::InputTask
     structure_file = ""
     chain_ids = String[]
     crop = Dict{String, String}()
-    msa = Dict{String, Dict{String, Any}}()
+    msa = Dict{String, MSAChainOptions}()
 
     if haskey(d, "condition")
         cond = _as_dict(d["condition"], "condition")
@@ -114,11 +127,11 @@ function parse_task(raw)::InputTask
 
         structure_file = String(cond["structure_file"])
         chain_ids = _to_string_vector(filt["chain_id"], "condition.filter.chain_id")
-        crop = _parse_crop(get(filt, "crop", Dict{String, Any}()))
-        msa = _parse_msa(get(cond, "msa", Dict{String, Any}()))
+        crop = _parse_crop(get(filt, "crop", nothing))
+        msa = _parse_msa(get(cond, "msa", nothing))
     end
 
-    hotspots = _parse_hotspots(get(d, "hotspot", Dict{String, Any}()))
+    hotspots = _parse_hotspots(get(d, "hotspot", nothing))
     generation = _parse_generation(d["generation"])
 
     return InputTask(name, structure_file, chain_ids, crop, hotspots, msa, generation)
