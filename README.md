@@ -87,6 +87,7 @@ For heteromer assemblies, Julia merges `pairing.a3m` rows across chains by infer
 Detailed API coverage vs Python is documented in:
 
 - `docs/PROTENIX_API_SURFACE_AUDIT.md`
+- `docs/PURE_JULIA_STATUS_AND_ENV_SETUP.md`
 
 Current Julia `predict` infer-JSON path supports mixed entities:
 
@@ -335,18 +336,58 @@ JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/runtests.jl
 ```
 
-`test/runtests.jl` includes end-to-end smoke paths for all three model families in this repo:
+### Comprehensive test suites
 
-- PXDesign infer scaffold (`Infer.run_infer` -> CIF output tree)
-- Protenix-mini sequence fold (`ProtenixMini.fold_sequence` -> CIF)
-- Protenix-base v0.5 sequence fold (`ProtenixBase.fold_sequence` -> CIF)
+Primary comprehensive validation command (Julia-only):
 
-For Python-vs-Julia numeric checks across Protenix modules (MSA, pairformer, mini trunk+denoise, base trunk+denoise):
+```bash
+cd /Users/benmurrell/JuliaM3/PXDesign/PXDesign.jl
+JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
+JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/runtests.jl
+```
+
+This covers (single command):
+
+- config defaults/override aliasing
+- Protenix API option validation and model listing
+- mixed-entity parsing (protein/dna/rna/ligand/ion)
+- covalent-bond injection (name + numeric ligand atom index modes)
+- precomputed MSA ingestion/merge behavior
+- template/ESM feature ingestion and validation
+- Protenix mini/base/base-constraint end-to-end smoke forwards
+- PXDesign infer non-dry-run scaffold smoke
+- model layer/state-load/parity utility checks
+- cache refresh and CLI smoke behavior
+
+Additional comprehensive suites:
+
+1. Frozen fixture regression (layer-level drift guardrail):
+
+```bash
+JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
+JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
+~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/layer_regression.jl
+```
+
+2. Python-reference Protenix parity suite (requires Python reference env):
 
 ```bash
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. \
 scripts/run_protenix_parity_suite.jl
 ```
+
+3. Official Python input-tensor parity sweep (reference runner, multi-model):
+
+```bash
+bash scripts/run_input_tensor_parity_official.sh
+```
+
+`test/runtests.jl` includes end-to-end smoke paths for all three model families in this repo:
+
+- PXDesign infer scaffold (`Infer.run_infer` -> CIF output tree)
+- Protenix-mini sequence fold (`ProtenixMini.fold_sequence` -> CIF)
+- Protenix-base v0.5 sequence fold (`ProtenixBase.fold_sequence` -> CIF)
 
 Parity compare scripts still accept explicit local override env vars for parity workflows:
 
@@ -365,15 +406,7 @@ JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
 ~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/runtests.jl
 ```
 
-### Frozen layer regression fixtures
-
-The test suite includes locked layer-level regression fixtures across PXDesign + Protenix-mini/v0.5 paths:
-
-```bash
-JULIA_DEPOT_PATH=$PWD/.julia_depot:$HOME/.julia \
-JULIAUP_DEPOT_PATH=$PWD/.julia_depot \
-~/.julia/juliaup/julia-1.11.2+0.aarch64.apple.darwin14/bin/julia --project=. test/layer_regression.jl
-```
+### Layer fixture regeneration
 
 Fixture regeneration is intentionally guarded and requires explicit opt-in:
 
@@ -400,3 +433,4 @@ See:
 - `docs/INFER_ONLY_AUDIT.md`
 - `docs/MODEL_PORT_MAP.md`
 - `docs/CODEBASE_ISSUES_TRACKER.md`
+- `docs/PURE_JULIA_STATUS_AND_ENV_SETUP.md`
