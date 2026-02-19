@@ -35,6 +35,11 @@ function _build_feature_bundles()
 end
 
 function compute_layer_regression_outputs()
+    # Seed the global RNG so that Onion sub-layers (AttentionPairBias, Transition,
+    # BGLinear) which use Random.default_rng() for weight initialization produce
+    # deterministic results regardless of prior RNG state in the process.
+    Random.seed!(42)
+
     base = _build_feature_bundles()
     atoms = base.atoms
     feat_design = base.feat_design
@@ -94,8 +99,8 @@ function compute_layer_regression_outputs()
         s_max = 2,
         rng = MersenneTwister(5),
     )
-    s_trunk = reshape(Float32.(collect(1:(n_tok * 16))), n_tok, 16) ./ 100f0
-    z_trunk = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), n_tok, n_tok, 8) ./ 100f0
+    s_trunk = reshape(Float32.(collect(1:(n_tok * 16))), 16, n_tok) ./ 100f0
+    z_trunk = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), 8, n_tok, n_tok) ./ 100f0
     pair_cache = PXDesign.Model.prepare_pair_cache(cond, relpos_input, z_trunk)
     single_s, pair_z = cond(
         Float32[16f0, 16f0],
@@ -109,17 +114,18 @@ function compute_layer_regression_outputs()
     out["pxdesign.diffusion_conditioning.single_s"] = single_s
     out["pxdesign.diffusion_conditioning.pair_z"] = pair_z
 
-    a_test = reshape(Float32.(collect(1:(n_tok * 12))), n_tok, 12) ./ 50f0
-    s_test = reshape(Float32.(collect(1:(n_tok * 16))), n_tok, 16) ./ 60f0
-    z_test = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), n_tok, n_tok, 8) ./ 70f0
+    a_test = reshape(Float32.(collect(1:(n_tok * 12))), 12, n_tok) ./ 50f0
+    s_test = reshape(Float32.(collect(1:(n_tok * 16))), 16, n_tok) ./ 60f0
+    z_test = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), 8, n_tok, n_tok) ./ 70f0
     ctb = PXDesign.Model.ConditionedTransitionBlock(12, 16; n = 2, rng = MersenneTwister(6))
     out["pxdesign.conditioned_transition_block"] = ctb(a_test, s_test)
+    mask_test = ones(Float32, n_tok, 1)
 
     apb = PXDesign.Model.AttentionPairBias(12, 16, 8; n_heads = 4, rng = MersenneTwister(7))
     out["pxdesign.attention_pair_bias"] = apb(a_test, s_test, z_test)
 
     dtb = PXDesign.Model.DiffusionTransformerBlock(12, 16, 8; n_heads = 4, rng = MersenneTwister(8))
-    out["pxdesign.diffusion_transformer_block"] = dtb(a_test, s_test, z_test)
+    out["pxdesign.diffusion_transformer_block"] = dtb(a_test, s_test, z_test, mask_test)
 
     dt = PXDesign.Model.DiffusionTransformer(12, 16, 8; n_blocks = 2, n_heads = 4, rng = MersenneTwister(9))
     out["pxdesign.diffusion_transformer"] = dt(a_test, s_test, z_test)
@@ -154,9 +160,9 @@ function compute_layer_regression_outputs()
         n_keys = 16,
         rng = MersenneTwister(11),
     )
-    r_l = zeros(Float32, 2, n_atom, 3)
-    s_batch = reshape(Float32.(collect(1:(2 * n_tok * 16))), 2, n_tok, 16) ./ 80f0
-    z_batch = reshape(Float32.(collect(1:(2 * n_tok * n_tok * 8))), 2, n_tok, n_tok, 8) ./ 90f0
+    r_l = zeros(Float32, 3, n_atom, 2)
+    s_batch = reshape(Float32.(collect(1:(2 * n_tok * 16))), 16, n_tok, 2) ./ 80f0
+    z_batch = reshape(Float32.(collect(1:(2 * n_tok * n_tok * 8))), 8, n_tok, n_tok, 2) ./ 90f0
     a_tok1, q_skip1, c_skip1, p_skip1 = aae_coords(atom_input; r_l = r_l, s = s_batch, z = z_batch)
     out["pxdesign.atom_attention_encoder_with_coords.a"] = a_tok1
     out["pxdesign.atom_attention_encoder_with_coords.q_skip"] = q_skip1
@@ -190,7 +196,7 @@ function compute_layer_regression_outputs()
         atom_decoder_heads = 2,
         rng = MersenneTwister(13),
     )
-    x_noisy = zeros(Float32, 2, n_atom, 3)
+    x_noisy = zeros(Float32, 3, n_atom, 2)
     out["pxdesign.diffusion_module"] = dm(
         x_noisy,
         Float32[16f0, 16f0];
@@ -314,14 +320,18 @@ function compute_layer_regression_outputs()
     out["protenix_mini.model_trunk.s"] = trunk.s
     out["protenix_mini.model_trunk.z"] = trunk.z
 
-    x_noisy_pm = zeros(Float32, 1, n_atom, 3)
+    x_noisy_pm = zeros(Float32, 3, n_atom, 1)
+    # ProtenixMini trunk outputs are features-last; convert to features-first for DiffusionModule
+    s_inputs_ff = permutedims(Float32.(trunk.s_inputs))  # (N,c) -> (c,N)
+    s_trunk_ff = permutedims(Float32.(trunk.s))            # (N,c) -> (c,N)
+    z_trunk_ff = permutedims(Float32.(trunk.z), (3, 1, 2)) # (N,N,c) -> (c,N,N)
     x_denoised_pm = pm.diffusion_module(
         x_noisy_pm,
         Float32[16f0];
         relpos_input = PXDesign.Model.as_relpos_input(feat_mini),
-        s_inputs = trunk.s_inputs,
-        s_trunk = trunk.s,
-        z_trunk = trunk.z,
+        s_inputs = s_inputs_ff,
+        s_trunk = s_trunk_ff,
+        z_trunk = z_trunk_ff,
         atom_to_token_idx = Int.(feat_mini["atom_to_token_idx"]),
         input_feature_dict = PXDesign.Model.as_atom_attention_input(feat_mini),
     )

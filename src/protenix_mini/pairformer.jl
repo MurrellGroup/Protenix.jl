@@ -354,11 +354,14 @@ function (m::MSAModule)(
     )
     isempty(idx) && return _as_f32_array(z)
 
-    msa_sel = Int.(msa_raw[idx, :])
+    # one_hot_int uses scalar loops on CPU; pull Int MSA to CPU.
+    msa_sel = Int.(Array(msa_raw[idx, :]))
     del_mask = _as_f32_array(feat.has_deletion[idx, :])
     del_val = _as_f32_array(feat.deletion_value[idx, :])
 
-    msa_onehot = one_hot_int(msa_sel, 32)
+    msa_onehot_cpu = one_hot_int(msa_sel, 32)
+    # Transfer one-hot to same device as z (GPU if model on GPU).
+    msa_onehot = z isa Array ? msa_onehot_cpu : copyto!(similar(z, Float32, size(msa_onehot_cpu)...), msa_onehot_cpu)
     msa_feat = cat(msa_onehot, reshape(del_mask, size(del_mask)..., 1), reshape(del_val, size(del_val)..., 1); dims = 3)
 
     msa_emb = m.linear_no_bias_m(msa_feat)
@@ -400,11 +403,12 @@ function (m::MSAModule)(
     )
     isempty(idx) && return _as_f32_array(z)
 
-    msa_sel = Int.(msa_raw[idx, :])
+    msa_sel = Int.(Array(msa_raw[idx, :]))
     del_mask = _as_f32_array(input_feature_dict["has_deletion"][idx, :])
     del_val = _as_f32_array(input_feature_dict["deletion_value"][idx, :])
 
-    msa_onehot = one_hot_int(msa_sel, 32)
+    msa_onehot_cpu = one_hot_int(msa_sel, 32)
+    msa_onehot = z isa Array ? msa_onehot_cpu : copyto!(similar(z, Float32, size(msa_onehot_cpu)...), msa_onehot_cpu)
     msa_feat = cat(msa_onehot, reshape(del_mask, size(del_mask)..., 1), reshape(del_val, size(del_val)..., 1); dims = 3)
 
     msa_emb = m.linear_no_bias_m(msa_feat)
@@ -532,10 +536,15 @@ function _noisy_structure_forward(
     x::AbstractMatrix{<:Real},
     mask::AbstractVector{Bool},
 )
+    # Early exit: if no atoms are masked, the entire contribution is zero.
+    any(mask) || return fill!(similar(z, Float32, size(z)), 0f0)
+
     n = size(z, 1)
     # Vectorized pair mask: mask[i] & mask[j]
-    mf = Float32.(mask)
-    pair_mask = reshape(mf, n, 1, 1) .* reshape(mf, 1, n, 1) # [n, n, 1]
+    mf_cpu = Float32.(mask)
+    pair_mask_cpu = reshape(mf_cpu, n, 1, 1) .* reshape(mf_cpu, 1, n, 1) # [n, n, 1]
+    # Transfer to device of z for broadcasting with GPU tensors.
+    pair_mask = z isa Array ? pair_mask_cpu : copyto!(similar(z, Float32, size(pair_mask_cpu)...), pair_mask_cpu)
 
     d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask
     d = cat(d, pair_mask; dims = 3)
@@ -545,7 +554,6 @@ function _noisy_structure_forward(
     z_cat = cat(z_proj, d; dims = 3)
     out = m.transition_out(z_cat)
 
-    any(mask) || (out = fill!(similar(out), 0f0))
     return out
 end
 
@@ -555,7 +563,8 @@ function (m::NoisyStructureEmbedder)(
 )
     n = size(z, 1)
     x = feat.struct_cb_coords === nothing ? fill!(similar(z, Float32, n, 3), 0f0) : Float32.(feat.struct_cb_coords)
-    mask = feat.struct_cb_mask === nothing ? falses(n) : Bool.(feat.struct_cb_mask)
+    # Create mask on CPU (used in scalar-compatible Bool operations).
+    mask = feat.struct_cb_mask === nothing ? falses(n) : Bool.(Array(feat.struct_cb_mask))
     return _noisy_structure_forward(m, z, x, mask)
 end
 
@@ -570,7 +579,7 @@ function (m::NoisyStructureEmbedder)(
         fill!(similar(z, Float32, n, 3), 0f0)
     end
     mask = if haskey(input_feature_dict, "struct_cb_mask")
-        Bool.(input_feature_dict["struct_cb_mask"])
+        Bool.(Array(input_feature_dict["struct_cb_mask"]))
     else
         falses(n)
     end

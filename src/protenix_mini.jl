@@ -24,7 +24,7 @@ using .Utils:
     sample_msa_indices
 
 using .Primitives: Linear, LinearNoBias, LayerNorm, transition, silu
-using .Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+using .Features: ProtenixFeatures, as_protenix_features, features_to_device, relpos_input, atom_attention_input
 using .Constraint:
     AbstractSubstructureEmbedder,
     SubstructureLinearEmbedder,
@@ -61,7 +61,7 @@ export softmax_lastdim,
     sample_msa_indices
 
 export Linear, LinearNoBias, LayerNorm, transition, silu
-export ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+export ProtenixFeatures, as_protenix_features, features_to_device, relpos_input, atom_attention_input
 export AbstractSubstructureEmbedder,
     SubstructureLinearEmbedder,
     SubstructureMLPEmbedder,

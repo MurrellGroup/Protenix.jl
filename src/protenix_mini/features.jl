@@ -1,10 +1,11 @@
 module Features
 
 using ConcreteStructs
+using Flux: @layer
 
 import ..Utils: one_hot_int
 
-export ConstraintFeatures, ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+export ConstraintFeatures, ProtenixFeatures, as_protenix_features, features_to_device, relpos_input, atom_attention_input
 
 @concrete struct ConstraintFeatures
     contact   # Union{Nothing, AbstractArray{Float32,3}}
@@ -12,6 +13,7 @@ export ConstraintFeatures, ProtenixFeatures, as_protenix_features, relpos_input,
     contact_atom  # Union{Nothing, AbstractArray{Float32,3}}
     substructure  # Union{Nothing, AbstractArray{Float32,3}}
 end
+@layer ConstraintFeatures
 
 @concrete struct ProtenixFeatures
     asym_id               # AbstractVector{Int}
@@ -44,10 +46,11 @@ end
     distogram_rep_atom_mask # AbstractVector{Bool}
     constraint_feature    # Union{Nothing, ConstraintFeatures}
 end
+@layer ProtenixFeatures
 
 _as_i_vec(x, name::String) = x isa AbstractVector ? Int.(x) : error("$name must be a vector")
 _as_f_vec(x, name::String) = x isa AbstractVector ? Float32.(x) : error("$name must be a vector")
-_as_b_vec(x, name::String) = x isa AbstractVector ? Bool.(x) : error("$name must be a vector")
+_as_b_vec(x, name::String) = x isa AbstractVector ? collect(Bool, x) : error("$name must be a vector")
 _as_i_mat(x, name::String) = x isa AbstractMatrix ? Int.(x) : error("$name must be a matrix")
 _as_f_mat(x, name::String) = x isa AbstractMatrix ? Float32.(x) : error("$name must be a matrix")
 function _as_ref_atom_name_chars_mat(x)
@@ -167,6 +170,55 @@ function as_protenix_features(feat::AbstractDict{<:AbstractString, <:Any})
 end
 
 as_protenix_features(feat::ProtenixFeatures) = feat
+
+# Transfer float arrays to the device of `ref`, keep int/bool vectors on CPU.
+function _float_to_dev(x::AbstractArray{<:AbstractFloat}, ref::AbstractArray)
+    copyto!(similar(ref, Float32, size(x)...), Float32.(x))
+end
+_float_to_dev(::Nothing, ::AbstractArray) = nothing
+
+function _constraint_to_device(c::ConstraintFeatures, ref::AbstractArray)
+    mv = x -> _float_to_dev(x, ref)
+    return ConstraintFeatures(mv(c.contact), mv(c.pocket), mv(c.contact_atom), mv(c.substructure))
+end
+
+function features_to_device(feat::ProtenixFeatures, ref::AbstractArray)
+    mv = x -> _float_to_dev(x, ref)
+    return ProtenixFeatures(
+        feat.asym_id,
+        feat.residue_index,
+        feat.entity_id,
+        feat.sym_id,
+        feat.token_index,
+        mv(feat.token_mask),
+        mv(feat.token_bonds),
+        mv(feat.restype),
+        mv(feat.profile),
+        mv(feat.deletion_mean),
+        feat.msa,
+        mv(feat.has_deletion),
+        mv(feat.deletion_value),
+        feat.template_restype,
+        mv(feat.template_all_atom_mask),
+        mv(feat.template_all_atom_positions),
+        mv(feat.struct_cb_coords),
+        feat.struct_cb_mask,
+        mv(feat.esm_token_embedding),
+        mv(feat.ref_pos),
+        mv(feat.ref_charge),
+        mv(feat.ref_mask),
+        mv(feat.ref_element),
+        mv(feat.ref_atom_name_chars),
+        feat.ref_space_uid,
+        feat.atom_to_token_idx,
+        feat.atom_to_tokatom_idx,
+        feat.distogram_rep_atom_mask,
+        feat.constraint_feature === nothing ? nothing : _constraint_to_device(feat.constraint_feature, ref),
+    )
+end
+
+# No-op when ref is a regular CPU Array
+features_to_device(feat::ProtenixFeatures, ::Array) = feat
 
 function relpos_input(feat::ProtenixFeatures)
     return (

@@ -3,11 +3,16 @@ module TransformerBlocks
 using Random
 using ConcreteStructs
 using Flux: @layer
+using NNlib
+import Onion
 
-import ..Primitives: AdaptiveLayerNorm, LayerNormNoOffset, LinearNoBias, silu
+import ..Primitives: AdaptiveLayerNorm, LayerNormFirst, BGLinear, LinearNoBias, silu
 
 export ConditionedTransitionBlock, AttentionPairBias, DiffusionTransformerBlock, DiffusionTransformer
 
+# ---------------------------------------------------------------------------
+# ConditionedTransitionBlock — features-first
+# ---------------------------------------------------------------------------
 @concrete struct ConditionedTransitionBlock
     c_a
     c_s
@@ -16,8 +21,7 @@ export ConditionedTransitionBlock, AttentionPairBias, DiffusionTransformerBlock,
     linear_a1
     linear_a2
     linear_b
-    linear_s
-    bias_s
+    linear_s     # gate projection: c_s → c_a, with bias
 end
 @layer ConditionedTransitionBlock
 
@@ -31,32 +35,32 @@ function ConditionedTransitionBlock(
     c_a > 0 || error("c_a must be positive.")
     c_s > 0 || error("c_s must be positive.")
     n > 0 || error("n must be positive.")
+    gate_proj = BGLinear(c_s, c_a; bias = true)
+    gate_proj.bias .= Float32(biasinit)
     return ConditionedTransitionBlock(
         c_a,
         c_s,
         n,
         AdaptiveLayerNorm(c_a, c_s; rng = rng),
-        LinearNoBias(n * c_a, c_a; rng = rng),
-        LinearNoBias(n * c_a, c_a; rng = rng),
-        LinearNoBias(c_a, n * c_a; rng = rng),
-        LinearNoBias(c_a, c_s; rng = rng),
-        fill(Float32(biasinit), c_a),
+        LinearNoBias(c_a, n * c_a),
+        LinearNoBias(c_a, n * c_a),
+        LinearNoBias(n * c_a, c_a),
+        gate_proj,
     )
 end
 
 function (blk::ConditionedTransitionBlock)(a::AbstractArray{<:Real}, s::AbstractArray{<:Real})
-    size(a, ndims(a)) == blk.c_a || error("ConditionedTransitionBlock: a last dim must be c_a=$(blk.c_a)")
-    size(s, ndims(s)) == blk.c_s || error("ConditionedTransitionBlock: s last dim must be c_s=$(blk.c_s)")
-    size(a)[1:(ndims(a)-1)] == size(s)[1:(ndims(s)-1)] ||
-        error("ConditionedTransitionBlock: a and s batch/token dims must match.")
-
+    # a: (c_a, N, ...), s: (c_s, N, ...)
     a0 = blk.adaln(a, s)
     b = silu(blk.linear_a1(a0)) .* blk.linear_a2(a0)
     proj = blk.linear_b(b)
-    gate = blk.linear_s(s) .+ reshape(blk.bias_s, ntuple(_ -> 1, ndims(s)-1)..., :)
-    return (1f0 ./ (1f0 .+ exp.(-gate))) .* proj
+    gate = NNlib.sigmoid.(blk.linear_s(s))
+    return gate .* proj
 end
 
+# ---------------------------------------------------------------------------
+# AttentionPairBias — wrapper around Onion.AttentionPairBias
+# ---------------------------------------------------------------------------
 @concrete struct AttentionPairBias
     n_heads
     c_a
@@ -64,17 +68,11 @@ end
     c_z
     cross_attention_mode
     adaln_a
-    adaln_kv
-    layernorm_z
-    linear_bias_z
-    linear_q
-    bias_q
-    linear_k
-    linear_v
-    linear_o
-    linear_g
-    linear_a_last
-    bias_a_last
+    adaln_kv           # nothing when cross_attention_mode=false
+    pair_bias_norm     # LayerNormFirst for z projection
+    pair_bias_proj     # BGLinear(c_z, n_heads; bias=false)
+    attn               # Onion.AttentionPairBias (compute_pair_bias=false)
+    output_gate        # BGLinear(c_s, c_a; bias=true) — sigmoid gate on output
 end
 @layer AttentionPairBias
 
@@ -89,6 +87,8 @@ function AttentionPairBias(
 )
     c_a % n_heads == 0 || error("c_a must be divisible by n_heads.")
     adaln_kv = cross_attention_mode ? AdaptiveLayerNorm(c_a, c_s; rng = rng) : nothing
+    gate_proj = BGLinear(c_s, c_a; bias = true)
+    gate_proj.bias .= Float32(biasinit)
     return AttentionPairBias(
         n_heads,
         c_a,
@@ -97,196 +97,219 @@ function AttentionPairBias(
         cross_attention_mode,
         AdaptiveLayerNorm(c_a, c_s; rng = rng),
         adaln_kv,
-        LayerNormNoOffset(c_z),
-        LinearNoBias(n_heads, c_z; rng = rng),
-        LinearNoBias(c_a, c_a; rng = rng),
-        zeros(Float32, c_a),
-        LinearNoBias(c_a, c_a; rng = rng),
-        LinearNoBias(c_a, c_a; rng = rng),
-        LinearNoBias(c_a, c_a; rng = rng),
-        LinearNoBias(c_a, c_a; rng = rng),
-        LinearNoBias(c_a, c_s; rng = rng),
-        fill(Float32(biasinit), c_a),
+        LayerNormFirst(c_z),
+        LinearNoBias(c_z, n_heads),
+        Onion.AttentionPairBias(c_a, c_z, n_heads; compute_pair_bias = false),
+        gate_proj,
     )
 end
 
-function _col_softmax(scores::AbstractMatrix{<:Real})
-    m = maximum(scores; dims=1)
-    ex = exp.(scores .- m)
-    return ex ./ sum(ex; dims=1)
-end
-
-function _create_local_attn_bias(n::Int, n_queries::Int, n_keys::Int)
-    n > 0 || error("n must be positive.")
-    n_queries > 0 || error("n_queries must be positive.")
-    n_keys >= n_queries || error("n_keys must be >= n_queries.")
-    n_queries % 2 == 0 || error("n_queries must be even.")
-    n_keys % 2 == 0 || error("n_keys must be even.")
-
-    n_trunks = cld(n, n_queries)
-    padded_n = n_trunks * n_queries
-    # CPU allocation intentional - this is a static structure mask, not a model tensor
-    mask = zeros(Float32, padded_n, padded_n)
-    left = div(n_keys - n_queries, 2)
-    right = div(n_queries + n_keys, 2)
-    for block in 0:(n_trunks - 1)
-        i1 = block * n_queries + 1
-        i2 = i1 + n_queries - 1
-        j1 = max(1, block * n_queries + 1 - left)
-        j2 = min(padded_n, block * n_queries + right)
-        @inbounds mask[i1:i2, j1:j2] .= 1f0
+# Windowing helpers for local-trunk atom attention
+function _window_queries(a::AbstractArray{Float32}, n_queries::Int)
+    # a: (c, N) — window into (c, n_queries, n_trunks)
+    c = size(a, 1)
+    N = size(a, 2)
+    n_trunks = cld(N, n_queries)
+    padded_N = n_trunks * n_queries
+    if N < padded_N
+        pad = fill!(similar(a, Float32, c, padded_N - N), 0f0)
+        a = cat(a, pad; dims = 2)
     end
-    attn_bias = (1f0 .- mask) .* (-1f10)
-    return @view(attn_bias[1:n, 1:n])
+    return reshape(a, c, n_queries, n_trunks)
 end
 
-function _attention_with_pair_bias(
-    blk::AttentionPairBias,
-    q_in::AbstractMatrix{Float32},
-    kv_in::AbstractMatrix{Float32},
-    z_bias::AbstractArray{Float32,3},
-    local_attn_bias::Union{Nothing, AbstractMatrix{Float32}} = nothing,
-)
-    n_token = size(q_in, 1)
-    c_a = blk.c_a
-    n_heads = blk.n_heads
-    d = div(c_a, n_heads)
-    scale = inv(sqrt(Float32(d)))
+function _window_keys(a::AbstractArray{Float32}, n_queries::Int, n_keys::Int)
+    # a: (c, N) — extract overlapping key windows: (c, n_keys, n_trunks)
+    c = size(a, 1)
+    N = size(a, 2)
+    n_trunks = cld(N, n_queries)
+    left = div(n_keys - n_queries, 2)
+    total_padded = (n_trunks - 1) * n_queries + n_keys
+    right_pad = total_padded - N - left
 
-    q = blk.linear_q(q_in) .+ reshape(blk.bias_q, 1, :)
-    k = blk.linear_k(kv_in)
-    v = blk.linear_v(kv_in)
-    g = 1f0 ./ (1f0 .+ exp.(-blk.linear_g(q_in)))
+    a_cpu = Array(a)
+    a_padded = cat(
+        zeros(Float32, c, left),
+        a_cpu,
+        zeros(Float32, c, max(0, right_pad));
+        dims = 2,
+    )
 
-    out = fill!(similar(q, Float32, n_token, c_a), 0f0)
-    for h in 1:n_heads
-        r = ((h - 1) * d + 1):(h * d)
-        qh = q[:, r]
-        kh = k[:, r]
-        vh = v[:, r]
-        scores = (kh * transpose(qh)) .* scale # [key, query]
-        scores = scores .+ transpose(z_bias[:, :, h])
-        if local_attn_bias !== nothing
-            scores = scores .+ transpose(local_attn_bias)
-        end
-        scores = _col_softmax(scores)
-        ctx = transpose(scores) * vh
-        out[:, r] .= ctx
+    out = zeros(Float32, c, n_keys, n_trunks)
+    for b in 1:n_trunks
+        start = (b - 1) * n_queries + 1
+        out[:, :, b] = a_padded[:, start:(start + n_keys - 1)]
     end
 
-    out = out .* g
-    out = blk.linear_o(out)
-    return out
+    return copyto!(similar(a, Float32, size(out)...), out)
 end
 
-function _attention_with_pair_bias_local_trunks(
-    blk::AttentionPairBias,
-    q_in::AbstractMatrix{Float32},
-    kv_in::AbstractMatrix{Float32},
-    z_bias_trunk::AbstractArray{Float32,4}, # [n_trunks, n_queries, n_keys, n_heads]
-    n_queries::Int,
-    n_keys::Int,
-)
-    n_token = size(q_in, 1)
-    c_a = blk.c_a
-    n_heads = blk.n_heads
-    d = div(c_a, n_heads)
-    scale = inv(sqrt(Float32(d)))
-    n_trunks = size(z_bias_trunk, 1)
-    size(z_bias_trunk, 2) == n_queries || error("z trunk query dim mismatch.")
-    size(z_bias_trunk, 3) == n_keys || error("z trunk key dim mismatch.")
-    size(z_bias_trunk, 4) == n_heads || error("z trunk head dim mismatch.")
-
-    q = blk.linear_q(q_in) .+ reshape(blk.bias_q, 1, :)
-    k = blk.linear_k(kv_in)
-    v = blk.linear_v(kv_in)
-    g = 1f0 ./ (1f0 .+ exp.(-blk.linear_g(q_in)))
-
-    out = fill!(similar(q, Float32, n_token, c_a), 0f0)
+function _create_window_mask(n_atom::Int, n_queries::Int, n_keys::Int)
+    # Returns (n_keys, n_trunks) mask: 1=valid, 0=padding
+    n_trunks = cld(n_atom, n_queries)
     left = div(n_keys - n_queries, 2)
-
-    for h in 1:n_heads
-        r = ((h - 1) * d + 1):(h * d)
-        qh = q[:, r]
-        kh = k[:, r]
-        vh = v[:, r]
-        for b in 1:n_trunks
-            q_start = (b - 1) * n_queries + 1
-            q_start > n_token && break
-            q_end = min(q_start + n_queries - 1, n_token)
-            q_len = q_end - q_start + 1
-            k_start = q_start - left
-
-            k_block = fill!(similar(kh, Float32, n_keys, d), 0f0)
-            v_block = fill!(similar(vh, Float32, n_keys, d), 0f0)
-            invalid_mask = fill!(similar(kh, Float32, n_keys, 1), -1f10)
-            for kk in 1:n_keys
-                k_idx = k_start + kk - 1
-                if 1 <= k_idx <= n_token
-                    k_block[kk, :] .= kh[k_idx, :]
-                    v_block[kk, :] .= vh[k_idx, :]
-                    invalid_mask[kk, 1] = 0f0
-                end
+    mask = zeros(Float32, n_keys, n_trunks)
+    for b in 1:n_trunks
+        k_start = (b - 1) * n_queries + 1 - left
+        for kl in 1:n_keys
+            k_idx = k_start + kl - 1
+            if 1 <= k_idx <= n_atom
+                mask[kl, b] = 1f0
             end
-
-            scores = (k_block * transpose(qh[q_start:q_end, :])) .* scale # [key, query]
-            scores = scores .+ transpose(z_bias_trunk[b, 1:q_len, :, h]) .+ invalid_mask
-            scores = _col_softmax(scores)
-            ctx = transpose(scores) * v_block
-            out[q_start:q_end, r] .= ctx
         end
     end
+    return mask
+end
 
-    out .*= g
-    out = blk.linear_o(out)
-    return out
+function _window_pair_bias(z_bias::AbstractArray{Float32}, n_queries::Int, n_keys::Int)
+    # z_bias: (n_heads, N_q, N_k) or (n_heads, N_q, N_k, B)
+    # Output: (n_heads, n_queries, n_keys, n_trunks) or (n_heads, n_queries, n_keys, n_trunks * B)
+    n_heads = size(z_bias, 1)
+    N = size(z_bias, 2)
+    has_batch = ndims(z_bias) == 4
+    B = has_batch ? size(z_bias, 4) : 1
+    n_trunks = cld(N, n_queries)
+    left = div(n_keys - n_queries, 2)
+
+    padded_q = n_trunks * n_queries
+    total_padded_k = (n_trunks - 1) * n_queries + n_keys
+    right_pad_k = total_padded_k - N - left
+
+    if has_batch
+        out = zeros(Float32, n_heads, n_queries, n_keys, n_trunks * B)
+        for bi in 1:B
+            z_cpu = Array(z_bias[:, :, :, bi])
+            if padded_q > N
+                z_cpu = cat(z_cpu, zeros(Float32, n_heads, padded_q - N, size(z_cpu, 3)); dims = 2)
+            end
+            z_cpu = cat(
+                zeros(Float32, n_heads, size(z_cpu, 2), left),
+                z_cpu,
+                zeros(Float32, n_heads, size(z_cpu, 2), max(0, right_pad_k));
+                dims = 3,
+            )
+            for t in 1:n_trunks
+                q_start = (t - 1) * n_queries + 1
+                k_start = (t - 1) * n_queries + 1
+                out[:, :, :, (bi - 1) * n_trunks + t] = z_cpu[:, q_start:(q_start + n_queries - 1), k_start:(k_start + n_keys - 1)]
+            end
+        end
+        return copyto!(similar(z_bias, Float32, size(out)...), out)
+    else
+        z_cpu = Array(z_bias)
+        if padded_q > N
+            z_cpu = cat(z_cpu, zeros(Float32, n_heads, padded_q - N, size(z_cpu, 3)); dims = 2)
+        end
+        z_cpu = cat(
+            zeros(Float32, n_heads, size(z_cpu, 2), left),
+            z_cpu,
+            zeros(Float32, n_heads, size(z_cpu, 2), max(0, right_pad_k));
+            dims = 3,
+        )
+        out = zeros(Float32, n_heads, n_queries, n_keys, n_trunks)
+        for t in 1:n_trunks
+            q_start = (t - 1) * n_queries + 1
+            k_start = (t - 1) * n_queries + 1
+            out[:, :, :, t] = z_cpu[:, q_start:(q_start + n_queries - 1), k_start:(k_start + n_keys - 1)]
+        end
+        return copyto!(similar(z_bias, Float32, size(out)...), out)
+    end
+end
+
+function _unwindow(out_windowed::AbstractArray{Float32,3}, n_atom::Int)
+    # out_windowed: (c, n_queries, n_trunks) → (c, n_atom)
+    c = size(out_windowed, 1)
+    flat = reshape(out_windowed, c, :)
+    return flat[:, 1:n_atom]
 end
 
 function (blk::AttentionPairBias)(
-    a::AbstractArray{<:Real,2},
-    s::AbstractArray{<:Real,2},
+    a::AbstractArray{<:Real},
+    s::AbstractArray{<:Real},
     z::AbstractArray{<:Real},
+    mask::AbstractArray{<:Real};
     n_queries::Union{Nothing, Int} = nothing,
     n_keys::Union{Nothing, Int} = nothing,
 )
-    size(a, 2) == blk.c_a || error("AttentionPairBias: a last dim must be c_a=$(blk.c_a)")
-    size(s, 2) == blk.c_s || error("AttentionPairBias: s last dim must be c_s=$(blk.c_s)")
-    size(a, 1) == size(s, 1) || error("AttentionPairBias: a/s token axis mismatch.")
-    ndims(z) in (3, 4) || error("AttentionPairBias: z must be rank-3 dense or rank-4 local trunk tensor.")
-    size(z, ndims(z)) == blk.c_z || error("AttentionPairBias: z last dim must be c_z=$(blk.c_z)")
+    # Features-first convention:
+    # Dense: a (c_a, N, B), s (c_s, N, B), z (c_z, N, N, B), mask (N, B)
+    # Windowed: a (c_a, N), s (c_s, N), z (c_z, n_q, n_k, n_trunks), mask (N,)
 
     a_f = Float32.(a)
     s_f = Float32.(s)
     a_norm = blk.adaln_a(a_f, s_f)
-    kv_norm = if blk.cross_attention_mode
-        blk.adaln_kv === nothing && error("cross_attention_mode=true but adaln_kv is missing.")
+    kv_norm = if blk.cross_attention_mode && blk.adaln_kv !== nothing
         blk.adaln_kv(a_norm, s_f)
     else
         a_norm
     end
-    out = if ndims(z) == 3
-        z_f = Float32.(z)
-        size(z_f, 1) == size(a, 1) || error("AttentionPairBias: dense z token axis mismatch.")
-        size(z_f, 2) == size(a, 1) || error("AttentionPairBias: dense z token axis mismatch.")
-        local_bias = if n_queries === nothing || n_keys === nothing
-            nothing
+
+    # Compute pair bias from z
+    z_f = Float32.(z)
+    z_bias = blk.pair_bias_proj(blk.pair_bias_norm(z_f))  # (n_heads, ...)
+
+    if n_queries !== nothing && n_keys !== nothing
+        # Windowed attention for atom transformer
+        n_atom = size(a_f, 2)
+        q_win = _window_queries(a_norm, n_queries)     # (c_a, n_queries, n_trunks)
+        kv_win = _window_keys(kv_norm, n_queries, n_keys)  # (c_a, n_keys, n_trunks)
+        # z_bias is already windowed if input z was pre-windowed (4D, matching n_queries x n_keys);
+        # otherwise window it from the full (n_heads, N, N) pair bias.
+        if ndims(z_bias) == 4 && size(z_bias, 2) == n_queries && size(z_bias, 3) == n_keys
+            z_bias_win = z_bias
         else
-            lb = collect(_create_local_attn_bias(size(a_f, 1), n_queries, n_keys))
-            copyto!(similar(z_f, Float32, size(lb)...), lb)
+            z_bias_win = _window_pair_bias(z_bias, n_queries, n_keys)
         end
-        z_bias = blk.linear_bias_z(blk.layernorm_z(z_f)) # [N, N, n_heads]
-        _attention_with_pair_bias(blk, a_norm, kv_norm, z_bias, local_bias)
+        mask_win_cpu = _create_window_mask(n_atom, n_queries, n_keys) # (n_keys, n_trunks)
+        mask_win = copyto!(similar(a_f, Float32, size(mask_win_cpu)...), mask_win_cpu)
+        attn_out_win = blk.attn(q_win, z_bias_win, mask_win, kv_win)  # (c_a, n_queries, n_trunks)
+        attn_out = _unwindow(attn_out_win, n_atom)  # (c_a, n_atom)
     else
-        n_queries === nothing && error("AttentionPairBias: rank-4 z requires n_queries.")
-        n_keys === nothing && error("AttentionPairBias: rank-4 z requires n_keys.")
-        z_f = Float32.(z)
-        z_bias_trunk = blk.linear_bias_z(blk.layernorm_z(z_f)) # [n_trunks, n_queries, n_keys, n_heads]
-        _attention_with_pair_bias_local_trunks(blk, a_norm, kv_norm, z_bias_trunk, n_queries, n_keys)
+        # Dense attention
+        attn_out = blk.attn(a_norm, z_bias, mask, kv_norm)
     end
-    gate = blk.linear_a_last(s_f) .+ reshape(blk.bias_a_last, 1, :)
-    return (1f0 ./ (1f0 .+ exp.(-gate))) .* out
+
+    gate = NNlib.sigmoid.(blk.output_gate(s_f))
+    return gate .* attn_out
 end
 
+# Backward-compatible call without explicit mask (creates all-ones mask)
+function (blk::AttentionPairBias)(
+    a::AbstractArray{<:Real},
+    s::AbstractArray{<:Real},
+    z::AbstractArray{<:Real};
+    n_queries::Union{Nothing, Int} = nothing,
+    n_keys::Union{Nothing, Int} = nothing,
+)
+    # For dense attention: a (c_a, N, B), infer mask from a
+    if n_queries !== nothing && n_keys !== nothing
+        # Windowed — no explicit mask needed, windowing creates its own
+        n_atom = size(a, 2)
+        mask = ones(Float32, n_atom)
+        mask_dev = copyto!(similar(Float32.(a), Float32, size(mask)...), mask)
+        return blk(a, s, z, mask_dev; n_queries = n_queries, n_keys = n_keys)
+    end
+    # Dense attention — create all-ones mask
+    input_was_2d = ndims(a) == 2
+    if ndims(a) == 3
+        N, B = size(a, 2), size(a, 3)
+        mask = ones(Float32, N, B)
+    else
+        N = size(a, 2)
+        mask = ones(Float32, N, 1)
+    end
+    mask_dev = copyto!(similar(Float32.(a), Float32, size(mask)...), mask)
+    result = blk(a, s, z, mask_dev)
+    # If input was 2D, Onion adds batch=1 — squeeze it back
+    if input_was_2d && ndims(result) == 3 && size(result, 3) == 1
+        return dropdims(result; dims=3)
+    end
+    return result
+end
+
+# ---------------------------------------------------------------------------
+# DiffusionTransformerBlock
+# ---------------------------------------------------------------------------
 @concrete struct DiffusionTransformerBlock
     attention_pair_bias
     conditioned_transition_block
@@ -317,20 +340,24 @@ function DiffusionTransformerBlock(
 end
 
 function (blk::DiffusionTransformerBlock)(
-    a::AbstractArray{<:Real,2},
-    s::AbstractArray{<:Real,2},
+    a::AbstractArray{<:Real},
+    s::AbstractArray{<:Real},
     z::AbstractArray{<:Real},
+    mask::AbstractArray{<:Real};
     n_queries::Union{Nothing, Int} = nothing,
     n_keys::Union{Nothing, Int} = nothing,
 )
     a_f = Float32.(a)
-    attn = blk.attention_pair_bias(a_f, s, z, n_queries, n_keys)
+    attn = blk.attention_pair_bias(a_f, s, z, mask; n_queries = n_queries, n_keys = n_keys)
     a_f = a_f .+ attn
     tr = blk.conditioned_transition_block(a_f, s)
     a_f = a_f .+ tr
-    return a_f, Float32.(s), Float32.(z)
+    return a_f
 end
 
+# ---------------------------------------------------------------------------
+# DiffusionTransformer
+# ---------------------------------------------------------------------------
 @concrete struct DiffusionTransformer
     blocks
 end
@@ -364,9 +391,10 @@ function DiffusionTransformer(
 end
 
 function (tr::DiffusionTransformer)(
-    a::AbstractArray{<:Real,2},
-    s::AbstractArray{<:Real,2},
+    a::AbstractArray{<:Real},
+    s::AbstractArray{<:Real},
     z::AbstractArray{<:Real},
+    mask::AbstractArray{<:Real};
     n_queries::Union{Nothing, Int} = nothing,
     n_keys::Union{Nothing, Int} = nothing,
 )
@@ -374,9 +402,35 @@ function (tr::DiffusionTransformer)(
     s_f = Float32.(s)
     z_f = Float32.(z)
     for blk in tr.blocks
-        a_f, s_f, z_f = blk(a_f, s_f, z_f, n_queries, n_keys)
+        a_f = blk(a_f, s_f, z_f, mask; n_queries = n_queries, n_keys = n_keys)
     end
     return a_f
+end
+
+# Convenience: no explicit mask
+function (tr::DiffusionTransformer)(
+    a::AbstractArray{<:Real},
+    s::AbstractArray{<:Real},
+    z::AbstractArray{<:Real};
+    n_queries::Union{Nothing, Int} = nothing,
+    n_keys::Union{Nothing, Int} = nothing,
+)
+    input_was_2d = ndims(a) == 2
+    if ndims(a) == 3
+        N, B = size(a, 2), size(a, 3)
+        mask = ones(Float32, N, B)
+    elseif ndims(a) == 2
+        N = size(a, 2)
+        mask = ones(Float32, N, 1)
+    else
+        error("DiffusionTransformer: a must be rank 2 or 3")
+    end
+    mask_dev = copyto!(similar(Float32.(a), Float32, size(mask)...), mask)
+    result = tr(a, s, z, mask_dev; n_queries = n_queries, n_keys = n_keys)
+    if input_was_2d && ndims(result) == 3 && size(result, 3) == 1
+        return dropdims(result; dims=3)
+    end
+    return result
 end
 
 end

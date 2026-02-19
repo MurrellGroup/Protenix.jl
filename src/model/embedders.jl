@@ -3,12 +3,15 @@ module Embedders
 using Random
 using ConcreteStructs
 using Flux: @layer
+import Onion
 
 export ConditionTemplateEmbedder,
     RelativePositionEncoding,
     condition_template_embedding,
     relative_position_features,
     fourier_embedding
+
+const BGLinear = Onion.BGLinear
 
 @concrete struct ConditionTemplateEmbedder
     c_templ_in
@@ -37,7 +40,9 @@ function condition_template_embedding(
     idx0 = ifelse.(mask_nz, 1 .+ Int.(conditional_templ), 0)
     idx = clamp.(idx0 .+ 1, 1, embedder.c_templ_in)
     gathered = embedder.weight[vec(idx), :]  # [n_i*n_j, c_z]
-    return reshape(gathered, n_i, n_j, embedder.c_z)
+    gathered_3d = reshape(gathered, n_i, n_j, embedder.c_z)
+    # Convert to features-first: (c_z, n_i, n_j)
+    return permutedims(gathered_3d, (3, 1, 2))
 end
 
 function condition_template_embedding(
@@ -55,7 +60,7 @@ end
     r_max
     s_max
     c_z
-    weight # [c_z, in_features] (LinearNoBias in PyTorch layout)
+    weight # [c_z, in_features]
 end
 @layer RelativePositionEncoding
 
@@ -94,7 +99,8 @@ function relative_position_features(
     d_r = 2 * (r_max + 1)
     d_s = 2 * (s_max + 1)
     d_total = d_r + d_r + 1 + d_s
-    out = zeros(Float32, n, n, d_total)
+    # Features-first: (d_total, n, n)
+    out = zeros(Float32, d_total, n, n)
 
     tmp_r = zeros(Float32, d_r)
     tmp_t = zeros(Float32, d_r)
@@ -121,30 +127,32 @@ function relative_position_features(
             _onehot_index!(tmp_c, d_chain)
 
             pos = 1
-            out[i, j, pos:(pos + d_r - 1)] .= tmp_r
+            out[pos:(pos + d_r - 1), i, j] .= tmp_r
             pos += d_r
-            out[i, j, pos:(pos + d_r - 1)] .= tmp_t
+            out[pos:(pos + d_r - 1), i, j] .= tmp_t
             pos += d_r
-            out[i, j, pos] = Float32(same_entity)
+            out[pos, i, j] = Float32(same_entity)
             pos += 1
-            out[i, j, pos:(pos + d_s - 1)] .= tmp_c
+            out[pos:(pos + d_s - 1), i, j] .= tmp_c
         end
     end
 
     return out
 end
 
-function _linear_no_bias_lastdim(x::AbstractArray{Float32,3}, weight::AbstractMatrix)
-    in_features = size(x, 3)
-    size(weight, 2) == in_features || error("Linear weight/input mismatch: weight $(size(weight)) vs input $(size(x)).")
-    flat = reshape(x, :, in_features)
-    y = flat * transpose(weight) # [*, in] x [in, out] -> [*, out]
-    return reshape(y, size(x, 1), size(x, 2), size(weight, 1))
+function _linear_first_dim(x::AbstractArray{Float32,3}, weight::AbstractMatrix)
+    # x: (in_features, N, N), weight: (out_features, in_features)
+    # -> (out_features, N, N)
+    in_features = size(x, 1)
+    size(weight, 2) == in_features || error("Linear weight/input mismatch: weight $(size(weight)) vs input dim=$(in_features).")
+    flat = reshape(x, in_features, :)
+    y = weight * flat  # (out, N*N)
+    return reshape(y, size(weight, 1), size(x, 2), size(x, 3))
 end
 
 function (relpe::RelativePositionEncoding)(input_feature_dict::AbstractDict{<:AbstractString, <:Any})
-    keys = ("asym_id", "residue_index", "entity_id", "sym_id", "token_index")
-    for k in keys
+    keys_needed = ("asym_id", "residue_index", "entity_id", "sym_id", "token_index")
+    for k in keys_needed
         haskey(input_feature_dict, k) || error("Missing input feature '$k' for RelativePositionEncoding.")
     end
 
@@ -159,7 +167,7 @@ function (relpe::RelativePositionEncoding)(input_feature_dict::AbstractDict{<:Ab
     )
     f_dev = similar(relpe.weight, Float32, size(f)...)
     copyto!(f_dev, f)
-    return _linear_no_bias_lastdim(f_dev, relpe.weight)
+    return _linear_first_dim(f_dev, relpe.weight)
 end
 
 function (relpe::RelativePositionEncoding)(
@@ -176,7 +184,7 @@ function (relpe::RelativePositionEncoding)(
     )
     f_dev = similar(relpe.weight, Float32, size(f)...)
     copyto!(f_dev, f)
-    return _linear_no_bias_lastdim(f_dev, relpe.weight)
+    return _linear_first_dim(f_dev, relpe.weight)
 end
 
 function fourier_embedding(
@@ -185,10 +193,11 @@ function fourier_embedding(
     b::AbstractVector{<:Real},
 )
     length(w) == length(b) || error("w and b must have same length.")
-    t_col = reshape(Float32.(t_hat_noise_level), :, 1)
-    w_row = reshape(Float32.(w), 1, :)
-    b_row = reshape(Float32.(b), 1, :)
-    return cos.(2f0 .* Float32(pi) .* (t_col .* w_row .+ b_row))
+    # Features-first: output (c_noise, N_sample)
+    w_col = reshape(Float32.(w), :, 1)
+    b_col = reshape(Float32.(b), :, 1)
+    t_row = reshape(Float32.(t_hat_noise_level), 1, :)
+    return cos.(2f0 .* Float32(pi) .* (w_col .* t_row .+ b_col))
 end
 
 end

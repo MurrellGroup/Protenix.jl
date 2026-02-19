@@ -1815,7 +1815,7 @@ end
         N_sample = 2,
         N_atom = 5,
     )
-    @test size(x) == (2, 5, 3)
+    @test size(x) == (3, 5, 2)
     @test all(isfinite, x)
 
     x_chunk = PXDesign.sample_diffusion(
@@ -1826,7 +1826,7 @@ end
         diffusion_chunk_size = 2,
         rng = MersenneTwister(3),
     )
-    @test size(x_chunk) == (5, 4, 3)
+    @test size(x_chunk) == (3, 4, 5)
     @test all(isfinite, x_chunk)
 end
 
@@ -1877,13 +1877,13 @@ end
         r_max = 2,
         s_max = 1,
     )
-    @test size(rel) == (3, 3, 17)
+    @test size(rel) == (17, 3, 3)
     # three one-hot blocks plus same_entity bit (0/1) => sum is 3 or 4
-    @test all(sum(rel[i, j, :]) in (3f0, 4f0) for i in 1:3 for j in 1:3)
+    @test all(sum(rel[:, i, j]) in (3f0, 4f0) for i in 1:3 for j in 1:3)
     # cross-entity pair should have same_entity bit = 0
     same_entity_idx = (2 * (2 + 1)) + (2 * (2 + 1)) + 1
-    @test rel[1, 3, same_entity_idx] == 0f0
-    @test rel[1, 2, same_entity_idx] == 1f0
+    @test rel[same_entity_idx, 1, 3] == 0f0
+    @test rel[same_entity_idx, 1, 2] == 1f0
 
     relpe = PXDesign.Model.RelativePositionEncoding(2, 1, 5)
     raw_relpos = Dict(
@@ -1894,7 +1894,7 @@ end
         "token_index" => [0, 1, 2],
     )
     z = relpe(raw_relpos)
-    @test size(z) == (3, 3, 5)
+    @test size(z) == (5, 3, 3)
     @test all(isfinite, z)
     relpos_input = PXDesign.Model.as_relpos_input(raw_relpos)
     z_nt = relpe(relpos_input)
@@ -1912,11 +1912,11 @@ end
         0 1 0
     ]
     ztempl = PXDesign.Model.condition_template_embedding(cte, templ, mask)
-    @test size(ztempl) == (3, 3, 7)
+    @test size(ztempl) == (7, 3, 3)
     # masked-out entries use embedding index 1 (idx0=0 -> +1)
-    @test ztempl[1, 1, :] == cte.weight[1, :]
+    @test ztempl[:, 1, 1] == cte.weight[1, :]
     # masked-in entry with templ=12 uses index 14 (1 + templ then +1 for Julia indexing)
-    @test ztempl[1, 2, :] == cte.weight[14, :]
+    @test ztempl[:, 1, 2] == cte.weight[14, :]
     templ_input = PXDesign.Model.as_template_input(
         Dict("conditional_templ" => templ, "conditional_templ_mask" => mask),
     )
@@ -1962,36 +1962,36 @@ end
         "conditional_templ_mask" => Int[0 1; 1 0],
     )
     s_dce, z_dce = dce(feat_dce)
-    @test size(s_dce) == (2, 16)
-    @test size(z_dce) == (2, 2, 4)
+    @test size(s_dce) == (16, 2)
+    @test size(z_dce) == (4, 2, 2)
     @test all(isfinite, s_dce)
     @test all(isfinite, z_dce)
 end
 
 @testset "Model primitives" begin
-    lin = PXDesign.Model.LinearNoBias(4, 3)
-    x = rand(Float32, 2, 5, 3)
+    lin = PXDesign.Model.LinearNoBias(3, 4)
+    x = rand(Float32, 3, 5)
     y = lin(x)
-    @test size(y) == (2, 5, 4)
+    @test size(y) == (4, 5)
     @test all(isfinite, y)
 
-    ln = PXDesign.Model.LayerNormNoOffset(3)
-    z = ln(rand(Float32, 7, 3))
-    @test size(z) == (7, 3)
+    ln = PXDesign.Model.LayerNormFirst(3)
+    z = ln(rand(Float32, 3, 7))
+    @test size(z) == (3, 7)
     @test all(isfinite, z)
-    # weighted LN keeps per-row mean near zero when weight is all ones
-    @test all(abs.(vec(mean(z; dims = 2))) .< 1f-3)
+    # weighted LN keeps per-column mean near zero when weight is all ones
+    @test all(abs.(vec(mean(z; dims = 1))) .< 1f-3)
 
     ada = PXDesign.Model.AdaptiveLayerNorm(6, 4)
-    a = rand(Float32, 2, 3, 6)
-    s = rand(Float32, 2, 3, 4)
+    a = rand(Float32, 6, 3, 2)
+    s = rand(Float32, 4, 3, 2)
     a2 = ada(a, s)
-    @test size(a2) == (2, 3, 6)
+    @test size(a2) == (6, 3, 2)
     @test all(isfinite, a2)
 
-    tr = PXDesign.Model.Transition(6, 2)
-    t = tr(rand(Float32, 2, 3, 6))
-    @test size(t) == (2, 3, 6)
+    tr = PXDesign.Model.Transition(6, 12)
+    t = tr(rand(Float32, 6, 3, 2))
+    @test size(t) == (6, 3, 2)
     @test all(isfinite, t)
 end
 
@@ -2015,55 +2015,54 @@ end
         sym_id = [1, 1, 1, 1],
         token_index = [0, 1, 2, 3],
     )
-    z_trunk = rand(Float32, 4, 4, 8)
+    z_trunk = rand(Float32, 8, 4, 4)
     pair = PXDesign.Model.prepare_pair_cache(cond, relpos_input, z_trunk)
-    @test size(pair) == (4, 4, 8)
+    @test size(pair) == (8, 4, 4)
     @test all(isfinite, pair)
 
-    s_inputs = rand(Float32, 4, 10)
-    s_trunk = rand(Float32, 4, 12)
+    s_inputs = rand(Float32, 10, 4)
+    s_trunk = rand(Float32, 12, 4)
     t_hat = [8.0, 4.0, 2.0]
     single_s, pair2 = cond(t_hat, relpos_input, s_inputs, s_trunk, z_trunk)
-    @test size(single_s) == (3, 4, 12)
-    @test size(pair2) == (4, 4, 8)
+    @test size(single_s) == (12, 4, 3)
+    @test size(pair2) == (8, 4, 4)
     @test all(isfinite, single_s)
     @test all(isfinite, pair2)
 end
 
 @testset "Transformer blocks" begin
     blk = PXDesign.Model.ConditionedTransitionBlock(8, 6; n = 2)
-    a = rand(Float32, 2, 4, 8)
-    s = rand(Float32, 2, 4, 6)
+    a = rand(Float32, 8, 4, 2)
+    s = rand(Float32, 6, 4, 2)
     out = blk(a, s)
-    @test size(out) == (2, 4, 8)
+    @test size(out) == (8, 4, 2)
     @test all(isfinite, out)
 
     attn = PXDesign.Model.AttentionPairBias(8, 6, 4; n_heads = 2)
-    a2 = rand(Float32, 5, 8)
-    s2 = rand(Float32, 5, 6)
-    z2 = rand(Float32, 5, 5, 4)
+    a2 = rand(Float32, 8, 5)
+    s2 = rand(Float32, 6, 5)
+    z2 = rand(Float32, 4, 5, 5)
     attn_out = attn(a2, s2, z2)
-    @test size(attn_out) == (5, 8)
+    @test size(attn_out) == (8, 5)
     @test all(isfinite, attn_out)
 
     attn_cross = PXDesign.Model.AttentionPairBias(8, 6, 4; n_heads = 2, cross_attention_mode = true)
     attn_cross_out = attn_cross(a2, s2, z2)
-    @test size(attn_cross_out) == (5, 8)
+    @test size(attn_cross_out) == (8, 5)
     @test all(isfinite, attn_cross_out)
-    attn_local_out = attn_cross(a2, s2, z2, 2, 4)
-    @test size(attn_local_out) == (5, 8)
+    attn_local_out = attn_cross(a2, s2, z2; n_queries = 2, n_keys = 4)
+    @test size(attn_local_out) == (8, 5)
     @test all(isfinite, attn_local_out)
 
     dblk = PXDesign.Model.DiffusionTransformerBlock(8, 6, 4; n_heads = 2)
-    a3, s3, z3 = dblk(a2, s2, z2)
-    @test size(a3) == (5, 8)
-    @test size(s3) == (5, 6)
-    @test size(z3) == (5, 5, 4)
+    mask2 = ones(Float32, 5, 1)
+    a3 = dblk(a2, s2, z2, mask2)
+    @test size(a3) == (8, 5, 1)  # mask (N, 1) → batch=1 output
     @test all(isfinite, a3)
 
     dtr = PXDesign.Model.DiffusionTransformer(8, 6, 4; n_blocks = 3, n_heads = 2)
     a4 = dtr(a2, s2, z2)
-    @test size(a4) == (5, 8)
+    @test size(a4) == (8, 5)
     @test all(isfinite, a4)
 end
 
@@ -2106,17 +2105,17 @@ end
         n_keys = 4,
     )
     a0, q0, c0, p0 = enc0(feat)
-    @test size(a0) == (2, 8)
-    @test size(q0) == (4, 16)
-    @test size(c0) == (4, 16)
-    @test size(p0) == (2, 2, 4, 4)
+    @test size(a0) == (8, 2)
+    @test size(q0) == (16, 4)
+    @test size(c0) == (16, 4)
+    @test size(p0) == (4, 2, 4, 2)
     @test all(isfinite, a0)
     atom_input = PXDesign.Model.as_atom_attention_input(feat)
     a0_nt, q0_nt, c0_nt, p0_nt = enc0(atom_input)
-    @test size(a0_nt) == (2, 8)
-    @test size(q0_nt) == (4, 16)
-    @test size(c0_nt) == (4, 16)
-    @test size(p0_nt) == (2, 2, 4, 4)
+    @test size(a0_nt) == (8, 2)
+    @test size(q0_nt) == (16, 4)
+    @test size(c0_nt) == (16, 4)
+    @test size(p0_nt) == (4, 2, 4, 2)
     @test all(isfinite, a0_nt)
 
     enc1 = PXDesign.Model.AtomAttentionEncoder(
@@ -2131,14 +2130,14 @@ end
         n_queries = 2,
         n_keys = 4,
     )
-    r = rand(Float32, 2, 4, 3)
-    s = rand(Float32, 2, 2, 6)
-    z = rand(Float32, 2, 2, 2, 4)
+    r = rand(Float32, 3, 4, 2)
+    s = rand(Float32, 6, 2, 2)
+    z = rand(Float32, 4, 2, 2, 2)
     a1, q1, c1, p1 = enc1(feat; r_l = r, s = s, z = z)
-    @test size(a1) == (2, 2, 8)
-    @test size(q1) == (2, 4, 16)
-    @test size(c1) == (2, 4, 16)
-    @test size(p1) == (2, 2, 2, 4, 4)
+    @test size(a1) == (8, 2, 2)
+    @test size(q1) == (16, 4, 2)
+    @test size(c1) == (16, 4, 2)
+    @test size(p1) == (4, 2, 4, 2, 2)
     @test all(isfinite, a1)
 
     dec = PXDesign.Model.AtomAttentionDecoder(
@@ -2151,7 +2150,7 @@ end
         n_keys = 4,
     )
     r_update = dec(feat, a1, q1, c1, p1)
-    @test size(r_update) == (2, 4, 3)
+    @test size(r_update) == (3, 4, 2)
     @test all(isfinite, r_update)
 end
 
@@ -2164,11 +2163,11 @@ end
         sym_id = [1, 1, 1],
         token_index = [0, 1, 2],
     )
-    s_inputs = rand(Float32, 3, 5)
-    s_trunk = rand(Float32, 3, 6)
-    z_trunk = rand(Float32, 3, 3, 4)
+    s_inputs = rand(Float32, 5, 3)
+    s_trunk = rand(Float32, 6, 3)
+    z_trunk = rand(Float32, 4, 3, 3)
     atom_to_token_idx = [0, 0, 1, 1, 2]
-    x_noisy = randn(Float32, 2, 5, 3)
+    x_noisy = randn(Float32, 3, 5, 2)
     out = dm(
         x_noisy,
         4.0f0;
@@ -2321,15 +2320,15 @@ end
     w = Dict{String, Any}()
     w["diffusion_module.diffusion_conditioning.layernorm_z.weight"] = fill(
         4f0,
-        size(dm.diffusion_conditioning.layernorm_z.weight),
+        size(dm.diffusion_conditioning.layernorm_z.w),
     )
     w["diffusion_module.diffusion_conditioning.linear_no_bias_z.weight"] = fill(
         5f0,
         size(dm.diffusion_conditioning.linear_no_bias_z.weight),
     )
-    w["diffusion_module.layernorm_s.weight"] = fill(6f0, size(dm.layernorm_s.weight))
+    w["diffusion_module.layernorm_s.weight"] = fill(6f0, size(dm.layernorm_s.w))
     w["diffusion_module.linear_no_bias_s.weight"] = fill(7f0, size(dm.linear_no_bias_s.weight))
-    w["diffusion_module.layernorm_a.weight"] = fill(8f0, size(dm.layernorm_a.weight))
+    w["diffusion_module.layernorm_a.weight"] = fill(8f0, size(dm.layernorm_a.w))
     w[
         "diffusion_module.diffusion_transformer.blocks.0.conditioned_transition_block.linear_nobias_a1.weight"
     ] = fill(
@@ -2346,11 +2345,11 @@ end
     )
 
     PXDesign.Model.load_diffusion_module!(dm, w; strict = false)
-    @test all(dm.diffusion_conditioning.layernorm_z.weight .== 4f0)
+    @test all(dm.diffusion_conditioning.layernorm_z.w .== 4f0)
     @test all(dm.diffusion_conditioning.linear_no_bias_z.weight .== 5f0)
-    @test all(dm.layernorm_s.weight .== 6f0)
+    @test all(dm.layernorm_s.w .== 6f0)
     @test all(dm.linear_no_bias_s.weight .== 7f0)
-    @test all(dm.layernorm_a.weight .== 8f0)
+    @test all(dm.layernorm_a.w .== 8f0)
     @test all(dm.diffusion_transformer.blocks[1].conditioned_transition_block.linear_a1.weight .== 9f0)
     @test all(dm.atom_attention_encoder.linear_no_bias_ref_pos.weight .== 10f0)
     @test all(dm.atom_attention_decoder.linear_no_bias_out.weight .== 11f0)

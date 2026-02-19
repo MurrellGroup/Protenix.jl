@@ -5,7 +5,7 @@ using ConcreteStructs
 using Flux: @layer
 
 import ..Primitives: LinearNoBias, LayerNorm
-import ..Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
+import ..Features: ProtenixFeatures, as_protenix_features, features_to_device, relpos_input, atom_attention_input
 import ..Embedders: InputFeatureEmbedder, RelativePositionEncoding
 import ..Pairformer: TemplateEmbedder, NoisyStructureEmbedder, MSAModule, PairformerStack
 import ..Heads: DistogramHead, ConfidenceHead
@@ -46,6 +46,14 @@ _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Flo
     scheduler
 end
 @layer ProtenixMiniModel
+
+# Detect a reference GPU array from model weights (returns nothing if CPU).
+function _model_dev_ref(model::ProtenixMiniModel)
+    dm = model.diffusion_module
+    dm === nothing && return nothing
+    w = dm.linear_no_bias_out.weight
+    return w isa Array ? nothing : w
+end
 
 function ProtenixMiniModel(
     c_token_diffusion::Int,
@@ -178,7 +186,9 @@ function get_pairformer_output(
     z2 = model.linear_no_bias_zinit2(s_init)
     z_init = reshape(z1, n_tok, 1, size(z1, 2)) .+ reshape(z2, 1, n_tok, size(z2, 2))
 
-    z_init .+= model.relative_position_encoding(relpos_input(feat))
+    # Model.RelativePositionEncoding returns features-first (c_z, N, N);
+    # ProtenixMini uses features-last (N, N, c_z).
+    z_init .+= permutedims(model.relative_position_encoding(relpos_input(feat)), (2, 3, 1))
 
     token_bonds = feat.token_bonds
     size(token_bonds) == (n_tok, n_tok) || error("token_bonds shape mismatch")
@@ -234,6 +244,12 @@ function run_inference(
     n_sample::Int = model.sample_n_sample,
     rng::AbstractRNG = Random.default_rng(),
 )
+    # Transfer features to model device (GPU if model is on GPU).
+    dev_ref = _model_dev_ref(model)
+    if dev_ref !== nothing
+        feat = features_to_device(feat, dev_ref)
+    end
+
     trunk = get_pairformer_output(model, feat; n_cycle = n_cycle, rng = rng)
 
     relpos = relpos_input(feat)
@@ -244,6 +260,10 @@ function run_inference(
     noise_schedule = model.scheduler(n_step)
 
     denoise = (x_noisy, t_hat; kwargs...) -> model.diffusion_module(x_noisy, t_hat; kwargs...)
+    # Convert ProtenixMini features-last → Model features-first for DiffusionModule
+    s_inputs_ff = permutedims(trunk.s_inputs)           # (N, c) → (c, N)
+    s_trunk_ff = permutedims(trunk.s)                    # (N, c) → (c, N)
+    z_trunk_ff = permutedims(trunk.z, (3, 1, 2))        # (N, N, c) → (c, N, N)
     coords = sample_diffusion(
         denoise;
         noise_schedule = noise_schedule,
@@ -254,13 +274,17 @@ function run_inference(
         noise_scale_lambda = model.sample_noise_scale_lambda,
         step_scale_eta = model.sample_step_scale_eta,
         rng = rng,
+        device_ref = dev_ref,
         relpos_input = relpos,
-        s_inputs = trunk.s_inputs,
-        s_trunk = trunk.s,
-        z_trunk = trunk.z,
+        s_inputs = s_inputs_ff,
+        s_trunk = s_trunk_ff,
+        z_trunk = z_trunk_ff,
         atom_to_token_idx = atom_to_token_idx,
         input_feature_dict = atom_input,
     )
+    # sample_diffusion returns features-first (3, N_atom, N_sample);
+    # convert to features-last (N_sample, N_atom, 3) for ProtenixMini heads
+    coords = permutedims(coords, (3, 2, 1))
 
     distogram_logits = model.distogram_head(trunk.z)
     pair_mask = _pair_mask(feat)

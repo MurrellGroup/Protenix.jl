@@ -1,6 +1,6 @@
 module Device
 
-using Flux: cpu, gpu
+using Flux: cpu, gpu, fmap
 
 export to_device, zeros_like, ones_like, device_ref, feats_to_device, feats_to_cpu
 
@@ -48,7 +48,7 @@ Traverses the model tree to find the first parameter array.
 """
 function device_ref(model)
     ref = nothing
-    Flux.fmap(model) do x
+    fmap(model) do x
         if ref === nothing && x isa AbstractArray{Float32}
             ref = x
         end

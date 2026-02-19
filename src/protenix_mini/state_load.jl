@@ -24,7 +24,7 @@ import ..Constraint:
     SubstructureTransformerLayer,
     SubstructureTransformerEmbedder
 import ..Model: ProtenixMiniModel
-import ...Model: load_diffusion_module!, infer_model_scaffold_dims
+import ...Model: load_diffusion_module!, load_diffusion_transformer!, infer_model_scaffold_dims
 
 export infer_protenix_mini_dims, build_protenix_mini_model, load_protenix_mini_model!
 
@@ -306,49 +306,13 @@ function _load_input_feature_embedder!(
     _load_linear_nobias!(enc.small_mlp_2, weights, "$prefix.atom_attention_encoder.small_mlp.3.weight"; strict = strict)
     _load_linear_nobias!(enc.small_mlp_3, weights, "$prefix.atom_attention_encoder.small_mlp.5.weight"; strict = strict)
 
-    # atom transformer blocks
-    for (i, blk) in enumerate(enc.atom_transformer.blocks)
-        b = "$prefix.atom_attention_encoder.atom_transformer.diffusion_transformer.blocks.$(i - 1)"
-        apb = blk.attention_pair_bias
-        _load_layernorm!(apb.adaln_a.layernorm_s, weights, "$b.attention_pair_bias.layernorm_a.layernorm_s"; strict = strict)
-        _load_linear_nobias!(apb.adaln_a.linear_nobias_s, weights, "$b.attention_pair_bias.layernorm_a.linear_nobias_s.weight"; strict = strict)
-        _load_linear_nobias!(apb.adaln_a.linear_s, weights, "$b.attention_pair_bias.layernorm_a.linear_s.weight"; strict = strict)
-        b_s = _key(weights, "$b.attention_pair_bias.layernorm_a.linear_s.bias"; strict = false)
-        b_s !== nothing && _load_vector!(apb.adaln_a.bias_s, b_s, "$b.attention_pair_bias.layernorm_a.linear_s.bias")
-
-        apb.adaln_kv !== nothing || error("Expected cross-attention adaptive LN in input embedder atom transformer")
-        _load_layernorm!(apb.adaln_kv.layernorm_s, weights, "$b.attention_pair_bias.layernorm_kv.layernorm_s"; strict = strict)
-        _load_linear_nobias!(apb.adaln_kv.linear_nobias_s, weights, "$b.attention_pair_bias.layernorm_kv.linear_nobias_s.weight"; strict = strict)
-        _load_linear_nobias!(apb.adaln_kv.linear_s, weights, "$b.attention_pair_bias.layernorm_kv.linear_s.weight"; strict = strict)
-        b_kv = _key(weights, "$b.attention_pair_bias.layernorm_kv.linear_s.bias"; strict = false)
-        b_kv !== nothing && _load_vector!(apb.adaln_kv.bias_s, b_kv, "$b.attention_pair_bias.layernorm_kv.linear_s.bias")
-
-        _load_layernorm!(apb.layernorm_z, weights, "$b.attention_pair_bias.layernorm_z"; strict = strict)
-        _load_linear_nobias!(apb.linear_bias_z, weights, "$b.attention_pair_bias.linear_nobias_z.weight"; strict = strict)
-        _load_linear_nobias!(apb.linear_q, weights, "$b.attention_pair_bias.attention.linear_q.weight"; strict = strict)
-        qbias = _key(weights, "$b.attention_pair_bias.attention.linear_q.bias"; strict = false)
-        qbias !== nothing && _load_vector!(apb.bias_q, qbias, "$b.attention_pair_bias.attention.linear_q.bias")
-        _load_linear_nobias!(apb.linear_k, weights, "$b.attention_pair_bias.attention.linear_k.weight"; strict = strict)
-        _load_linear_nobias!(apb.linear_v, weights, "$b.attention_pair_bias.attention.linear_v.weight"; strict = strict)
-        _load_linear_nobias!(apb.linear_o, weights, "$b.attention_pair_bias.attention.linear_o.weight"; strict = strict)
-        _load_linear_nobias!(apb.linear_g, weights, "$b.attention_pair_bias.attention.linear_g.weight"; strict = strict)
-        _load_linear_nobias!(apb.linear_a_last, weights, "$b.attention_pair_bias.linear_a_last.weight"; strict = strict)
-        alast_bias = _key(weights, "$b.attention_pair_bias.linear_a_last.bias"; strict = false)
-        alast_bias !== nothing && _load_vector!(apb.bias_a_last, alast_bias, "$b.attention_pair_bias.linear_a_last.bias")
-
-        ctb = blk.conditioned_transition_block
-        _load_layernorm!(ctb.adaln.layernorm_s, weights, "$b.conditioned_transition_block.adaln.layernorm_s"; strict = strict)
-        _load_linear_nobias!(ctb.adaln.linear_nobias_s, weights, "$b.conditioned_transition_block.adaln.linear_nobias_s.weight"; strict = strict)
-        _load_linear_nobias!(ctb.adaln.linear_s, weights, "$b.conditioned_transition_block.adaln.linear_s.weight"; strict = strict)
-        ctbias = _key(weights, "$b.conditioned_transition_block.adaln.linear_s.bias"; strict = false)
-        ctbias !== nothing && _load_vector!(ctb.adaln.bias_s, ctbias, "$b.conditioned_transition_block.adaln.linear_s.bias")
-        _load_linear_nobias!(ctb.linear_a1, weights, "$b.conditioned_transition_block.linear_nobias_a1.weight"; strict = strict)
-        _load_linear_nobias!(ctb.linear_a2, weights, "$b.conditioned_transition_block.linear_nobias_a2.weight"; strict = strict)
-        _load_linear_nobias!(ctb.linear_b, weights, "$b.conditioned_transition_block.linear_nobias_b.weight"; strict = strict)
-        _load_linear_nobias!(ctb.linear_s, weights, "$b.conditioned_transition_block.linear_s.weight"; strict = strict)
-        sbias = _key(weights, "$b.conditioned_transition_block.linear_s.bias"; strict = false)
-        sbias !== nothing && _load_vector!(ctb.bias_s, sbias, "$b.conditioned_transition_block.linear_s.bias")
-    end
+    # Delegate atom transformer loading to the shared model's loader which handles Onion layers
+    load_diffusion_transformer!(
+        enc.atom_transformer,
+        weights,
+        "$prefix.atom_attention_encoder.atom_transformer.diffusion_transformer";
+        strict = strict,
+    )
 
     _load_linear_nobias!(enc.linear_no_bias_q, weights, "$prefix.atom_attention_encoder.linear_no_bias_q.weight"; strict = strict)
 
@@ -585,8 +549,10 @@ end
 function build_protenix_mini_model(
     weights::AbstractDict{<:AbstractString, <:Any};
     rng::AbstractRNG = MersenneTwister(0),
+    esm_enable::Union{Nothing, Bool} = nothing,
 )
     d = infer_protenix_mini_dims(weights)
+    use_esm = esm_enable === nothing ? d.input_esm_enable : esm_enable
     return ProtenixMiniModel(
         d.c_token_diffusion,
         d.c_token_input,
@@ -604,7 +570,7 @@ function build_protenix_mini_model(
         confidence_max_atoms_per_token = d.max_atoms_per_token,
         sample_n_step = 5,
         sample_n_sample = 1,
-        input_esm_enable = d.input_esm_enable,
+        input_esm_enable = use_esm,
         input_esm_embedding_dim = d.input_esm_embedding_dim,
         rng = rng,
     )

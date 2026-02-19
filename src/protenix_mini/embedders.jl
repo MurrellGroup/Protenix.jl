@@ -51,7 +51,10 @@ function (m::InputFeatureEmbedder)(
     feat::ProtenixFeatures;
     chunk_size::Union{Nothing, Int} = nothing,
 )
-    a, _, _, _ = m.atom_attention_encoder(atom_attention_input(feat))
+    a_ff, _, _, _ = m.atom_attention_encoder(atom_attention_input(feat))
+    # Model.AtomAttentionEncoder returns features-first (c_token, N_token);
+    # ProtenixMini uses features-last (N_token, c_token).
+    a = permutedims(a_ff)
     n_tok = size(a, 1)
 
     restype = feat.restype

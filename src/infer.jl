@@ -269,13 +269,15 @@ function _build_scaffold_model_inputs(
     relpos_input = as_relpos_input(feat)
     n_token = length(relpos_input.token_index)
 
-    s_trunk = zeros(Float32, n_token, c_s)
+    # Features-first convention: s_trunk (c_s, n_token), s_inputs (c_s_inputs, n_token), z_trunk (c_z, n_token, n_token)
+    s_trunk = zeros(Float32, c_s, n_token)
     if design_condition_embedder === nothing
         restype = _to_matrix_f32(feat["restype"])
         profile = _to_matrix_f32(feat["profile"])
         deletion_mean = Float32.(feat["deletion_mean"])
         plddt = Float32.(feat["plddt"])
         hotspot = Float32.(feat["hotspot"])
+        # Build features-last then transpose to features-first
         token_features = hcat(
             restype,
             profile,
@@ -283,16 +285,16 @@ function _build_scaffold_model_inputs(
             reshape(plddt, :, 1),
             reshape(hotspot, :, 1),
         )
-
-        s_inputs = _pad_or_truncate_columns(token_features, c_s_inputs)
-        z_trunk = zeros(Float32, n_token, n_token, c_z)
+        s_inputs_fl = _pad_or_truncate_columns(token_features, c_s_inputs)
+        s_inputs = permutedims(s_inputs_fl)  # (c_s_inputs, n_token)
+        z_trunk = zeros(Float32, c_z, n_token, n_token)
         if c_z > 0
             templ_mask = _to_matrix_f32(feat["conditional_templ_mask"])
-            z_trunk[:, :, 1] .= templ_mask
+            z_trunk[1, :, :] .= templ_mask
         end
         if c_z > 1
             templ_bins = _to_matrix_f32(feat["conditional_templ"])
-            z_trunk[:, :, 2] .= templ_bins ./ 63f0
+            z_trunk[2, :, :] .= templ_bins ./ 63f0
         end
         atom_to_token_idx = Int.(feat["atom_to_token_idx"])
         return (
@@ -305,12 +307,13 @@ function _build_scaffold_model_inputs(
         )
     end
 
+    # DesignConditionEmbedder returns features-first: s_inputs (c_s_inputs, n_token), z_trunk (c_z, n_token, n_token)
     s_inputs, z_trunk = design_condition_embedder(feat)
-    size(s_inputs, 1) == n_token || error("DesignConditionEmbedder returned mismatched token count.")
-    size(s_inputs, 2) == c_s_inputs || error("DesignConditionEmbedder returned c_s_inputs=$(size(s_inputs, 2)) expected $c_s_inputs.")
-    size(z_trunk, 1) == n_token || error("DesignConditionEmbedder returned mismatched pair token count.")
+    size(s_inputs, 2) == n_token || error("DesignConditionEmbedder returned mismatched token count.")
+    size(s_inputs, 1) == c_s_inputs || error("DesignConditionEmbedder returned c_s_inputs=$(size(s_inputs, 1)) expected $c_s_inputs.")
     size(z_trunk, 2) == n_token || error("DesignConditionEmbedder returned mismatched pair token count.")
-    size(z_trunk, 3) == c_z || error("DesignConditionEmbedder returned c_z=$(size(z_trunk, 3)) expected $c_z.")
+    size(z_trunk, 3) == n_token || error("DesignConditionEmbedder returned mismatched pair token count.")
+    size(z_trunk, 1) == c_z || error("DesignConditionEmbedder returned c_z=$(size(z_trunk, 1)) expected $c_z.")
 
     atom_to_token_idx = Int.(feat["atom_to_token_idx"])
     return (
@@ -561,7 +564,10 @@ function run_infer(cfg::Dict{String, Any}; dry_run::Bool = false, io::IO = stdou
                 continue
             end
 
-            coordinates = _run_diffusion_coordinates(feature_bundle, cfg, seed)
+            coordinates_ff = _run_diffusion_coordinates(feature_bundle, cfg, seed)
+            # sample_diffusion returns features-first (3, N_atom, N_sample);
+            # dump_prediction_bundle expects (N_sample, N_atom, 3).
+            coordinates = permutedims(coordinates_ff, (3, 2, 1))
             dump_prediction_bundle(task_dump_dir, task_name, feature_bundle["atoms"], coordinates)
             pred_dir = joinpath(task_dump_dir, "predictions")
             println(

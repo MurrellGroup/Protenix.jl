@@ -16,6 +16,12 @@ silu(x::AbstractArray) = x ./ (1 .+ exp.(-x))
 
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 
+# Move input to same device as weights when they differ (CPU→GPU).
+function _to_weight_device(x::AbstractArray, w::AbstractArray)
+    x isa Array && !(w isa Array) && return copyto!(similar(w, eltype(x), size(x)), x)
+    return x
+end
+
 @concrete struct Linear
     weight # [out, in]
     bias   # Union{Vector, Nothing}
@@ -39,7 +45,7 @@ function (lin::Linear)(x::AbstractArray{<:Real})
     in_features = size(x, ndims(x))
     size(lin.weight, 2) == in_features ||
         error("Linear input mismatch: expected $(size(lin.weight, 2)), got $in_features")
-    x_f = _as_f32_array(x)
+    x_f = _to_weight_device(_as_f32_array(x), lin.weight)
     flat = reshape(x_f, :, in_features)
     y = flat * transpose(lin.weight)
     if lin.bias !== nothing
@@ -64,7 +70,7 @@ function (lin::LinearNoBias)(x::AbstractArray{<:Real})
     in_features = size(x, ndims(x))
     size(lin.weight, 2) == in_features ||
         error("LinearNoBias input mismatch: expected $(size(lin.weight, 2)), got $in_features")
-    x_f = _as_f32_array(x)
+    x_f = _to_weight_device(_as_f32_array(x), lin.weight)
     flat = reshape(x_f, :, in_features)
     y = flat * transpose(lin.weight)
     return reshape(y, (size(x)[1:(ndims(x)-1)]..., size(lin.weight, 1)))
@@ -86,7 +92,7 @@ function (ln::LayerNorm)(x::AbstractArray{<:Real})
     c = size(x, ndims(x))
     length(ln.weight) == c || error("LayerNorm weight length mismatch")
     length(ln.bias) == c || error("LayerNorm bias length mismatch")
-    x_f = _as_f32_array(x)
+    x_f = _to_weight_device(_as_f32_array(x), ln.weight)
     flat = reshape(x_f, :, c)
     μ = mean(flat; dims=2)
     diff = flat .- μ

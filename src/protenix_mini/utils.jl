@@ -84,9 +84,9 @@ function broadcast_token_to_atom(
     x_token::AbstractMatrix{<:Real},
     atom_to_token_idx::AbstractVector{<:Integer},
 )
-    idx = Int.(atom_to_token_idx) .+ 1
-    all(i -> 1 <= i <= size(x_token, 1), idx) || error("atom_to_token_idx out of range")
-    return Float32.(x_token[idx, :])
+    idx_cpu = Array(Int.(atom_to_token_idx)) .+ 1  # ensure CPU for range check
+    all(i -> 1 <= i <= size(x_token, 1), idx_cpu) || error("atom_to_token_idx out of range")
+    return Float32.(x_token[idx_cpu, :])
 end
 
 function aggregate_atom_to_token_mean(
@@ -95,29 +95,24 @@ function aggregate_atom_to_token_mean(
     n_token::Int,
 )
     n_token > 0 || error("n_token must be positive")
-    size(x_atom, 1) == length(atom_to_token_idx) || error("x_atom/atom_to_token_idx length mismatch")
+    n_atom = size(x_atom, 1)
+    n_atom == length(atom_to_token_idx) || error("x_atom/atom_to_token_idx length mismatch")
     c = size(x_atom, 2)
     x_f = Float32.(x_atom)
-    # CPU scatter-add (will be replaced with GPU-native scatter on CUDA)
-    out = fill!(similar(x_f, Float32, n_token, c), 0f0)
-    counts = zeros(Int, n_token)
-    @inbounds for a in 1:size(x_f, 1)
-        t = Int(atom_to_token_idx[a]) + 1
-        1 <= t <= n_token || error("atom_to_token_idx[$a] out of range")
-        for j in 1:c
-            out[t, j] += x_f[a, j]
-        end
-        counts[t] += 1
+    idx_cpu = Array(Int.(atom_to_token_idx)) .+ 1  # ensure CPU, 0→1 indexed
+    # Build one-hot mapping on CPU: (N_token, N_atom)
+    oh_cpu = zeros(Float32, n_token, n_atom)
+    @inbounds for i in 1:n_atom
+        1 <= idx_cpu[i] <= n_token || error("atom_to_token_idx[$i] out of range")
+        oh_cpu[idx_cpu[i], i] = 1f0
     end
-    @inbounds for t in 1:n_token
-        if counts[t] > 0
-            inv_c = 1f0 / counts[t]
-            for j in 1:c
-                out[t, j] *= inv_c
-            end
-        end
-    end
-    return out
+    # Transfer to same device as x_atom
+    oh = copyto!(similar(x_f, Float32, n_token, n_atom), oh_cpu)
+    # Matrix multiply: (N_token, N_atom) × (N_atom, c) = (N_token, c)
+    sums = oh * x_f
+    # Counts per token: (N_token, 1)
+    counts = max.(sum(oh; dims=2), 1f0)
+    return sums ./ counts
 end
 
 function pairwise_distances(x::AbstractMatrix{<:Real})

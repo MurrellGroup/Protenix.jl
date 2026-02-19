@@ -2628,7 +2628,7 @@ function _load_model(model_name::AbstractString, weights_path::AbstractString; s
 
     w = load_safetensors_weights(weights_path)
     if params.family == :mini
-        m = ProtenixMini.build_protenix_mini_model(w)
+        m = ProtenixMini.build_protenix_mini_model(w; esm_enable = params.needs_esm_embedding)
         ProtenixMini.load_protenix_mini_model!(m, w; strict = strict)
         return (model = m, family = :mini)
     elseif params.family == :base
@@ -2698,42 +2698,7 @@ function _constraint_to_device(cf, ref)
 end
 
 function _features_to_device(feat::ProtenixMini.ProtenixFeatures, ref::AbstractArray)
-    _to_dev_f(x::Nothing) = nothing
-    _to_dev_f(x::AbstractArray{Float32}) = copyto!(similar(ref, Float32, size(x)), x)
-    _to_dev_i(x::Nothing) = nothing
-    _to_dev_i(x::AbstractArray{Int}) = copyto!(similar(ref, Int, size(x)), x)
-
-    return ProtenixMini.ProtenixFeatures(
-        copyto!(similar(ref, Int, size(feat.asym_id)), feat.asym_id),
-        copyto!(similar(ref, Int, size(feat.residue_index)), feat.residue_index),
-        copyto!(similar(ref, Int, size(feat.entity_id)), feat.entity_id),
-        copyto!(similar(ref, Int, size(feat.sym_id)), feat.sym_id),
-        copyto!(similar(ref, Int, size(feat.token_index)), feat.token_index),
-        _to_dev_f(feat.token_mask),
-        _to_dev_f(feat.token_bonds),
-        _to_dev_f(feat.restype),
-        _to_dev_f(feat.profile),
-        _to_dev_f(feat.deletion_mean),
-        _to_dev_i(feat.msa),
-        _to_dev_f(feat.has_deletion),
-        _to_dev_f(feat.deletion_value),
-        _to_dev_i(feat.template_restype),
-        feat.template_all_atom_mask === nothing ? nothing : copyto!(similar(ref, Float32, size(feat.template_all_atom_mask)), feat.template_all_atom_mask),
-        feat.template_all_atom_positions === nothing ? nothing : copyto!(similar(ref, Float32, size(feat.template_all_atom_positions)), feat.template_all_atom_positions),
-        _to_dev_f(feat.struct_cb_coords),
-        feat.struct_cb_mask === nothing ? nothing : copyto!(similar(ref, Bool, size(feat.struct_cb_mask)), feat.struct_cb_mask),
-        _to_dev_f(feat.esm_token_embedding),
-        _to_dev_f(feat.ref_pos),
-        _to_dev_f(feat.ref_charge),
-        _to_dev_f(feat.ref_mask),
-        _to_dev_f(feat.ref_element),
-        _to_dev_f(feat.ref_atom_name_chars),
-        copyto!(similar(ref, Int, size(feat.ref_space_uid)), feat.ref_space_uid),
-        copyto!(similar(ref, Int, size(feat.atom_to_token_idx)), feat.atom_to_token_idx),
-        copyto!(similar(ref, Int, size(feat.atom_to_tokatom_idx)), feat.atom_to_tokatom_idx),
-        copyto!(similar(ref, Bool, size(feat.distogram_rep_atom_mask)), feat.distogram_rep_atom_mask),
-        _constraint_to_device(feat.constraint_feature, ref),
-    )
+    return ProtenixMini.features_to_device(feat, ref)
 end
 
 function _pred_to_cpu(pred)
