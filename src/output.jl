@@ -254,7 +254,7 @@ function dump_prediction_bundle(
     task_dump_dir::AbstractString,
     task_name::AbstractString,
     atoms::Vector{AtomRecord},
-    coordinates::Array{Float32,3},
+    coordinates::AbstractArray{Float32,3},
 )
     size(coordinates, 2) == length(atoms) || error("Coordinates must be [N_sample, N_atom, 3].")
     size(coordinates, 3) == 3 || error("Coordinates must be [N_sample, N_atom, 3].")
