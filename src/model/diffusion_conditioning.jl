@@ -123,7 +123,8 @@ function (cond::DiffusionConditioning)(
     single_s = _cat_lastdim(s_trunk_f, Float32.(s_inputs))             # [N_token, c_s + c_s_inputs]
     single_s = cond.linear_no_bias_s(cond.layernorm_s(single_s))       # [N_token, c_s]
 
-    noise_input = log.(Float32.(t_hat_noise_level) ./ cond.sigma_data) ./ 4f0
+    noise_cpu = log.(Float32.(t_hat_noise_level) ./ cond.sigma_data) ./ 4f0
+    noise_input = copyto!(similar(cond.w_noise, Float32, size(noise_cpu)...), noise_cpu)
     noise_emb = fourier_embedding(noise_input, cond.w_noise, cond.b_noise) # [N_sample, c_noise_embedding]
     noise_proj = cond.linear_no_bias_n(cond.layernorm_n(noise_emb))         # [N_sample, c_s]
 
