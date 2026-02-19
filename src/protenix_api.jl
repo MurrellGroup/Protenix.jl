@@ -20,6 +20,7 @@ export ProtenixModelSpec,
     ProtenixSequenceOptions,
     PredictJSONRecord,
     PredictSequenceRecord,
+    ProtenixHandle,
     MODEL_SPECS,
     resolve_model_spec,
     recommended_params,
@@ -28,7 +29,10 @@ export ProtenixModelSpec,
     predict_json,
     predict_sequence,
     convert_structure_to_infer_json,
-    add_precomputed_msa_to_json
+    add_precomputed_msa_to_json,
+    load_protenix,
+    fold,
+    confidence_metrics
 
 struct ProtenixModelSpec
     model_name::String
@@ -3138,6 +3142,236 @@ function add_precomputed_msa_to_json(
     end
     write_json(out_path, output_payload)
     return out_path
+end
+
+# ──────────────────────────────────────────────────────────────────────
+# REPL-friendly API: load_protenix / fold / confidence_metrics
+# ──────────────────────────────────────────────────────────────────────
+
+"""
+    ProtenixHandle
+
+Reusable model handle returned by [`load_protenix`](@ref).
+
+Load once, predict many times:
+
+```julia
+h = load_protenix("protenix_mini_default_v0.5.0"; gpu=true)
+r1 = fold(h, "MKQLLED..."; seed=42)
+r2 = fold(h, "GGGGGGG..."; seed=7)
+```
+"""
+struct ProtenixHandle
+    model::Any          # ProtenixMiniModel or ProtenixBaseModel
+    family::Symbol      # :mini or :base
+    model_name::String
+    on_gpu::Bool
+    params::NamedTuple  # from recommended_params
+end
+
+function Base.show(io::IO, h::ProtenixHandle)
+    print(io, "ProtenixHandle($(h.model_name), family=:$(h.family), gpu=$(h.on_gpu))")
+end
+
+"""
+    load_protenix(model_name="protenix_base_default_v0.5.0"; gpu=false, strict=true)
+
+Load a Protenix model and return a reusable [`ProtenixHandle`](@ref).
+
+# Examples
+
+```julia
+h = load_protenix(gpu=true)
+h = load_protenix("protenix_mini_default_v0.5.0"; gpu=true)
+h = load_protenix("protenix_base_constraint_v0.5.0"; gpu=true)
+```
+"""
+const _flux_gpu = gpu
+
+# pLDDT: 50 bins from 0 to 1, score in 0-100 range
+# pAE: 64 bins from 0 to 32 Angstroms
+function _logits_to_score(logits::AbstractArray{<:Real}, min_bin::Real, max_bin::Real, no_bins::Int)
+    bin_width = (max_bin - min_bin) / no_bins
+    bin_centers = Float32[min_bin + bin_width * (i - 0.5f0) for i in 1:no_bins]
+    # logits has shape (..., no_bins). Apply softmax along last dim and dot with bin_centers.
+    ndim = ndims(logits)
+    # Flatten all but last dim
+    outer = prod(size(logits)[1:end-1])
+    reshaped = reshape(Float64.(logits), outer, no_bins)
+    scores = Vector{Float32}(undef, outer)
+    bc = Float64.(bin_centers)
+    for i in 1:outer
+        row = @view reshaped[i, :]
+        m = maximum(row)
+        ex = exp.(row .- m)
+        s = sum(ex)
+        prob = ex ./ s
+        scores[i] = Float32(sum(prob .* bc))
+    end
+    return reshape(scores, size(logits)[1:end-1]...)
+end
+
+function _logits_to_plddt(logits::AbstractArray{<:Real})
+    # pLDDT: bins from 0 to 1, scale to 0-100
+    no_bins = size(logits, ndims(logits))
+    scores = _logits_to_score(logits, 0f0, 1f0, no_bins)
+    return scores .* 100f0
+end
+
+function _logits_to_pae(logits::AbstractArray{<:Real})
+    # PAE: bins from 0 to 32 Angstroms
+    no_bins = size(logits, ndims(logits))
+    return _logits_to_score(logits, 0f0, 32f0, no_bins)
+end
+
+function load_protenix(
+    model_name::AbstractString = "protenix_base_default_v0.5.0";
+    gpu::Bool = false,
+    strict::Bool = true,
+)
+    params = recommended_params(model_name; use_default_params = true)
+    weights_ref = default_weights_path(model_name)
+    loaded = _load_model(model_name, weights_ref; strict = strict)
+    if gpu
+        loaded = (model = _flux_gpu(loaded.model), family = loaded.family)
+    end
+    return ProtenixHandle(loaded.model, loaded.family, String(model_name), gpu, params)
+end
+
+"""
+    fold(handle, sequence; seed=101, step=nothing, sample=nothing, cycle=nothing,
+         out_dir=nothing, task_name="protenix_sequence", chain_id="A0",
+         esm_token_embedding=nothing)
+
+Fold a protein sequence using a loaded model handle. Returns a `NamedTuple` with
+coordinates, CIF text, file paths, and confidence metrics for a single seed.
+
+# Examples
+
+```julia
+h = load_protenix(gpu=true)
+result = fold(h, "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH")
+result.cif       # mmCIF text as String
+result.plddt     # per-residue pLDDT vector
+result.mean_plddt
+```
+"""
+function fold(
+    handle::ProtenixHandle,
+    sequence::AbstractString;
+    seed::Integer = 101,
+    step::Union{Nothing, Integer} = nothing,
+    sample::Union{Nothing, Integer} = nothing,
+    cycle::Union{Nothing, Integer} = nothing,
+    out_dir::Union{Nothing, AbstractString} = nothing,
+    task_name::AbstractString = "protenix_sequence",
+    chain_id::AbstractString = "A0",
+    esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
+)
+    seq = uppercase(strip(String(sequence)))
+    isempty(seq) && error("sequence must be non-empty")
+
+    p = handle.params
+    run_cycle = cycle === nothing ? p.cycle : Int(cycle)
+    run_step = step === nothing ? p.step : Int(step)
+    run_sample = sample === nothing ? 1 : Int(sample)
+    actual_out_dir = out_dir === nothing ? mktempdir() : mkpath(String(out_dir))
+
+    rng = MersenneTwister(Int(seed))
+    atoms = ProtenixMini.build_sequence_atoms(seq; chain_id = String(chain_id))
+    bundle = build_feature_bundle_from_atoms(atoms; task_name = String(task_name), rng = rng)
+    _normalize_protenix_feature_dict!(bundle["input_feature_dict"])
+
+    if esm_token_embedding !== nothing
+        emb = esm_token_embedding
+        n_tok = size(bundle["input_feature_dict"]["restype"], 1)
+        size(emb, 1) == n_tok || error(
+            "esm_token_embedding token length mismatch: expected $n_tok, got $(size(emb, 1)).",
+        )
+        bundle["input_feature_dict"]["esm_token_embedding"] = emb
+    end
+    _inject_auto_esm_token_embedding!(
+        bundle["input_feature_dict"],
+        bundle["atoms"],
+        bundle["tokens"],
+        Dict(String(chain_id) => seq),
+        p,
+        "fold task '$(task_name)'",
+    )
+    _validate_required_model_inputs!(p, bundle["input_feature_dict"], "fold task '$(task_name)'")
+
+    typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+    if handle.on_gpu
+        ref = device_ref(handle.model)
+        typed_feat = _features_to_device(typed_feat, ref)
+    end
+
+    pred = _run_model(
+        (model = handle.model, family = handle.family),
+        typed_feat;
+        cycle = run_cycle,
+        step = run_step,
+        sample = run_sample,
+        rng = rng,
+    )
+    if handle.on_gpu
+        pred = _pred_to_cpu(pred)
+    end
+
+    task_dump_dir = joinpath(actual_out_dir, String(task_name), "seed_$(seed)")
+    pred_dir = dump_prediction_bundle(task_dump_dir, String(task_name), bundle["atoms"], pred.coordinate)
+    _write_confidence_summaries(pred_dir, String(task_name), Int(seed), pred)
+
+    cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
+    cif_text = isempty(cif_paths) ? "" : read(first(cif_paths), String)
+
+    # Convert logits to proper pLDDT scores (0-100 scale)
+    plddt_scores = _logits_to_plddt(pred.plddt)
+    pae_scores = _logits_to_pae(pred.pae)
+    mean_plddt = Float32(Statistics.mean(plddt_scores))
+    mean_pae = Float32(Statistics.mean(pae_scores))
+
+    return (
+        coordinate = pred.coordinate,
+        cif = cif_text,
+        cif_paths = cif_paths,
+        prediction_dir = pred_dir,
+        plddt = plddt_scores,
+        mean_plddt = mean_plddt,
+        pae = pae_scores,
+        mean_pae = mean_pae,
+        pde = pred.pde,
+        resolved = pred.resolved,
+        distogram_logits = pred.distogram_logits,
+        plddt_logits = pred.plddt,
+        pae_logits = pred.pae,
+        seed = Int(seed),
+        task_name = String(task_name),
+    )
+end
+
+"""
+    confidence_metrics(result) → NamedTuple
+
+Extract confidence metrics from a fold result.
+
+```julia
+h = load_protenix(gpu=true)
+result = fold(h, "MKQLLED...")
+m = confidence_metrics(result)
+m.mean_plddt  # average predicted local distance difference test
+m.mean_pae    # average predicted aligned error
+```
+"""
+function confidence_metrics(result::NamedTuple)
+    return (
+        plddt = result.plddt,
+        mean_plddt = result.mean_plddt,
+        pae = result.pae,
+        mean_pae = result.mean_pae,
+        pde = result.pde,
+        resolved = result.resolved,
+    )
 end
 
 end

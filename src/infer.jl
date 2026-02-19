@@ -4,7 +4,9 @@ using Dates
 using Random
 using SHA
 using TOML
+using Flux: gpu as flux_gpu
 
+import ..Device: device_ref as _device_ref
 import ..Cache: ensure_inference_cache!
 import ..Data: build_basic_feature_bundle
 import ..Inputs: load_input_tasks, process_input_file, snapshot_input
@@ -453,6 +455,23 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
         )
     end
 
+    # GPU support: move model and features to GPU after CPU construction
+    use_gpu = Bool(get(cfg, "gpu", false))
+    dev_ref = nothing
+    if use_gpu && typed_model !== nothing
+        typed_model = flux_gpu(typed_model)
+        dev_ref = _device_ref(typed_model)
+        _to_gpu = x::AbstractArray{Float32} -> copyto!(similar(dev_ref, Float32, size(x)...), x)
+        model_inputs = (
+            relpos_input = model_inputs.relpos_input,
+            atom_input = model_inputs.atom_input,
+            s_inputs = _to_gpu(model_inputs.s_inputs),
+            s_trunk = _to_gpu(model_inputs.s_trunk),
+            z_trunk = _to_gpu(model_inputs.z_trunk),
+            atom_to_token_idx = model_inputs.atom_to_token_idx,
+        )
+    end
+
     denoise_net = function (x_noisy, t_hat; kwargs...)
         x = if use_model_scaffold
             typed_model(
@@ -485,6 +504,7 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
         step_scale_eta = eta,
         diffusion_chunk_size = infer_opts.sample_diffusion_chunk_size,
         rng = rng,
+        device_ref = dev_ref,
     )
 end
 
