@@ -1,22 +1,25 @@
 module TransformerBlocks
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: AdaptiveLayerNorm, LayerNormNoOffset, LinearNoBias, silu
 
 export ConditionedTransitionBlock, AttentionPairBias, DiffusionTransformerBlock, DiffusionTransformer
 
-struct ConditionedTransitionBlock
-    c_a::Int
-    c_s::Int
-    n::Int
-    adaln::AdaptiveLayerNorm
-    linear_a1::LinearNoBias
-    linear_a2::LinearNoBias
-    linear_b::LinearNoBias
-    linear_s::LinearNoBias
-    bias_s::Vector{Float32}
+@concrete struct ConditionedTransitionBlock
+    c_a
+    c_s
+    n
+    adaln
+    linear_a1
+    linear_a2
+    linear_b
+    linear_s
+    bias_s
 end
+@layer ConditionedTransitionBlock
 
 function ConditionedTransitionBlock(
     c_a::Int,
@@ -54,25 +57,26 @@ function (blk::ConditionedTransitionBlock)(a::AbstractArray{<:Real}, s::Abstract
     return (1f0 ./ (1f0 .+ exp.(-gate))) .* proj
 end
 
-struct AttentionPairBias
-    n_heads::Int
-    c_a::Int
-    c_s::Int
-    c_z::Int
-    cross_attention_mode::Bool
-    adaln_a::AdaptiveLayerNorm
-    adaln_kv::Union{AdaptiveLayerNorm, Nothing}
-    layernorm_z::LayerNormNoOffset
-    linear_bias_z::LinearNoBias # c_z -> n_heads
-    linear_q::LinearNoBias
-    bias_q::Vector{Float32}
-    linear_k::LinearNoBias
-    linear_v::LinearNoBias
-    linear_o::LinearNoBias
-    linear_g::LinearNoBias
-    linear_a_last::LinearNoBias
-    bias_a_last::Vector{Float32}
+@concrete struct AttentionPairBias
+    n_heads
+    c_a
+    c_s
+    c_z
+    cross_attention_mode
+    adaln_a
+    adaln_kv
+    layernorm_z
+    linear_bias_z
+    linear_q
+    bias_q
+    linear_k
+    linear_v
+    linear_o
+    linear_g
+    linear_a_last
+    bias_a_last
 end
+@layer AttentionPairBias
 
 function AttentionPairBias(
     c_a::Int,
@@ -106,15 +110,10 @@ function AttentionPairBias(
     )
 end
 
-function _col_softmax!(scores::Matrix{Float32})
-    for j in 1:size(scores, 2)
-        col = @view(scores[:, j])
-        m = maximum(col)
-        col .= exp.(col .- m)
-        s = sum(col)
-        col ./= s
-    end
-    return scores
+function _col_softmax(scores::AbstractMatrix{<:Real})
+    m = maximum(scores; dims=1)
+    ex = exp.(scores .- m)
+    return ex ./ sum(ex; dims=1)
 end
 
 function _create_local_attn_bias(n::Int, n_queries::Int, n_keys::Int)
@@ -126,6 +125,7 @@ function _create_local_attn_bias(n::Int, n_queries::Int, n_keys::Int)
 
     n_trunks = cld(n, n_queries)
     padded_n = n_trunks * n_queries
+    # CPU allocation intentional - this is a static structure mask, not a model tensor
     mask = zeros(Float32, padded_n, padded_n)
     left = div(n_keys - n_queries, 2)
     right = div(n_queries + n_keys, 2)
@@ -142,9 +142,9 @@ end
 
 function _attention_with_pair_bias(
     blk::AttentionPairBias,
-    q_in::Matrix{Float32},
-    kv_in::Matrix{Float32},
-    z_bias::Array{Float32,3},
+    q_in::AbstractMatrix{Float32},
+    kv_in::AbstractMatrix{Float32},
+    z_bias::AbstractArray{Float32,3},
     local_attn_bias::Union{Nothing, AbstractMatrix{Float32}} = nothing,
 )
     n_token = size(q_in, 1)
@@ -158,33 +158,32 @@ function _attention_with_pair_bias(
     v = blk.linear_v(kv_in)
     g = 1f0 ./ (1f0 .+ exp.(-blk.linear_g(q_in)))
 
-    out = zeros(Float32, n_token, c_a)
+    out = fill!(similar(q, Float32, n_token, c_a), 0f0)
     for h in 1:n_heads
         r = ((h - 1) * d + 1):(h * d)
-        qh = @view(q[:, r])
-        kh = @view(k[:, r])
-        vh = @view(v[:, r])
-        scores = Array{Float32}(undef, n_token, n_token) # [key, query]
-        scores .= (kh * transpose(qh)) .* scale
-        scores .+= transpose(@view(z_bias[:, :, h]))
+        qh = q[:, r]
+        kh = k[:, r]
+        vh = v[:, r]
+        scores = (kh * transpose(qh)) .* scale # [key, query]
+        scores = scores .+ transpose(z_bias[:, :, h])
         if local_attn_bias !== nothing
-            scores .+= transpose(local_attn_bias)
+            scores = scores .+ transpose(local_attn_bias)
         end
-        _col_softmax!(scores)
+        scores = _col_softmax(scores)
         ctx = transpose(scores) * vh
-        @view(out[:, r]) .= ctx
+        out[:, r] .= ctx
     end
 
-    out .*= g
+    out = out .* g
     out = blk.linear_o(out)
     return out
 end
 
 function _attention_with_pair_bias_local_trunks(
     blk::AttentionPairBias,
-    q_in::Matrix{Float32},
-    kv_in::Matrix{Float32},
-    z_bias_trunk::Array{Float32,4}, # [n_trunks, n_queries, n_keys, n_heads]
+    q_in::AbstractMatrix{Float32},
+    kv_in::AbstractMatrix{Float32},
+    z_bias_trunk::AbstractArray{Float32,4}, # [n_trunks, n_queries, n_keys, n_heads]
     n_queries::Int,
     n_keys::Int,
 )
@@ -203,14 +202,14 @@ function _attention_with_pair_bias_local_trunks(
     v = blk.linear_v(kv_in)
     g = 1f0 ./ (1f0 .+ exp.(-blk.linear_g(q_in)))
 
-    out = zeros(Float32, n_token, c_a)
+    out = fill!(similar(q, Float32, n_token, c_a), 0f0)
     left = div(n_keys - n_queries, 2)
 
     for h in 1:n_heads
         r = ((h - 1) * d + 1):(h * d)
-        qh = @view(q[:, r])
-        kh = @view(k[:, r])
-        vh = @view(v[:, r])
+        qh = q[:, r]
+        kh = k[:, r]
+        vh = v[:, r]
         for b in 1:n_trunks
             q_start = (b - 1) * n_queries + 1
             q_start > n_token && break
@@ -218,28 +217,23 @@ function _attention_with_pair_bias_local_trunks(
             q_len = q_end - q_start + 1
             k_start = q_start - left
 
-            k_block = zeros(Float32, n_keys, d)
-            v_block = zeros(Float32, n_keys, d)
-            valid_key = falses(n_keys)
+            k_block = fill!(similar(kh, Float32, n_keys, d), 0f0)
+            v_block = fill!(similar(vh, Float32, n_keys, d), 0f0)
+            invalid_mask = fill!(similar(kh, Float32, n_keys, 1), -1f10)
             for kk in 1:n_keys
                 k_idx = k_start + kk - 1
                 if 1 <= k_idx <= n_token
-                    valid_key[kk] = true
-                    @inbounds k_block[kk, :] .= kh[k_idx, :]
-                    @inbounds v_block[kk, :] .= vh[k_idx, :]
+                    k_block[kk, :] .= kh[k_idx, :]
+                    v_block[kk, :] .= vh[k_idx, :]
+                    invalid_mask[kk, 1] = 0f0
                 end
             end
 
             scores = (k_block * transpose(qh[q_start:q_end, :])) .* scale # [key, query]
-            scores .+= transpose(@view(z_bias_trunk[b, 1:q_len, :, h]))
-            for kk in 1:n_keys
-                if !valid_key[kk]
-                    @inbounds scores[kk, :] .= -1f10
-                end
-            end
-            _col_softmax!(scores)
+            scores = scores .+ transpose(z_bias_trunk[b, 1:q_len, :, h]) .+ invalid_mask
+            scores = _col_softmax(scores)
             ctx = transpose(scores) * v_block
-            @view(out[q_start:q_end, r]) .= ctx
+            out[q_start:q_end, r] .= ctx
         end
     end
 
@@ -277,7 +271,8 @@ function (blk::AttentionPairBias)(
         local_bias = if n_queries === nothing || n_keys === nothing
             nothing
         else
-            _create_local_attn_bias(size(a_f, 1), n_queries, n_keys)
+            lb = collect(_create_local_attn_bias(size(a_f, 1), n_queries, n_keys))
+            copyto!(similar(z_f, Float32, size(lb)...), lb)
         end
         z_bias = blk.linear_bias_z(blk.layernorm_z(z_f)) # [N, N, n_heads]
         _attention_with_pair_bias(blk, a_norm, kv_norm, z_bias, local_bias)
@@ -292,10 +287,11 @@ function (blk::AttentionPairBias)(
     return (1f0 ./ (1f0 .+ exp.(-gate))) .* out
 end
 
-struct DiffusionTransformerBlock
-    attention_pair_bias::AttentionPairBias
-    conditioned_transition_block::ConditionedTransitionBlock
+@concrete struct DiffusionTransformerBlock
+    attention_pair_bias
+    conditioned_transition_block
 end
+@layer DiffusionTransformerBlock
 
 function DiffusionTransformerBlock(
     c_a::Int,
@@ -335,9 +331,10 @@ function (blk::DiffusionTransformerBlock)(
     return a_f, Float32.(s), Float32.(z)
 end
 
-struct DiffusionTransformer
-    blocks::Vector{DiffusionTransformerBlock}
+@concrete struct DiffusionTransformer
+    blocks
 end
+@layer DiffusionTransformer
 
 function DiffusionTransformer(
     c_a::Int,

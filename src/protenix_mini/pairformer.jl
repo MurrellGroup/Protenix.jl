@@ -1,6 +1,8 @@
 module Pairformer
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm, transition
 import ..Features: ProtenixFeatures
@@ -24,14 +26,15 @@ export TransitionBlock,
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 _as_f32_copy(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? copy(x) : Float32.(x)
 
-struct TransitionBlock
-    c_in::Int
-    n::Int
-    layernorm1::LayerNorm
-    linear_no_bias_a::LinearNoBias
-    linear_no_bias_b::LinearNoBias
-    linear_no_bias::LinearNoBias
+@concrete struct TransitionBlock
+    c_in
+    n
+    layernorm1
+    linear_no_bias_a
+    linear_no_bias_b
+    linear_no_bias
 end
+@layer TransitionBlock
 
 function TransitionBlock(c_in::Int; n::Int = 4, rng::AbstractRNG = Random.default_rng())
     return TransitionBlock(
@@ -48,16 +51,17 @@ function (m::TransitionBlock)(x::AbstractArray{<:Real})
     return transition(x, m.layernorm1, m.linear_no_bias_a, m.linear_no_bias_b, m.linear_no_bias)
 end
 
-struct PairformerBlock
-    c_s::Int
-    tri_mul_out::TriangleMultiplication
-    tri_mul_in::TriangleMultiplication
-    tri_att_start::TriangleAttention
-    tri_att_end::TriangleAttention
-    pair_transition::TransitionBlock
-    attention_pair_bias::Union{PairAttentionNoS, Nothing}
-    single_transition::Union{TransitionBlock, Nothing}
+@concrete struct PairformerBlock
+    c_s
+    tri_mul_out
+    tri_mul_in
+    tri_att_start
+    tri_att_end
+    pair_transition
+    attention_pair_bias
+    single_transition
 end
+@layer PairformerBlock
 
 function PairformerBlock(
     c_z::Int,
@@ -108,9 +112,10 @@ function (m::PairformerBlock)(
     return nothing, z_f
 end
 
-struct PairformerStack
-    blocks::Vector{PairformerBlock}
+@concrete struct PairformerStack
+    blocks
 end
+@layer PairformerStack
 
 function PairformerStack(
     c_z::Int,
@@ -140,18 +145,19 @@ function (m::PairformerStack)(
     return s_cur, z_cur
 end
 
-struct MSAPairWeightedAveraging
-    c_m::Int
-    c::Int
-    n_heads::Int
-    c_z::Int
-    layernorm_m::LayerNorm
-    linear_no_bias_mv::LinearNoBias
-    layernorm_z::LayerNorm
-    linear_no_bias_z::LinearNoBias
-    linear_no_bias_mg::LinearNoBias
-    linear_no_bias_out::LinearNoBias
+@concrete struct MSAPairWeightedAveraging
+    c_m
+    c
+    n_heads
+    c_z
+    layernorm_m
+    linear_no_bias_mv
+    layernorm_z
+    linear_no_bias_z
+    linear_no_bias_mg
+    linear_no_bias_out
 end
+@layer MSAPairWeightedAveraging
 
 function MSAPairWeightedAveraging(
     c_m::Int,
@@ -187,25 +193,29 @@ function (m::MSAPairWeightedAveraging)(
     b = m.linear_no_bias_z(m.layernorm_z(z)) # [N, N, H]
     g_lin = 1f0 ./ (1f0 .+ exp.(-m.linear_no_bias_mg(msa_ln))) # [N_msa, N_tok, H*C]
 
-    w = softmax_dim2(b) # softmax over second token dimension
+    w = softmax_dim2(b) # softmax over second token dimension [N, N, H]
 
-    o_lin = zeros(Float32, n_msa, n_tok, m.n_heads * m.c)
-    @inbounds for m_ix in 1:n_msa, i in 1:n_tok, h in 1:m.n_heads, c_ix in 1:m.c
-        idx = (h - 1) * m.c + c_ix
-        acc = 0f0
-        for j in 1:n_tok
-            acc += w[i, j, h] * v_lin[m_ix, j, idx]
+    # Vectorized weighted sum: for each head h, weighted_v[:, i, hc] = sum_j w[i,j,h] * v[:, j, hc]
+    # Process per-head to stay GPU friendly
+    o_lin = fill!(similar(v_lin, Float32, n_msa, n_tok, m.n_heads * m.c), 0f0)
+    for h in 1:m.n_heads
+        r = ((h - 1) * m.c + 1):(h * m.c)
+        wh = w[:, :, h] # [n_tok, n_tok]
+        for s in 1:n_msa
+            # v_slice: [n_tok, c], wh: [n_tok, n_tok] → wh * v_slice = [n_tok, c]
+            o_lin[s, :, r] .= wh * v_lin[s, :, r]
         end
-        o_lin[m_ix, i, idx] = g_lin[m_ix, i, idx] * acc
     end
+    o_lin = o_lin .* g_lin
 
     return m.linear_no_bias_out(o_lin)
 end
 
-struct MSAStack
-    msa_pair_weighted_averaging::MSAPairWeightedAveraging
-    transition_m::TransitionBlock
+@concrete struct MSAStack
+    msa_pair_weighted_averaging
+    transition_m
 end
+@layer MSAStack
 
 function MSAStack(
     c_m::Int,
@@ -225,12 +235,13 @@ function (m::MSAStack)(msa::AbstractArray{<:Real,3}, z::AbstractArray{<:Real,3})
     return msa_f
 end
 
-struct MSABlock
-    is_last_block::Bool
-    outer_product_mean_msa::OuterProductMean
-    msa_stack::Union{MSAStack, Nothing}
-    pair_stack::PairformerBlock
+@concrete struct MSABlock
+    is_last_block
+    outer_product_mean_msa
+    msa_stack
+    pair_stack
 end
+@layer MSABlock
 
 function MSABlock(
     c_m::Int,
@@ -268,17 +279,18 @@ function (m::MSABlock)(
     return msa_f, z_f
 end
 
-struct MSAModule
-    n_blocks::Int
-    c_m::Int
-    c_s_inputs::Int
-    sample_cutoff::Int
-    sample_lower_bound::Int
-    sample_strategy::String
-    linear_no_bias_m::LinearNoBias
-    linear_no_bias_s::LinearNoBias
-    blocks::Vector{MSABlock}
+@concrete struct MSAModule
+    n_blocks
+    c_m
+    c_s_inputs
+    sample_cutoff
+    sample_lower_bound
+    sample_strategy
+    linear_no_bias_m
+    linear_no_bias_s
+    blocks
 end
+@layer MSAModule
 
 function MSAModule(
     c_z::Int,
@@ -407,17 +419,18 @@ function (m::MSAModule)(
     return z_cur
 end
 
-struct TemplateEmbedder
-    n_blocks::Int
-    c::Int
-    c_z::Int
-    layernorm_z::LayerNorm
-    linear_no_bias_z::LinearNoBias
-    linear_no_bias_a::LinearNoBias
-    pairformer_stack::PairformerStack
-    layernorm_v::LayerNorm
-    linear_no_bias_u::LinearNoBias
+@concrete struct TemplateEmbedder
+    n_blocks
+    c
+    c_z
+    layernorm_z
+    linear_no_bias_z
+    linear_no_bias_a
+    pairformer_stack
+    layernorm_v
+    linear_no_bias_u
 end
+@layer TemplateEmbedder
 
 function TemplateEmbedder(
     c_z::Int;
@@ -444,10 +457,10 @@ function (m::TemplateEmbedder)(
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     if m.n_blocks < 1 || feat.template_restype === nothing
-        return zeros(Float32, size(z))
+        return fill!(similar(z, Float32, size(z)), 0f0)
     end
     # Mirrors Python implementation: template branch currently disabled.
-    return zeros(Float32, size(z))
+    return fill!(similar(z, Float32, size(z)), 0f0)
 end
 
 function (m::TemplateEmbedder)(
@@ -456,21 +469,22 @@ function (m::TemplateEmbedder)(
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     if m.n_blocks < 1 || !haskey(input_feature_dict, "template_restype")
-        return zeros(Float32, size(z))
+        return fill!(similar(z, Float32, size(z)), 0f0)
     end
     # Mirrors Python implementation: template branch currently disabled.
-    return zeros(Float32, size(z))
+    return fill!(similar(z, Float32, size(z)), 0f0)
 end
 
-struct NoisyStructureEmbedder
-    c_z::Int
-    bins::Vector{Float32}
-    upper_bins::Vector{Float32}
-    linear_struct::LinearNoBias
-    layernorm_z::LayerNorm
-    linear_z::LinearNoBias
-    transition_out::TransitionBlock
+@concrete struct NoisyStructureEmbedder
+    c_z
+    bins
+    upper_bins
+    linear_struct
+    layernorm_z
+    linear_z
+    transition_out
 end
+@layer NoisyStructureEmbedder
 
 function NoisyStructureEmbedder(
     c_z::Int;
@@ -496,35 +510,32 @@ end
 
 function _one_hot_binned_sqdist(
     x::AbstractMatrix{<:Real},
-    bins::Vector{Float32},
-    upper_bins::Vector{Float32},
+    bins::AbstractVector{Float32},
+    upper_bins::AbstractVector{Float32},
 )
     n = size(x, 1)
-    out = zeros(Float32, n, n, length(bins))
-    @inbounds for i in 1:n, j in 1:n
-        dx = Float32(x[i, 1]) - Float32(x[j, 1])
-        dy = Float32(x[i, 2]) - Float32(x[j, 2])
-        dz = Float32(x[i, 3]) - Float32(x[j, 3])
-        d = sqrt(dx * dx + dy * dy + dz * dz)
-        for b in 1:length(bins)
-            out[i, j, b] = (d > bins[b] && d < upper_bins[b]) ? 1f0 : 0f0
-        end
-    end
-    return out
+    xf = Float32.(x)
+    # Vectorized pairwise distance
+    diff = reshape(xf, n, 1, 3) .- reshape(xf, 1, n, 3)
+    d = dropdims(sqrt.(sum(diff .^ 2; dims=3)); dims=3) # [n, n]
+    # Vectorized interval one-hot
+    nb = length(bins)
+    d3 = reshape(d, n, n, 1)
+    lo = reshape(bins, 1, 1, nb)
+    hi = reshape(upper_bins, 1, 1, nb)
+    return Float32.((d3 .> lo) .& (d3 .< hi))
 end
 
-function (m::NoisyStructureEmbedder)(
-    feat::ProtenixFeatures,
+function _noisy_structure_forward(
+    m::NoisyStructureEmbedder,
     z::AbstractArray{<:Real,3},
+    x::AbstractMatrix{<:Real},
+    mask::AbstractVector{Bool},
 )
     n = size(z, 1)
-    x = feat.struct_cb_coords === nothing ? zeros(Float32, n, 3) : feat.struct_cb_coords
-    mask = feat.struct_cb_mask === nothing ? falses(n) : feat.struct_cb_mask
-
-    pair_mask = zeros(Float32, n, n, 1)
-    @inbounds for i in 1:n, j in 1:n
-        pair_mask[i, j, 1] = (mask[i] && mask[j]) ? 1f0 : 0f0
-    end
+    # Vectorized pair mask: mask[i] & mask[j]
+    mf = Float32.(mask)
+    pair_mask = reshape(mf, n, 1, 1) .* reshape(mf, 1, n, 1) # [n, n, 1]
 
     d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask
     d = cat(d, pair_mask; dims = 3)
@@ -534,8 +545,18 @@ function (m::NoisyStructureEmbedder)(
     z_cat = cat(z_proj, d; dims = 3)
     out = m.transition_out(z_cat)
 
-    any(mask) || (out .= 0f0)
+    any(mask) || (out = fill!(similar(out), 0f0))
     return out
+end
+
+function (m::NoisyStructureEmbedder)(
+    feat::ProtenixFeatures,
+    z::AbstractArray{<:Real,3},
+)
+    n = size(z, 1)
+    x = feat.struct_cb_coords === nothing ? fill!(similar(z, Float32, n, 3), 0f0) : Float32.(feat.struct_cb_coords)
+    mask = feat.struct_cb_mask === nothing ? falses(n) : Bool.(feat.struct_cb_mask)
+    return _noisy_structure_forward(m, z, x, mask)
 end
 
 function (m::NoisyStructureEmbedder)(
@@ -546,29 +567,14 @@ function (m::NoisyStructureEmbedder)(
     x = if haskey(input_feature_dict, "struct_cb_coords")
         _as_f32_array(input_feature_dict["struct_cb_coords"])
     else
-        zeros(Float32, n, 3)
+        fill!(similar(z, Float32, n, 3), 0f0)
     end
     mask = if haskey(input_feature_dict, "struct_cb_mask")
         Bool.(input_feature_dict["struct_cb_mask"])
     else
         falses(n)
     end
-
-    pair_mask = zeros(Float32, n, n, 1)
-    @inbounds for i in 1:n, j in 1:n
-        pair_mask[i, j, 1] = (mask[i] && mask[j]) ? 1f0 : 0f0
-    end
-
-    d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask
-    d = cat(d, pair_mask; dims = 3)
-    d = m.linear_struct(d)
-
-    z_proj = m.linear_z(m.layernorm_z(z))
-    z_cat = cat(z_proj, d; dims = 3)
-    out = m.transition_out(z_cat)
-
-    any(mask) || (out .= 0f0)
-    return out
+    return _noisy_structure_forward(m, z, x, mask)
 end
 
 end

@@ -13,15 +13,7 @@ export softmax_lastdim,
     sample_msa_indices
 
 function clamp01(x::AbstractArray{<:Real})
-    out = Float32.(x)
-    @inbounds for i in eachindex(out)
-        if out[i] < 0f0
-            out[i] = 0f0
-        elseif out[i] > 1f0
-            out[i] = 1f0
-        end
-    end
-    return out
+    return clamp.(Float32.(x), 0f0, 1f0)
 end
 
 function softmax_lastdim(x::AbstractArray{<:Real})
@@ -30,15 +22,10 @@ function softmax_lastdim(x::AbstractArray{<:Real})
     n >= 1 || error("softmax_lastdim requires rank >= 1")
     c = size(y, n)
     flat = reshape(y, :, c)
-    out = similar(flat)
-    @inbounds for i in 1:size(flat, 1)
-        row = @view flat[i, :]
-        m = maximum(row)
-        ex = exp.(row .- m)
-        s = sum(ex)
-        out[i, :] .= ex ./ s
-    end
-    return reshape(out, size(y))
+    m = maximum(flat; dims=2)
+    ex = exp.(flat .- m)
+    s = sum(ex; dims=2)
+    return reshape(ex ./ s, size(y))
 end
 
 """
@@ -46,28 +33,10 @@ Softmax along the second dimension of a rank-3 tensor `[I, J, H]`.
 """
 function softmax_dim2(x::AbstractArray{<:Real,3})
     y = Float32.(x)
-    i_dim, j_dim, h_dim = size(y)
-    out = similar(y)
-    @inbounds for i in 1:i_dim, h in 1:h_dim
-        m = -Inf32
-        for j in 1:j_dim
-            v = y[i, j, h]
-            if v > m
-                m = v
-            end
-        end
-        s = 0f0
-        for j in 1:j_dim
-            e = exp(y[i, j, h] - m)
-            out[i, j, h] = e
-            s += e
-        end
-        invs = inv(s)
-        for j in 1:j_dim
-            out[i, j, h] *= invs
-        end
-    end
-    return out
+    m = maximum(y; dims=2)
+    ex = exp.(y .- m)
+    s = sum(ex; dims=2)
+    return ex ./ s
 end
 
 function one_hot_int(x::AbstractVector{<:Integer}, num_classes::Int)
@@ -105,31 +74,19 @@ function one_hot_interval(
     length(lower_bins) == length(upper_bins) || error("lower_bins/upper_bins length mismatch")
     n, m = size(x)
     b = length(lower_bins)
-    out = zeros(Float32, n, m, b)
-    @inbounds for i in 1:n, j in 1:m
-        v = Float32(x[i, j])
-        for k in 1:b
-            lo = Float32(lower_bins[k])
-            hi = Float32(upper_bins[k])
-            out[i, j, k] = (v > lo && v < hi) ? 1f0 : 0f0
-        end
-    end
-    return out
+    xf = Float32.(reshape(x, n, m, 1))
+    lo = reshape(Float32.(lower_bins), 1, 1, b)
+    hi = reshape(Float32.(upper_bins), 1, 1, b)
+    return Float32.((xf .> lo) .& (xf .< hi))
 end
 
 function broadcast_token_to_atom(
     x_token::AbstractMatrix{<:Real},
     atom_to_token_idx::AbstractVector{<:Integer},
 )
-    n_atom = length(atom_to_token_idx)
-    c = size(x_token, 2)
-    out = zeros(Float32, n_atom, c)
-    @inbounds for a in 1:n_atom
-        t = Int(atom_to_token_idx[a]) + 1
-        1 <= t <= size(x_token, 1) || error("atom_to_token_idx[$a] out of range")
-        out[a, :] .= Float32.(x_token[t, :])
-    end
-    return out
+    idx = Int.(atom_to_token_idx) .+ 1
+    all(i -> 1 <= i <= size(x_token, 1), idx) || error("atom_to_token_idx out of range")
+    return Float32.(x_token[idx, :])
 end
 
 function aggregate_atom_to_token_mean(
@@ -140,17 +97,24 @@ function aggregate_atom_to_token_mean(
     n_token > 0 || error("n_token must be positive")
     size(x_atom, 1) == length(atom_to_token_idx) || error("x_atom/atom_to_token_idx length mismatch")
     c = size(x_atom, 2)
-    out = zeros(Float32, n_token, c)
+    x_f = Float32.(x_atom)
+    # CPU scatter-add (will be replaced with GPU-native scatter on CUDA)
+    out = fill!(similar(x_f, Float32, n_token, c), 0f0)
     counts = zeros(Int, n_token)
-    @inbounds for a in 1:size(x_atom, 1)
+    @inbounds for a in 1:size(x_f, 1)
         t = Int(atom_to_token_idx[a]) + 1
         1 <= t <= n_token || error("atom_to_token_idx[$a] out of range")
-        out[t, :] .+= Float32.(x_atom[a, :])
+        for j in 1:c
+            out[t, j] += x_f[a, j]
+        end
         counts[t] += 1
     end
     @inbounds for t in 1:n_token
         if counts[t] > 0
-            out[t, :] ./= counts[t]
+            inv_c = 1f0 / counts[t]
+            for j in 1:c
+                out[t, j] *= inv_c
+            end
         end
     end
     return out
@@ -159,19 +123,10 @@ end
 function pairwise_distances(x::AbstractMatrix{<:Real})
     n = size(x, 1)
     size(x, 2) == 3 || error("pairwise_distances expects [N,3]")
-    out = zeros(Float32, n, n)
-    @inbounds for i in 1:n
-        xi = Float32(x[i, 1])
-        yi = Float32(x[i, 2])
-        zi = Float32(x[i, 3])
-        for j in 1:n
-            dx = xi - Float32(x[j, 1])
-            dy = yi - Float32(x[j, 2])
-            dz = zi - Float32(x[j, 3])
-            out[i, j] = sqrt(dx * dx + dy * dy + dz * dz)
-        end
-    end
-    return out
+    xf = Float32.(x)
+    # [n,1,3] - [1,n,3] → [n,n,3], then sum squared over dim 3
+    diff = reshape(xf, n, 1, 3) .- reshape(xf, 1, n, 3)
+    return dropdims(sqrt.(sum(diff .^ 2; dims=3)); dims=3)
 end
 
 """

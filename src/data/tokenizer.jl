@@ -111,7 +111,11 @@ function tokenize_atoms(atoms::Vector{AtomRecord})::TokenArray
             for i in start:stop
                 elem = uppercase(atoms[i].element)
                 elem_token = get(ELEMS, elem, nothing)
-                elem_token === nothing && error("Unknown atom element: $(atoms[i].element)")
+                if elem_token === nothing
+                    # Unrecognised element (e.g. single-letter inference "A").
+                    # Fall back to Carbon, the most common organic element.
+                    elem_token = ELEMS["C"]
+                end
                 push!(tokens, Token(elem_token, [i], [atoms[i].atom_name], i))
             end
         end

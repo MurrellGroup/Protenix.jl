@@ -1,6 +1,8 @@
 module Embedders
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 export ConditionTemplateEmbedder,
     RelativePositionEncoding,
@@ -8,11 +10,12 @@ export ConditionTemplateEmbedder,
     relative_position_features,
     fourier_embedding
 
-struct ConditionTemplateEmbedder
-    c_templ_in::Int
-    c_z::Int
-    weight::Matrix{Float32} # [c_templ_in, c_z]
+@concrete struct ConditionTemplateEmbedder
+    c_templ_in
+    c_z
+    weight # [c_templ_in, c_z]
 end
+@layer ConditionTemplateEmbedder
 
 function ConditionTemplateEmbedder(c_templ_in::Int = 65, c_z::Int = 128; rng::AbstractRNG = Random.default_rng())
     c_templ_in > 0 || error("c_templ_in must be positive.")
@@ -30,17 +33,11 @@ function condition_template_embedding(
         error("conditional_templ and conditional_templ_mask shapes must match.")
 
     n_i, n_j = size(conditional_templ)
-    out = Array{Float32}(undef, n_i, n_j, embedder.c_z)
-
-    for i in 1:n_i
-        for j in 1:n_j
-            mask_ij = conditional_templ_mask[i, j] != 0
-            idx0 = mask_ij ? (1 + Int(conditional_templ[i, j])) : 0
-            idx = clamp(idx0 + 1, 1, embedder.c_templ_in)
-            @inbounds out[i, j, :] = embedder.weight[idx, :]
-        end
-    end
-    return out
+    mask_nz = conditional_templ_mask .!= 0
+    idx0 = ifelse.(mask_nz, 1 .+ Int.(conditional_templ), 0)
+    idx = clamp.(idx0 .+ 1, 1, embedder.c_templ_in)
+    gathered = embedder.weight[vec(idx), :]  # [n_i*n_j, c_z]
+    return reshape(gathered, n_i, n_j, embedder.c_z)
 end
 
 function condition_template_embedding(
@@ -54,12 +51,13 @@ function condition_template_embedding(
     )
 end
 
-struct RelativePositionEncoding
-    r_max::Int
-    s_max::Int
-    c_z::Int
-    weight::Matrix{Float32} # [c_z, in_features] (LinearNoBias in PyTorch layout)
+@concrete struct RelativePositionEncoding
+    r_max
+    s_max
+    c_z
+    weight # [c_z, in_features] (LinearNoBias in PyTorch layout)
 end
+@layer RelativePositionEncoding
 
 function RelativePositionEncoding(r_max::Int = 32, s_max::Int = 2, c_z::Int = 128; rng::AbstractRNG = Random.default_rng())
     r_max >= 0 || error("r_max must be non-negative.")
@@ -136,7 +134,7 @@ function relative_position_features(
     return out
 end
 
-function _linear_no_bias_lastdim(x::Array{Float32,3}, weight::Matrix{Float32})
+function _linear_no_bias_lastdim(x::AbstractArray{Float32,3}, weight::AbstractMatrix)
     in_features = size(x, 3)
     size(weight, 2) == in_features || error("Linear weight/input mismatch: weight $(size(weight)) vs input $(size(x)).")
     flat = reshape(x, :, in_features)
@@ -159,7 +157,9 @@ function (relpe::RelativePositionEncoding)(input_feature_dict::AbstractDict{<:Ab
         r_max = relpe.r_max,
         s_max = relpe.s_max,
     )
-    return _linear_no_bias_lastdim(f, relpe.weight)
+    f_dev = similar(relpe.weight, Float32, size(f)...)
+    copyto!(f_dev, f)
+    return _linear_no_bias_lastdim(f_dev, relpe.weight)
 end
 
 function (relpe::RelativePositionEncoding)(
@@ -174,7 +174,9 @@ function (relpe::RelativePositionEncoding)(
         r_max = relpe.r_max,
         s_max = relpe.s_max,
     )
-    return _linear_no_bias_lastdim(f, relpe.weight)
+    f_dev = similar(relpe.weight, Float32, size(f)...)
+    copyto!(f_dev, f)
+    return _linear_no_bias_lastdim(f_dev, relpe.weight)
 end
 
 function fourier_embedding(
@@ -183,16 +185,10 @@ function fourier_embedding(
     b::AbstractVector{<:Real},
 )
     length(w) == length(b) || error("w and b must have same length.")
-    n = length(t_hat_noise_level)
-    c = length(w)
-    out = Array{Float32}(undef, n, c)
-    for i in 1:n
-        ti = Float32(t_hat_noise_level[i])
-        for j in 1:c
-            out[i, j] = cos(2f0 * Float32(pi) * (ti * Float32(w[j]) + Float32(b[j])))
-        end
-    end
-    return out
+    t_col = reshape(Float32.(t_hat_noise_level), :, 1)
+    w_row = reshape(Float32.(w), 1, :)
+    b_row = reshape(Float32.(b), 1, :)
+    return cos.(2f0 .* Float32(pi) .* (t_col .* w_row .+ b_row))
 end
 
 end

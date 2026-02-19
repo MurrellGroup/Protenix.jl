@@ -1,46 +1,48 @@
 module Features
 
+using ConcreteStructs
+
 import ..Utils: one_hot_int
 
 export ConstraintFeatures, ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
 
-struct ConstraintFeatures
-    contact::Union{Nothing, Array{Float32,3}}
-    pocket::Union{Nothing, Array{Float32,3}}
-    contact_atom::Union{Nothing, Array{Float32,3}}
-    substructure::Union{Nothing, Array{Float32,3}}
+@concrete struct ConstraintFeatures
+    contact   # Union{Nothing, AbstractArray{Float32,3}}
+    pocket    # Union{Nothing, AbstractArray{Float32,3}}
+    contact_atom  # Union{Nothing, AbstractArray{Float32,3}}
+    substructure  # Union{Nothing, AbstractArray{Float32,3}}
 end
 
-struct ProtenixFeatures
-    asym_id::Vector{Int}
-    residue_index::Vector{Int}
-    entity_id::Vector{Int}
-    sym_id::Vector{Int}
-    token_index::Vector{Int}
-    token_mask::Union{Nothing, Vector{Float32}}
-    token_bonds::Matrix{Float32}
-    restype::Matrix{Float32}
-    profile::Matrix{Float32}
-    deletion_mean::Vector{Float32}
-    msa::Union{Nothing, Matrix{Int}}
-    has_deletion::Union{Nothing, Matrix{Float32}}
-    deletion_value::Union{Nothing, Matrix{Float32}}
-    template_restype::Union{Nothing, Matrix{Int}}
-    template_all_atom_mask::Union{Nothing, Array{Float32,3}}
-    template_all_atom_positions::Union{Nothing, Array{Float32,4}}
-    struct_cb_coords::Union{Nothing, Matrix{Float32}}
-    struct_cb_mask::Union{Nothing, Vector{Bool}}
-    esm_token_embedding::Union{Nothing, Matrix{Float32}}
-    ref_pos::Matrix{Float32}
-    ref_charge::Vector{Float32}
-    ref_mask::Vector{Float32}
-    ref_element::Matrix{Float32}
-    ref_atom_name_chars::Matrix{Float32}
-    ref_space_uid::Vector{Int}
-    atom_to_token_idx::Vector{Int}
-    atom_to_tokatom_idx::Vector{Int}
-    distogram_rep_atom_mask::Vector{Bool}
-    constraint_feature::Union{Nothing, ConstraintFeatures}
+@concrete struct ProtenixFeatures
+    asym_id               # AbstractVector{Int}
+    residue_index         # AbstractVector{Int}
+    entity_id             # AbstractVector{Int}
+    sym_id                # AbstractVector{Int}
+    token_index           # AbstractVector{Int}
+    token_mask            # Union{Nothing, AbstractVector{Float32}}
+    token_bonds           # AbstractMatrix{Float32}
+    restype               # AbstractMatrix{Float32}
+    profile               # AbstractMatrix{Float32}
+    deletion_mean         # AbstractVector{Float32}
+    msa                   # Union{Nothing, AbstractMatrix{Int}}
+    has_deletion          # Union{Nothing, AbstractMatrix{Float32}}
+    deletion_value        # Union{Nothing, AbstractMatrix{Float32}}
+    template_restype      # Union{Nothing, AbstractMatrix{Int}}
+    template_all_atom_mask      # Union{Nothing, AbstractArray{Float32,3}}
+    template_all_atom_positions # Union{Nothing, AbstractArray{Float32,4}}
+    struct_cb_coords      # Union{Nothing, AbstractMatrix{Float32}}
+    struct_cb_mask        # Union{Nothing, AbstractVector{Bool}}
+    esm_token_embedding   # Union{Nothing, AbstractMatrix{Float32}}
+    ref_pos               # AbstractMatrix{Float32}
+    ref_charge            # AbstractVector{Float32}
+    ref_mask              # AbstractVector{Float32}
+    ref_element           # AbstractMatrix{Float32}
+    ref_atom_name_chars   # AbstractMatrix{Float32}
+    ref_space_uid         # AbstractVector{Int}
+    atom_to_token_idx     # AbstractVector{Int}
+    atom_to_tokatom_idx   # AbstractVector{Int}
+    distogram_rep_atom_mask # AbstractVector{Bool}
+    constraint_feature    # Union{Nothing, ConstraintFeatures}
 end
 
 _as_i_vec(x, name::String) = x isa AbstractVector ? Int.(x) : error("$name must be a vector")

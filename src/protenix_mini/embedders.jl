@@ -1,6 +1,8 @@
 module Embedders
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: LinearNoBias
 import ..Features: ProtenixFeatures, as_protenix_features, atom_attention_input
@@ -8,14 +10,15 @@ import ...Model: AtomAttentionEncoder, RelativePositionEncoding
 
 export InputFeatureEmbedder, RelativePositionEncoding
 
-struct InputFeatureEmbedder
-    c_atom::Int
-    c_atompair::Int
-    c_token::Int
-    atom_attention_encoder::AtomAttentionEncoder
-    esm_enable::Bool
-    linear_esm::Union{LinearNoBias, Nothing}
+@concrete struct InputFeatureEmbedder
+    c_atom
+    c_atompair
+    c_token
+    atom_attention_encoder
+    esm_enable
+    linear_esm
 end
+@layer InputFeatureEmbedder
 
 function InputFeatureEmbedder(
     c_atom::Int,

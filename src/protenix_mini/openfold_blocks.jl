@@ -1,6 +1,8 @@
 module OpenFoldBlocks
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm
 
@@ -9,33 +11,29 @@ export TriangleMultiplication,
     OuterProductMean,
     PairAttentionNoS
 
-function _row_softmax!(scores::Matrix{Float32})
-    @inbounds for i in 1:size(scores, 1)
-        row = @view scores[i, :]
-        m = maximum(row)
-        row .= exp.(row .- m)
-        s = sum(row)
-        row ./= s
-    end
-    return scores
+function _row_softmax(scores::AbstractMatrix{<:Real})
+    m = maximum(scores; dims=2)
+    ex = exp.(scores .- m)
+    return ex ./ sum(ex; dims=2)
 end
 
 """
 Pair attention used in Pairformer when `has_s=false`.
 """
-struct PairAttentionNoS
-    n_heads::Int
-    c_a::Int
-    c_z::Int
-    layernorm_a::LayerNorm
-    layernorm_z::LayerNorm
-    linear_nobias_z::LinearNoBias
-    linear_q::Linear
-    linear_k::LinearNoBias
-    linear_v::LinearNoBias
-    linear_o::LinearNoBias
-    linear_g::LinearNoBias
+@concrete struct PairAttentionNoS
+    n_heads
+    c_a
+    c_z
+    layernorm_a
+    layernorm_z
+    linear_nobias_z
+    linear_q
+    linear_k
+    linear_v
+    linear_o
+    linear_g
 end
+@layer PairAttentionNoS
 
 function PairAttentionNoS(
     c_a::Int,
@@ -78,7 +76,7 @@ function (m::PairAttentionNoS)(
 
     z_bias = m.linear_nobias_z(z_ln) # [N, N, H]
     if pair_mask === nothing
-        pair_bias = zeros(Float32, n, n)
+        pair_bias = fill!(similar(q, Float32, n, n), 0f0)
     else
         size(pair_mask) == (n, n) || error("pair_mask shape mismatch")
         pair_bias = (Float32.(pair_mask) .- 1f0) .* 1f9
@@ -86,24 +84,23 @@ function (m::PairAttentionNoS)(
 
     d = div(m.c_a, m.n_heads)
     scale = inv(sqrt(Float32(d)))
-    out = zeros(Float32, n, m.c_a)
+    out = fill!(similar(q, Float32, n, m.c_a), 0f0)
 
-    @inbounds for h in 1:m.n_heads
+    for h in 1:m.n_heads
         r = ((h - 1) * d + 1):(h * d)
-        qh = @view q[:, r]
-        kh = @view k[:, r]
-        vh = @view v[:, r]
+        qh = q[:, r]
+        kh = k[:, r]
+        vh = v[:, r]
 
         scores = (qh * transpose(kh)) .* scale
-        scores .+= @view z_bias[:, :, h]
-        scores .+= pair_bias
-        _row_softmax!(scores)
+        scores = scores .+ z_bias[:, :, h] .+ pair_bias
+        scores = _row_softmax(scores)
 
         ctx = scores * vh
-        @view(out[:, r]) .= ctx
+        out[:, r] .= ctx
     end
 
-    out .*= g
+    out = out .* g
     out = m.linear_o(out)
     return out
 end
@@ -111,19 +108,20 @@ end
 """
 OpenFold triangle multiplicative update, inference path only.
 """
-struct TriangleMultiplication
-    c_z::Int
-    c_hidden::Int
-    outgoing::Bool
-    layer_norm_in::LayerNorm
-    layer_norm_out::LayerNorm
-    linear_a_p::LinearNoBias
-    linear_a_g::LinearNoBias
-    linear_b_p::LinearNoBias
-    linear_b_g::LinearNoBias
-    linear_z::LinearNoBias
-    linear_g::LinearNoBias
+@concrete struct TriangleMultiplication
+    c_z
+    c_hidden
+    outgoing
+    layer_norm_in
+    layer_norm_out
+    linear_a_p
+    linear_a_g
+    linear_b_p
+    linear_b_g
+    linear_z
+    linear_g
 end
+@layer TriangleMultiplication
 
 function TriangleMultiplication(
     c_z::Int,
@@ -155,7 +153,7 @@ function (m::TriangleMultiplication)(
     c_z == m.c_z || error("TriangleMultiplication c_z mismatch")
 
     if mask === nothing
-        mask_f = ones(Float32, n_i, n_j)
+        mask_f = fill!(similar(z, Float32, n_i, n_j), 1f0)
     else
         size(mask) == (n_i, n_j) || error("TriangleMultiplication mask shape mismatch")
         mask_f = Float32.(mask)
@@ -164,36 +162,26 @@ function (m::TriangleMultiplication)(
     z0 = m.layer_norm_in(z)
     a = m.linear_a_p(z0) .* (1f0 ./ (1f0 .+ exp.(-m.linear_a_g(z0))))
     b = m.linear_b_p(z0) .* (1f0 ./ (1f0 .+ exp.(-m.linear_b_g(z0))))
-    a .*= reshape(mask_f, n_i, n_j, 1)
-    b .*= reshape(mask_f, n_i, n_j, 1)
+    a = a .* reshape(mask_f, n_i, n_j, 1)
+    b = b .* reshape(mask_f, n_i, n_j, 1)
 
-    x = zeros(Float32, n_i, n_j, m.c_hidden)
-    @inbounds for c in 1:m.c_hidden
+    x = fill!(similar(a, Float32, n_i, n_j, m.c_hidden), 0f0)
+    for c in 1:m.c_hidden
+        ac = a[:, :, c]
+        bc = b[:, :, c]
         if m.outgoing
-            # out[i,j,c] = sum_k a[i,k,c] * b[j,k,c]
-            for i in 1:n_i, j in 1:n_j
-                s = 0f0
-                for k_idx in 1:n_i
-                    s += a[i, k_idx, c] * b[j, k_idx, c]
-                end
-                x[i, j, c] = s
-            end
+            # x[:,:,c] = a[:,:,c] * b[:,:,c]'
+            x[:, :, c] .= ac * transpose(bc)
         else
-            # out[i,j,c] = sum_k a[k,i,c] * b[k,j,c]
-            for i in 1:n_i, j in 1:n_j
-                s = 0f0
-                for k_idx in 1:n_i
-                    s += a[k_idx, i, c] * b[k_idx, j, c]
-                end
-                x[i, j, c] = s
-            end
+            # x[:,:,c] = a[:,:,c]' * b[:,:,c]
+            x[:, :, c] .= transpose(ac) * bc
         end
     end
 
     x = m.layer_norm_out(x)
     x = m.linear_z(x)
     g = 1f0 ./ (1f0 .+ exp.(-m.linear_g(z0)))
-    x .*= g
+    x = x .* g
     return x
 end
 
@@ -201,20 +189,21 @@ end
 OpenFold triangle attention, inference path only.
 Implements row/column variants controlled by `starting`.
 """
-struct TriangleAttention
-    c_in::Int
-    c_hidden::Int
-    n_heads::Int
-    starting::Bool
-    inf::Float32
-    layer_norm::LayerNorm
-    linear::LinearNoBias # c_in -> n_heads
-    linear_q::LinearNoBias
-    linear_k::LinearNoBias
-    linear_v::LinearNoBias
-    linear_o::LinearNoBias
-    linear_g::LinearNoBias
+@concrete struct TriangleAttention
+    c_in
+    c_hidden
+    n_heads
+    starting
+    inf
+    layer_norm
+    linear # c_in -> n_heads
+    linear_q
+    linear_k
+    linear_v
+    linear_o
+    linear_g
 end
+@layer TriangleAttention
 
 function TriangleAttention(
     c_in::Int,
@@ -243,8 +232,8 @@ end
 
 function _triangle_attention_row(
     m::TriangleAttention,
-    x::Array{Float32,3},
-    mask::Matrix{Float32},
+    x::AbstractArray{<:Real,3},
+    mask::AbstractMatrix{<:Real},
 )
     i_dim, j_dim, c_in = size(x)
     c_in == m.c_in || error("TriangleAttention c_in mismatch")
@@ -259,38 +248,34 @@ function _triangle_attention_row(
 
     d = div(m.c_hidden, m.n_heads)
     scale = inv(sqrt(Float32(d)))
-    out = zeros(Float32, i_dim, j_dim, m.c_hidden)
+    out = fill!(similar(q, Float32, i_dim, j_dim, m.c_hidden), 0f0)
 
-    @inbounds for b in 1:i_dim
-        mask_bias_key = m.inf .* (mask[b, :] .- 1f0)
+    for b in 1:i_dim
+        mask_bias_key = reshape(m.inf .* (mask[b:b, :] .- 1f0), 1, j_dim)
         for h in 1:m.n_heads
             r = ((h - 1) * d + 1):(h * d)
-            qh = @view q[b, :, r] # [Q, d]
-            kh = @view k[b, :, r] # [K, d]
-            vh = @view v[b, :, r] # [K, d]
+            qh = q[b, :, r] # [Q, d]
+            kh = k[b, :, r] # [K, d]
+            vh = v[b, :, r] # [K, d]
 
             scores = (qh * transpose(kh)) .* scale
-            for qi in 1:j_dim
-                # OpenFold triangle bias is non-batched: depends on (query, key, head),
-                # not on the batch/row index after reshaping.
-                @views scores[qi, :] .+= tri_bias[qi, :, h]
-                @views scores[qi, :] .+= mask_bias_key
-            end
-            _row_softmax!(scores)
+            scores = scores .+ tri_bias[:, :, h:h][:, :, 1] .+ mask_bias_key
+            scores = _row_softmax(scores)
+
             ctx = scores * vh
-            @view(out[b, :, r]) .= ctx
+            out[b, :, r] .= ctx
         end
     end
 
-    out .*= g
+    out = out .* g
     out = m.linear_o(out)
     return out
 end
 
 function _triangle_attention_col(
     m::TriangleAttention,
-    x::Array{Float32,3},
-    mask::Matrix{Float32},
+    x::AbstractArray{<:Real,3},
+    mask::AbstractMatrix{<:Real},
 )
     i_dim, j_dim, c_in = size(x)
     c_in == m.c_in || error("TriangleAttention c_in mismatch")
@@ -305,30 +290,26 @@ function _triangle_attention_col(
 
     d = div(m.c_hidden, m.n_heads)
     scale = inv(sqrt(Float32(d)))
-    out = zeros(Float32, i_dim, j_dim, m.c_hidden)
+    out = fill!(similar(q, Float32, i_dim, j_dim, m.c_hidden), 0f0)
 
-    @inbounds for b in 1:j_dim
-        mask_bias_key = m.inf .* (mask[:, b] .- 1f0)
+    for b in 1:j_dim
+        mask_bias_key = reshape(m.inf .* (mask[:, b:b] .- 1f0), i_dim, 1)
         for h in 1:m.n_heads
             r = ((h - 1) * d + 1):(h * d)
-            qh = @view q[:, b, r] # [Q, d]
-            kh = @view k[:, b, r] # [K, d]
-            vh = @view v[:, b, r] # [K, d]
+            qh = q[:, b, r] # [Q, d]
+            kh = k[:, b, r] # [K, d]
+            vh = v[:, b, r] # [K, d]
 
             scores = (qh * transpose(kh)) .* scale
-            for qi in 1:i_dim
-                # Mirrors transpose-based path:
-                # tri_bias_t[qi, key] == tri_bias[key, qi] in original layout.
-                @views scores[qi, :] .+= tri_bias[:, qi, h]
-                @views scores[qi, :] .+= mask_bias_key
-            end
-            _row_softmax!(scores)
+            # tri_bias[:, b, h] broadcasts across key dimension
+            scores = scores .+ reshape(tri_bias[:, b, h:h], i_dim, 1) .+ mask_bias_key
+            scores = _row_softmax(scores)
             ctx = scores * vh
-            @view(out[:, b, r]) .= ctx
+            out[:, b, r] .= ctx
         end
     end
 
-    out .*= g
+    out = out .* g
     out = m.linear_o(out)
     return out
 end
@@ -340,7 +321,7 @@ function (m::TriangleAttention)(
     x_f = Float32.(x)
     n_i, n_j, _ = size(x_f)
     if mask === nothing
-        mask_f = ones(Float32, n_i, n_j)
+        mask_f = fill!(similar(x_f, Float32, n_i, n_j), 1f0)
     else
         size(mask) == (n_i, n_j) || error("TriangleAttention mask shape mismatch")
         mask_f = Float32.(mask)
@@ -356,16 +337,17 @@ end
 OpenFold outer product mean, inference path only.
 `m` shape: `[N_seq, N_res, C_m]`
 """
-struct OuterProductMean
-    c_m::Int
-    c_z::Int
-    c_hidden::Int
-    eps::Float32
-    layer_norm::LayerNorm
-    linear_1::LinearNoBias
-    linear_2::LinearNoBias
-    linear_out::Linear
+@concrete struct OuterProductMean
+    c_m
+    c_z
+    c_hidden
+    eps
+    layer_norm
+    linear_1
+    linear_2
+    linear_out
 end
+@layer OuterProductMean
 
 function OuterProductMean(
     c_m::Int,
@@ -394,7 +376,7 @@ function (m::OuterProductMean)(
     c_m == m.c_m || error("OuterProductMean c_m mismatch")
 
     if mask === nothing
-        mask_f = ones(Float32, n_seq, n_res)
+        mask_f = fill!(similar(msa, Float32, n_seq, n_res), 1f0)
     else
         size(mask) == (n_seq, n_res) || error("OuterProductMean mask shape mismatch")
         mask_f = Float32.(mask)
@@ -404,36 +386,26 @@ function (m::OuterProductMean)(
     a = m.linear_1(ln) .* reshape(mask_f, n_seq, n_res, 1)
     b = m.linear_2(ln) .* reshape(mask_f, n_seq, n_res, 1)
 
-    out = zeros(Float32, n_res, n_res, m.c_z)
-    tmp = zeros(Float32, m.c_hidden, m.c_hidden)
+    # a: [n_seq, n_res, c_hidden], b: [n_seq, n_res, c_hidden]
+    # For each (i,j): tmp = a[:,i,:]' * b[:,j,:] → [c_hidden, c_hidden]
+    # Then flatten row-major and apply linear_out
+    out = fill!(similar(a, Float32, n_res, n_res, m.c_z), 0f0)
 
-    @inbounds for i in 1:n_res, j in 1:n_res
-        fill!(tmp, 0f0)
-        for s in 1:n_seq
-            for c1 in 1:m.c_hidden
-                ai = a[s, i, c1]
-                for c2 in 1:m.c_hidden
-                    tmp[c1, c2] += ai * b[s, j, c2]
-                end
-            end
+    for i in 1:n_res
+        # a_i: [n_seq, c_hidden]
+        a_i = a[:, i, :]
+        for j in 1:n_res
+            b_j = b[:, j, :]
+            # tmp[c1, c2] = sum_s a_i[s, c1] * b_j[s, c2]
+            tmp = transpose(a_i) * b_j  # [c_hidden, c_hidden]
+            # Flatten in row-major order (c1 varies slowest, c2 varies fastest)
+            flat = reshape(vec(tmp), 1, :)
+            out[i, j, :] .= vec(m.linear_out(flat))
         end
-        # Python flattens `[c, e]` row-major with `e` as the fastest axis.
-        # Build the flattened view directly in that order to avoid permuting.
-        flat_vec = Vector{Float32}(undef, m.c_hidden * m.c_hidden)
-        idx = 1
-        for c1 in 1:m.c_hidden, c2 in 1:m.c_hidden
-            flat_vec[idx] = tmp[c1, c2]
-            idx += 1
-        end
-        flat = reshape(flat_vec, 1, :)
-        out[i, j, :] .= vec(m.linear_out(flat))
     end
 
     norm = transpose(mask_f) * mask_f
-    @inbounds for i in 1:n_res, j in 1:n_res
-        denom = norm[i, j] + m.eps
-        out[i, j, :] ./= denom
-    end
+    out = out ./ reshape(norm .+ m.eps, n_res, n_res, 1)
     return out
 end
 

@@ -319,13 +319,14 @@ _pdbx_struct_assembly_gen.asym_id_list
         )
         @test_throws ErrorException PXDesign.ProtenixAPI._ensure_json_tasks(bad_wrapper_json)
 
+        _has_ccd_data = PXDesign.ProtenixAPI._default_ccd_components_path() != ""
         mini_weights = try
             PXDesign.default_weights_path("protenix_mini_default_v0.5.0")
         catch
             nothing
         end
-        if mini_weights === nothing
-            @test_skip "Skipping predict_json wrapper smoke: protenix_mini_default_v0.5.0 safetensors not found."
+        if mini_weights === nothing || !_has_ccd_data
+            @test_skip "Skipping predict_json wrapper smoke: requires protenix_mini weights and CCD data."
         else
             pred_opts = PXDesign.ProtenixPredictOptions(
                 out_dir = joinpath(d, "predict_out_wrapped"),
@@ -381,25 +382,29 @@ _pdbx_struct_assembly_gen.asym_id_list
 end
 
 @testset "Protenix mixed-entity parsing and covalent bonds" begin
-    task = Dict{String, Any}(
-        "name" => "mixed_entities_smoke",
-        "sequences" => Any[
-            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
-            Dict("dnaSequence" => Dict("sequence" => "AT", "count" => 1)),
-            Dict("rnaSequence" => Dict("sequence" => "GU", "count" => 1)),
-            Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
-            Dict("condition_ligand" => Dict("ligand" => "CCD_FAD", "count" => 1)),
-            Dict("ion" => Dict("ion" => "MG", "count" => 1)),
-        ],
-    )
-    parsed = PXDesign.ProtenixAPI._parse_task_entities(task)
-    @test !isempty(parsed.atoms)
-    @test length(parsed.protein_specs) == 1
-    @test length(parsed.entity_chain_ids) == 6
-    @test any(a -> a.mol_type == "protein", parsed.atoms)
-    @test any(a -> a.mol_type == "dna", parsed.atoms)
-    @test any(a -> a.mol_type == "rna", parsed.atoms)
-    @test any(a -> a.mol_type == "ligand", parsed.atoms)
+    if PXDesign.ProtenixAPI._default_ccd_components_path() == ""
+        @test_skip "Skipping mixed-entity CCD ligand test: CCD components file not available."
+    else
+        task = Dict{String, Any}(
+            "name" => "mixed_entities_smoke",
+            "sequences" => Any[
+                Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+                Dict("dnaSequence" => Dict("sequence" => "AT", "count" => 1)),
+                Dict("rnaSequence" => Dict("sequence" => "GU", "count" => 1)),
+                Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+                Dict("condition_ligand" => Dict("ligand" => "CCD_FAD", "count" => 1)),
+                Dict("ion" => Dict("ion" => "MG", "count" => 1)),
+            ],
+        )
+        parsed = PXDesign.ProtenixAPI._parse_task_entities(task)
+        @test !isempty(parsed.atoms)
+        @test length(parsed.protein_specs) == 1
+        @test length(parsed.entity_chain_ids) == 6
+        @test any(a -> a.mol_type == "protein", parsed.atoms)
+        @test any(a -> a.mol_type == "dna", parsed.atoms)
+        @test any(a -> a.mol_type == "rna", parsed.atoms)
+        @test any(a -> a.mol_type == "ligand", parsed.atoms)
+    end
 
     bond_task = Dict{String, Any}(
         "name" => "bond_smoke",
@@ -1026,63 +1031,67 @@ end
         "missing esm",
     )
 
-    auto_task = Dict{String, Any}(
-        "name" => "esm_auto_inject",
-        "sequences" => Any[
-            Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
-            Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
-        ],
-    )
-    parsed_auto = PXDesign.ProtenixAPI._parse_task_entities(auto_task)
-    auto_bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed_auto.atoms; task_name = "esm_auto_inject")
-    auto_feat = auto_bundle["input_feature_dict"]
-    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(auto_feat)
-
-    PXDesign.ESMProvider.set_sequence_embedder_override!((sequence, variant) -> begin
-        n = length(sequence)
-        out = zeros(Float32, n, 2)
-        bias = variant == :esm2_3b ? 10f0 : 20f0
-        for i in 1:n
-            out[i, 1] = Float32(i)
-            out[i, 2] = bias + Float32(i)
-        end
-        out
-    end)
-    try
-        PXDesign.ProtenixAPI._inject_auto_esm_token_embedding!(
-            auto_feat,
-            auto_bundle["atoms"],
-            auto_bundle["tokens"],
-            Dict("A0" => "AC"),
-            params,
-            "auto esm test",
+    if PXDesign.ProtenixAPI._default_ccd_components_path() == ""
+        @test_skip "Skipping ESM auto-inject with CCD ligand: CCD components file not available."
+    else
+        auto_task = Dict{String, Any}(
+            "name" => "esm_auto_inject",
+            "sequences" => Any[
+                Dict("proteinChain" => Dict("sequence" => "AC", "count" => 1)),
+                Dict("ligand" => Dict("ligand" => "CCD_ATP", "count" => 1)),
+            ],
         )
-        @test haskey(auto_feat, "esm_token_embedding")
-        @test size(auto_feat["esm_token_embedding"], 1) == size(auto_feat["restype"], 1)
-        @test size(auto_feat["esm_token_embedding"], 2) == 2
+        parsed_auto = PXDesign.ProtenixAPI._parse_task_entities(auto_task)
+        auto_bundle = PXDesign.Data.build_feature_bundle_from_atoms(parsed_auto.atoms; task_name = "esm_auto_inject")
+        auto_feat = auto_bundle["input_feature_dict"]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(auto_feat)
 
-        centre_atoms = [auto_bundle["atoms"][tok.centre_atom_index] for tok in auto_bundle["tokens"]]
-        for (i, atom) in enumerate(centre_atoms)
-            if atom.mol_type == "protein"
-                @test auto_feat["esm_token_embedding"][i, 1] == Float32(atom.res_id)
-            else
-                @test all(auto_feat["esm_token_embedding"][i, :] .== 0f0)
+        PXDesign.ESMProvider.set_sequence_embedder_override!((sequence, variant) -> begin
+            n = length(sequence)
+            out = zeros(Float32, n, 2)
+            bias = variant == :esm2_3b ? 10f0 : 20f0
+            for i in 1:n
+                out[i, 1] = Float32(i)
+                out[i, 2] = bias + Float32(i)
             end
-        end
+            out
+        end)
+        try
+            PXDesign.ProtenixAPI._inject_auto_esm_token_embedding!(
+                auto_feat,
+                auto_bundle["atoms"],
+                auto_bundle["tokens"],
+                Dict("A0" => "AC"),
+                params,
+                "auto esm test",
+            )
+            @test haskey(auto_feat, "esm_token_embedding")
+            @test size(auto_feat["esm_token_embedding"], 1) == size(auto_feat["restype"], 1)
+            @test size(auto_feat["esm_token_embedding"], 2) == 2
 
-        frozen = copy(auto_feat["esm_token_embedding"])
-        PXDesign.ProtenixAPI._inject_auto_esm_token_embedding!(
-            auto_feat,
-            auto_bundle["atoms"],
-            auto_bundle["tokens"],
-            Dict("A0" => "AC"),
-            params,
-            "auto esm no-overwrite",
-        )
-        @test auto_feat["esm_token_embedding"] == frozen
-    finally
-        PXDesign.ESMProvider.set_sequence_embedder_override!(nothing)
-        PXDesign.ESMProvider.clear_esm_cache!()
+            centre_atoms = [auto_bundle["atoms"][tok.centre_atom_index] for tok in auto_bundle["tokens"]]
+            for (i, atom) in enumerate(centre_atoms)
+                if atom.mol_type == "protein"
+                    @test auto_feat["esm_token_embedding"][i, 1] == Float32(atom.res_id)
+                else
+                    @test all(auto_feat["esm_token_embedding"][i, :] .== 0f0)
+                end
+            end
+
+            frozen = copy(auto_feat["esm_token_embedding"])
+            PXDesign.ProtenixAPI._inject_auto_esm_token_embedding!(
+                auto_feat,
+                auto_bundle["atoms"],
+                auto_bundle["tokens"],
+                Dict("A0" => "AC"),
+                params,
+                "auto esm no-overwrite",
+            )
+            @test auto_feat["esm_token_embedding"] == frozen
+        finally
+            PXDesign.ESMProvider.set_sequence_embedder_override!(nothing)
+            PXDesign.ESMProvider.clear_esm_cache!()
+        end
     end
 end
 

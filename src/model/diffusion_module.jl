@@ -1,6 +1,8 @@
 module DiffusionModuleModule
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..DiffusionConditioningModule: DiffusionConditioning
 import ..AtomAttentionModule: AtomAttentionEncoder, AtomAttentionDecoder
@@ -9,21 +11,22 @@ import ..TransformerBlocks: DiffusionTransformer
 
 export DiffusionModule
 
-struct DiffusionModule
-    c_token::Int
-    c_s::Int
-    c_z::Int
-    c_atom::Int
-    c_atompair::Int
-    diffusion_conditioning::DiffusionConditioning
-    atom_attention_encoder::AtomAttentionEncoder
-    layernorm_s::LayerNormNoOffset
-    linear_no_bias_s::LinearNoBias
-    diffusion_transformer::DiffusionTransformer
-    layernorm_a::LayerNormNoOffset
-    atom_attention_decoder::AtomAttentionDecoder
-    linear_no_bias_out::LinearNoBias # token -> xyz delta
+@concrete struct DiffusionModule
+    c_token
+    c_s
+    c_z
+    c_atom
+    c_atompair
+    diffusion_conditioning
+    atom_attention_encoder
+    layernorm_s
+    linear_no_bias_s
+    diffusion_transformer
+    layernorm_a
+    atom_attention_decoder
+    linear_no_bias_out # token -> xyz delta
 end
+@layer DiffusionModule
 
 function DiffusionModule(
     c_token::Int = 384,
@@ -85,23 +88,19 @@ function _as_t_hat_vector(t_hat, n_sample::Int)
 end
 
 function _token_to_atom_deltas(
-    token_delta::Array{Float32,3},
+    token_delta::AbstractArray{Float32,3},
     atom_to_token_idx::AbstractVector{<:Integer},
     n_atom::Int,
 )
     n_token = size(token_delta, 1)
     size(token_delta, 2) == 3 || error("token_delta second dim must be xyz=3.")
     n_sample = size(token_delta, 3)
-    out = zeros(Float32, n_sample, n_atom, 3)
-    for a in 1:n_atom
-        t0 = Int(atom_to_token_idx[a])
-        t = t0 + 1
-        1 <= t <= n_token || error("atom_to_token_idx[$a]=$t0 out of token range.")
-        for s in 1:n_sample
-            @inbounds out[s, a, :] = token_delta[t, :, s]
-        end
-    end
-    return out
+    idx = Int.(atom_to_token_idx) .+ 1
+    all(i -> 1 <= i <= n_token, idx) || error("atom_to_token_idx out of token range.")
+    # Gather: token_delta[idx, :, :] → [n_atom, 3, n_sample]
+    gathered = token_delta[idx, :, :] # [n_atom, 3, n_sample]
+    # Reorder to [n_sample, n_atom, 3]
+    return permutedims(gathered, (3, 1, 2))
 end
 
 """
@@ -138,20 +137,14 @@ function (dm::DiffusionModule)(
         feat = input_feature_dict
         sigma_data = dm.diffusion_conditioning.sigma_data
         t_scale = sqrt.(sigma_data^2 .+ t_vec .^ 2)
-        r_noisy = Array{Float32}(undef, n_sample, n_atom, 3)
         x_f = Float32.(x_noisy)
-        for i in 1:n_sample
-            @inbounds r_noisy[i, :, :] = x_f[i, :, :] ./ t_scale[i]
-        end
+        r_noisy = x_f ./ reshape(t_scale, n_sample, 1, 1)
 
         n_token = size(single_s, 2)
-        s_tok = Array{Float32}(undef, n_sample, n_token, dm.c_s)
-        z_tok = Array{Float32}(undef, n_sample, n_token, n_token, dm.c_z)
         s_trunk_f = Float32.(s_trunk)
-        for i in 1:n_sample
-            @inbounds s_tok[i, :, :] = s_trunk_f
-            @inbounds z_tok[i, :, :, :] = pair_z
-        end
+        # Broadcast trunk features across samples
+        s_tok = repeat(reshape(s_trunk_f, 1, n_token, size(s_trunk_f, 2)), n_sample, 1, 1)
+        z_tok = repeat(reshape(pair_z, 1, n_token, n_token, size(pair_z, 3)), n_sample, 1, 1, 1)
 
         a_token, q_skip, c_skip, p_skip = dm.atom_attention_encoder(
             feat;
@@ -161,12 +154,12 @@ function (dm::DiffusionModule)(
         )
         a_token .+= dm.linear_no_bias_s(dm.layernorm_s(single_s))
 
-        a_token_out = Array{Float32}(undef, size(a_token))
+        a_token_out = similar(a_token)
         for i in 1:n_sample
-            a_i = Array{Float32,2}(a_token[i, :, :])
-            s_i = Array{Float32,2}(single_s[i, :, :])
+            a_i = Float32.(a_token[i, :, :])
+            s_i = Float32.(single_s[i, :, :])
             a_i = dm.diffusion_transformer(a_i, s_i, pair_z)
-            @inbounds a_token_out[i, :, :] = dm.layernorm_a(a_i)
+            a_token_out[i, :, :] .= dm.layernorm_a(a_i)
         end
 
         r_update = dm.atom_attention_decoder(feat, a_token_out, q_skip, c_skip, p_skip)
@@ -179,13 +172,13 @@ function (dm::DiffusionModule)(
 
     # Legacy fallback path used by module-level unit tests without full atom features.
     n_token = size(single_s, 2)
-    token_xyz = Array{Float32}(undef, n_token, 3, n_sample)
+    token_xyz = similar(single_s, Float32, n_token, 3, n_sample)
     for s in 1:n_sample
-        s_sample = Array{Float32,2}(single_s[s, :, :])
+        s_sample = Float32.(single_s[s, :, :])
         a = dm.linear_no_bias_s(dm.layernorm_s(s_sample)) # [N_token, c_token]
         a = dm.diffusion_transformer(a, s_sample, pair_z)
         a = dm.layernorm_a(a)
-        token_xyz[:, :, s] = dm.linear_no_bias_out(a)      # [N_token, 3]
+        token_xyz[:, :, s] .= dm.linear_no_bias_out(a)    # [N_token, 3]
     end
 
     atom_delta = _token_to_atom_deltas(token_xyz, atom_to_token_idx, n_atom)

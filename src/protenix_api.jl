@@ -2,7 +2,9 @@ module ProtenixAPI
 
 using Random
 using Statistics
+using Flux: gpu, cpu
 
+import ..Device: feats_to_device, feats_to_cpu, device_ref
 import ..Data: AtomRecord, build_feature_bundle_from_atoms, load_structure_atoms
 import ..Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS, STD_RESIDUES_PROTENIX
 import ..JSONLite: parse_json, write_json
@@ -54,6 +56,7 @@ struct ProtenixPredictOptions
     sample::Union{Nothing, Int}
     use_msa::Union{Nothing, Bool}
     strict::Bool
+    gpu::Bool
 end
 
 function ProtenixPredictOptions(;
@@ -67,6 +70,7 @@ function ProtenixPredictOptions(;
     sample::Union{Nothing, Integer} = nothing,
     use_msa::Union{Nothing, Bool} = nothing,
     strict::Bool = true,
+    gpu::Bool = false,
 )
     s = Int.(collect(seeds))
     isempty(s) && error("seeds must be non-empty")
@@ -85,6 +89,7 @@ function ProtenixPredictOptions(;
         sample === nothing ? nothing : Int(sample),
         use_msa,
         strict,
+        gpu,
     )
 end
 
@@ -820,12 +825,22 @@ function _build_ligand_atoms_from_codes(ccd_codes::AbstractVector{<:AbstractStri
             continue
         end
 
-        element = length(code) <= 2 ? code : _infer_element_from_atom_name(code)
-        atom_name = length(code) <= 4 ? code : "C1"
-        push!(
-            atoms,
-            AtomRecord(atom_name, code, "ligand", uppercase(element), chain_id, res_id, true, xoff, 0f0, 0f0, is_resolved),
-        )
+        # For short codes (1-2 chars), treat the code as a single-atom ion/element.
+        # For longer codes (e.g. ATP, FAD), CCD component data is required.
+        if length(code) <= 2
+            element = uppercase(code)
+            atom_name = code
+            push!(
+                atoms,
+                AtomRecord(atom_name, code, "ligand", element, chain_id, res_id, true, xoff, 0f0, 0f0, is_resolved),
+            )
+        else
+            error(
+                "CCD component data not found for ligand code '$(code)'. " *
+                "Ensure the CCD components file is available (set PROTENIX_DATA_ROOT_DIR or place " *
+                "components.v20240608.cif in release_data/ccd_cache/)."
+            )
+        end
     end
     return atoms
 end
@@ -2669,6 +2684,72 @@ function _run_model(
     error("Unsupported model family: $(loaded.family)")
 end
 
+function _constraint_to_device(cf::Nothing, ref)
+    return nothing
+end
+
+function _constraint_to_device(cf, ref)
+    return ProtenixMini.Features.ConstraintFeatures(
+        cf.contact === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.contact)), cf.contact),
+        cf.pocket === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.pocket)), cf.pocket),
+        cf.contact_atom === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.contact_atom)), cf.contact_atom),
+        cf.substructure === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.substructure)), cf.substructure),
+    )
+end
+
+function _features_to_device(feat::ProtenixMini.ProtenixFeatures, ref::AbstractArray)
+    _to_dev_f(x::Nothing) = nothing
+    _to_dev_f(x::AbstractArray{Float32}) = copyto!(similar(ref, Float32, size(x)), x)
+    _to_dev_i(x::Nothing) = nothing
+    _to_dev_i(x::AbstractArray{Int}) = copyto!(similar(ref, Int, size(x)), x)
+
+    return ProtenixMini.ProtenixFeatures(
+        copyto!(similar(ref, Int, size(feat.asym_id)), feat.asym_id),
+        copyto!(similar(ref, Int, size(feat.residue_index)), feat.residue_index),
+        copyto!(similar(ref, Int, size(feat.entity_id)), feat.entity_id),
+        copyto!(similar(ref, Int, size(feat.sym_id)), feat.sym_id),
+        copyto!(similar(ref, Int, size(feat.token_index)), feat.token_index),
+        _to_dev_f(feat.token_mask),
+        _to_dev_f(feat.token_bonds),
+        _to_dev_f(feat.restype),
+        _to_dev_f(feat.profile),
+        _to_dev_f(feat.deletion_mean),
+        _to_dev_i(feat.msa),
+        _to_dev_f(feat.has_deletion),
+        _to_dev_f(feat.deletion_value),
+        _to_dev_i(feat.template_restype),
+        feat.template_all_atom_mask === nothing ? nothing : copyto!(similar(ref, Float32, size(feat.template_all_atom_mask)), feat.template_all_atom_mask),
+        feat.template_all_atom_positions === nothing ? nothing : copyto!(similar(ref, Float32, size(feat.template_all_atom_positions)), feat.template_all_atom_positions),
+        _to_dev_f(feat.struct_cb_coords),
+        feat.struct_cb_mask === nothing ? nothing : copyto!(similar(ref, Bool, size(feat.struct_cb_mask)), feat.struct_cb_mask),
+        _to_dev_f(feat.esm_token_embedding),
+        _to_dev_f(feat.ref_pos),
+        _to_dev_f(feat.ref_charge),
+        _to_dev_f(feat.ref_mask),
+        _to_dev_f(feat.ref_element),
+        _to_dev_f(feat.ref_atom_name_chars),
+        copyto!(similar(ref, Int, size(feat.ref_space_uid)), feat.ref_space_uid),
+        copyto!(similar(ref, Int, size(feat.atom_to_token_idx)), feat.atom_to_token_idx),
+        copyto!(similar(ref, Int, size(feat.atom_to_tokatom_idx)), feat.atom_to_tokatom_idx),
+        copyto!(similar(ref, Bool, size(feat.distogram_rep_atom_mask)), feat.distogram_rep_atom_mask),
+        _constraint_to_device(feat.constraint_feature, ref),
+    )
+end
+
+function _pred_to_cpu(pred)
+    return (
+        coordinate = Array(pred.coordinate),
+        s_inputs = Array(pred.s_inputs),
+        s_trunk = Array(pred.s_trunk),
+        z_trunk = Array(pred.z_trunk),
+        distogram_logits = Array(pred.distogram_logits),
+        plddt = Array(pred.plddt),
+        pae = Array(pred.pae),
+        pde = Array(pred.pde),
+        resolved = Array(pred.resolved),
+    )
+end
+
 function _softmax(v::AbstractVector{<:Real})
     m = maximum(v)
     ex = exp.(Float64.(v) .- Float64(m))
@@ -2741,13 +2822,17 @@ function _resolve_predict_runtime(opts::ProtenixPredictOptions)
     )
     weights_ref = default_weights_path(opts.model_name)
     loaded = _load_model(opts.model_name, weights_ref; strict = opts.strict)
-    return (params = params, loaded = loaded)
+    if opts.gpu
+        loaded = (model = gpu(loaded.model), family = loaded.family)
+    end
+    return (params = params, loaded = loaded, gpu = opts.gpu)
 end
 
 function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
     runtime = _resolve_predict_runtime(opts)
     params = runtime.params
     loaded = runtime.loaded
+    use_gpu = runtime.gpu
     json_paths = _collect_input_paths(input; exts = (".json",))
     records = PredictJSONRecord[]
 
@@ -2805,6 +2890,10 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     "task '$task_name' in $(basename(json_path))",
                 )
                 typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+                if use_gpu
+                    ref = device_ref(loaded.model)
+                    typed_feat = _features_to_device(typed_feat, ref)
+                end
                 pred = _run_model(
                     loaded,
                     typed_feat;
@@ -2813,6 +2902,9 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     sample = params.sample,
                     rng = rng,
                 )
+                if use_gpu
+                    pred = _pred_to_cpu(pred)
+                end
 
                 task_dump_dir = joinpath(opts.out_dir, task_name, "seed_$(seed)")
                 pred_dir = dump_prediction_bundle(task_dump_dir, task_name, bundle["atoms"], pred.coordinate)
@@ -2848,6 +2940,7 @@ function predict_json(
     sample::Union{Nothing, Int} = nothing,
     use_msa::Union{Nothing, Bool} = nothing,
     strict::Bool = true,
+    gpu::Bool = false,
 )
     opts = ProtenixPredictOptions(
         out_dir = out_dir,
@@ -2860,6 +2953,7 @@ function predict_json(
         sample = sample,
         use_msa = use_msa,
         strict = strict,
+        gpu = gpu,
     )
     return predict_json(input, opts)
 end
@@ -2871,6 +2965,7 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
     runtime = _resolve_predict_runtime(opts.common)
     params = runtime.params
     loaded = runtime.loaded
+    use_gpu = runtime.gpu
     records = PredictSequenceRecord[]
 
     for seed in opts.common.seeds
@@ -2899,6 +2994,10 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
             "sequence task '$(opts.task_name)'",
         )
         typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+        if use_gpu
+            ref = device_ref(loaded.model)
+            typed_feat = _features_to_device(typed_feat, ref)
+        end
         pred = _run_model(
             loaded,
             typed_feat;
@@ -2907,6 +3006,9 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
             sample = params.sample,
             rng = rng,
         )
+        if use_gpu
+            pred = _pred_to_cpu(pred)
+        end
 
         task_dump_dir = joinpath(opts.common.out_dir, opts.task_name, "seed_$(seed)")
         pred_dir = dump_prediction_bundle(task_dump_dir, opts.task_name, bundle["atoms"], pred.coordinate)
@@ -2942,6 +3044,7 @@ function predict_sequence(
     use_msa::Union{Nothing, Bool} = nothing,
     esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
     strict::Bool = true,
+    gpu::Bool = false,
 )
     common = ProtenixPredictOptions(
         out_dir = out_dir,
@@ -2954,6 +3057,7 @@ function predict_sequence(
         sample = sample,
         use_msa = use_msa,
         strict = strict,
+        gpu = gpu,
     )
     seq_opts = ProtenixSequenceOptions(
         common = common,

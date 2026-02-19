@@ -1,6 +1,8 @@
 module AtomAttentionModule
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: LinearNoBias, LayerNormNoOffset
 import ..TransformerBlocks: DiffusionTransformer
@@ -43,14 +45,9 @@ function _broadcast_token_to_atom(
     atom_to_token_idx::AbstractVector{<:Integer},
 )
     n_atom = length(atom_to_token_idx)
-    c = size(x_token, 2)
-    out = Array{Float32}(undef, n_atom, c)
-    for a in 1:n_atom
-        t = Int(atom_to_token_idx[a]) + 1
-        (1 <= t <= size(x_token, 1)) || error("atom_to_token_idx[$a] out of range.")
-        @inbounds out[a, :] = Float32.(x_token[t, :])
-    end
-    return out
+    idx = Int.(atom_to_token_idx) .+ 1
+    all(i -> 1 <= i <= size(x_token, 1), idx) || error("atom_to_token_idx out of range.")
+    return Float32.(x_token[idx, :])
 end
 
 function _validate_local_window(n_queries::Int, n_keys::Int)
@@ -71,8 +68,10 @@ function _broadcast_token_pair_to_local_trunks(
     n_atom = length(atom_to_token_idx)
     c = size(z_token, 3)
     n_trunks = cld(n_atom, n_queries)
+    # Complex local window loop requires CPU element access
+    z = Array(Float32.(z_token))
+    ati = Array(atom_to_token_idx)
     out = zeros(Float32, n_trunks, n_queries, n_keys, c)
-    z = Float32.(z_token)
 
     left = div(n_keys - n_queries, 2)
     q_pad = n_trunks * n_queries - n_atom
@@ -87,20 +86,21 @@ function _broadcast_token_pair_to_local_trunks(
             q_pad_idx = q_start + ql - 1
             (1 <= q_pad_idx <= q_padded_len) || error("query padded index out of range.")
             q_atom_idx = q_pad_idx <= n_atom ? q_pad_idx : 0
-            ti = q_atom_idx == 0 ? 1 : Int(atom_to_token_idx[q_atom_idx]) + 1
+            ti = q_atom_idx == 0 ? 1 : Int(ati[q_atom_idx]) + 1
             (1 <= ti <= size(z, 1)) || error("atom_to_token_idx query out of range.")
             for kl in 1:n_keys
                 k_pad_idx = k_start + kl - 1
                 (1 <= k_pad_idx <= k_padded_len) || error("key padded index out of range.")
                 k_atom_idx = k_pad_idx - left
                 k_atom_idx = (1 <= k_atom_idx <= n_atom) ? k_atom_idx : 0
-                tj = k_atom_idx == 0 ? 1 : Int(atom_to_token_idx[k_atom_idx]) + 1
+                tj = k_atom_idx == 0 ? 1 : Int(ati[k_atom_idx]) + 1
                 (1 <= tj <= size(z, 2)) || error("atom_to_token_idx key out of range.")
                 @inbounds out[b, ql, kl, :] .= z[ti, tj, :]
             end
         end
     end
-    return out
+    # Transfer result to device of input
+    return copyto!(similar(z_token, Float32, size(out)...), out)
 end
 
 function _aggregate_atom_to_token_mean(
@@ -110,12 +110,13 @@ function _aggregate_atom_to_token_mean(
 )
     n_atom, c = size(x_atom)
     length(atom_to_token_idx) == n_atom || error("atom_to_token_idx length mismatch.")
-    out = zeros(Float32, n_token, c)
+    x_f = Float32.(x_atom)
+    out = fill!(similar(x_f, Float32, n_token, c), 0f0)
     counts = zeros(Int, n_token)
     for i in 1:n_atom
         t = Int(atom_to_token_idx[i]) + 1
         (1 <= t <= n_token) || error("atom_to_token_idx[$i] out of range.")
-        @inbounds out[t, :] .+= Float32.(x_atom[i, :])
+        @inbounds out[t, :] .+= x_f[i, :]
         counts[t] += 1
     end
     for t in 1:n_token
@@ -142,12 +143,12 @@ function _small_mlp!(
 end
 
 function _base_atom_features(
-    ref_pos::Matrix{Float32},
-    ref_charge::Matrix{Float32},
-    ref_mask::Matrix{Float32},
-    ref_element::Matrix{Float32},
-    ref_atom_name_chars::Matrix{Float32},
-    ref_space_uid::Vector{Int},
+    ref_pos::AbstractMatrix{Float32},
+    ref_charge::AbstractMatrix{Float32},
+    ref_mask::AbstractMatrix{Float32},
+    ref_element::AbstractMatrix{Float32},
+    ref_atom_name_chars::AbstractMatrix{Float32},
+    ref_space_uid::AbstractVector{<:Integer},
     linear_no_bias_ref_pos::LinearNoBias,
     linear_no_bias_ref_charge::LinearNoBias,
     linear_no_bias_f::LinearNoBias,
@@ -163,6 +164,9 @@ function _base_atom_features(
     c_l .= (c_l + linear_no_bias_f(hcat(ref_mask, ref_element, ref_atom_name_chars))) .* ref_mask
 
     n_trunks = cld(n_atom, n_queries)
+    # Complex local window loop requires CPU element access
+    rp = Array(ref_pos)
+    rsu = Array(ref_space_uid)
     d_local = zeros(Float32, n_trunks, n_queries, n_keys, 3)
     v_local = zeros(Float32, n_trunks, n_queries, n_keys, 1)
     inv_local = zeros(Float32, n_trunks, n_queries, n_keys, 1)
@@ -180,19 +184,19 @@ function _base_atom_features(
             q_pad_idx = q_start + ql - 1
             (1 <= q_pad_idx <= q_padded_len) || error("query padded index out of range.")
             q_idx = q_pad_idx <= n_atom ? q_pad_idx : 0
-            xi1 = q_idx == 0 ? 0f0 : ref_pos[q_idx, 1]
-            xi2 = q_idx == 0 ? 0f0 : ref_pos[q_idx, 2]
-            xi3 = q_idx == 0 ? 0f0 : ref_pos[q_idx, 3]
-            ui = q_idx == 0 ? 0 : ref_space_uid[q_idx]
+            xi1 = q_idx == 0 ? 0f0 : rp[q_idx, 1]
+            xi2 = q_idx == 0 ? 0f0 : rp[q_idx, 2]
+            xi3 = q_idx == 0 ? 0f0 : rp[q_idx, 3]
+            ui = q_idx == 0 ? 0 : rsu[q_idx]
             for kl in 1:n_keys
                 k_pad_idx = k_start + kl - 1
                 (1 <= k_pad_idx <= k_padded_len) || error("key padded index out of range.")
                 k_idx = k_pad_idx - left
                 k_idx = (1 <= k_idx <= n_atom) ? k_idx : 0
-                xk1 = k_idx == 0 ? 0f0 : ref_pos[k_idx, 1]
-                xk2 = k_idx == 0 ? 0f0 : ref_pos[k_idx, 2]
-                xk3 = k_idx == 0 ? 0f0 : ref_pos[k_idx, 3]
-                uk = k_idx == 0 ? 0 : ref_space_uid[k_idx]
+                xk1 = k_idx == 0 ? 0f0 : rp[k_idx, 1]
+                xk2 = k_idx == 0 ? 0f0 : rp[k_idx, 2]
+                xk3 = k_idx == 0 ? 0f0 : rp[k_idx, 3]
+                uk = k_idx == 0 ? 0 : rsu[k_idx]
                 dx = xi1 - xk1
                 dy = xi2 - xk2
                 dz = xi3 - xk3
@@ -208,15 +212,22 @@ function _base_atom_features(
         end
     end
 
-    p_local = (linear_no_bias_d(d_local) .* v_local) .* mask_local
-    p_local .+= linear_no_bias_invd(inv_local) .* v_local
-    p_local .+= linear_no_bias_v(v_local)
+    # Transfer local arrays to model device before applying model layers
+    _ref = linear_no_bias_d.weight
+    d_dev = copyto!(similar(_ref, Float32, size(d_local)...), d_local)
+    v_dev = copyto!(similar(_ref, Float32, size(v_local)...), v_local)
+    inv_dev = copyto!(similar(_ref, Float32, size(inv_local)...), inv_local)
+    mask_dev = copyto!(similar(_ref, Float32, size(mask_local)...), mask_local)
+
+    p_local = (linear_no_bias_d(d_dev) .* v_dev) .* mask_dev
+    p_local .+= linear_no_bias_invd(inv_dev) .* v_dev
+    p_local .+= linear_no_bias_v(v_dev)
     return c_l, p_local
 end
 
 function _mix_pair_with_single!(
-    p_local::Array{Float32,4},
-    c_l::Matrix{Float32},
+    p_local::AbstractArray{Float32,4},
+    c_l::AbstractMatrix{Float32},
     linear_no_bias_cl::LinearNoBias,
     linear_no_bias_cm::LinearNoBias,
     small_mlp_1::LinearNoBias,
@@ -229,8 +240,8 @@ function _mix_pair_with_single!(
     n_atom = size(c_l, 1)
     c_atompair = size(p_local, 4)
     c_relu = max.(c_l, 0f0)
-    c_q = linear_no_bias_cl(c_relu)
-    c_k = linear_no_bias_cm(c_relu)
+    c_q = Array(linear_no_bias_cl(c_relu))
+    c_k = Array(linear_no_bias_cm(c_relu))
     n_trunks = size(p_local, 1)
     size(p_local, 2) == n_queries || error("p_local query window mismatch.")
     size(p_local, 3) == n_keys || error("p_local key window mismatch.")
@@ -240,6 +251,8 @@ function _mix_pair_with_single!(
     q_padded_len = n_atom + q_pad
     k_padded_len = n_atom + left + k_pad_right
 
+    # Complex local window scatter loop requires CPU element access
+    p_cpu = Array(p_local)
     for b in 1:n_trunks
         q_start = (b - 1) * n_queries + 1
         k_start = (b - 1) * n_queries + 1
@@ -256,48 +269,51 @@ function _mix_pair_with_single!(
                 if q_idx == 0 && k_idx == 0
                     continue
                 elseif q_idx == 0
-                    @inbounds p_local[b, ql, kl, :] .+= c_k[k_idx, :]
+                    @inbounds p_cpu[b, ql, kl, :] .+= c_k[k_idx, :]
                 elseif k_idx == 0
-                    @inbounds p_local[b, ql, kl, :] .+= c_q[q_idx, :]
+                    @inbounds p_cpu[b, ql, kl, :] .+= c_q[q_idx, :]
                 else
-                    @inbounds p_local[b, ql, kl, :] .+= c_q[q_idx, :] .+ c_k[k_idx, :]
+                    @inbounds p_cpu[b, ql, kl, :] .+= c_q[q_idx, :] .+ c_k[k_idx, :]
                 end
             end
         end
     end
 
+    # Transfer back to model device
+    copyto!(p_local, p_cpu)
     _small_mlp!(p_local, small_mlp_1, small_mlp_2, small_mlp_3)
     return p_local
 end
 
-struct AtomAttentionEncoder
-    has_coords::Bool
-    c_atom::Int
-    c_atompair::Int
-    c_token::Int
-    c_s::Int
-    c_z::Int
-    n_queries::Int
-    n_keys::Int
-    linear_no_bias_ref_pos::LinearNoBias
-    linear_no_bias_ref_charge::LinearNoBias
-    linear_no_bias_f::LinearNoBias
-    linear_no_bias_d::LinearNoBias
-    linear_no_bias_invd::LinearNoBias
-    linear_no_bias_v::LinearNoBias
-    layernorm_s::Union{LayerNormNoOffset, Nothing}
-    linear_no_bias_s::Union{LinearNoBias, Nothing}
-    layernorm_z::Union{LayerNormNoOffset, Nothing}
-    linear_no_bias_z::Union{LinearNoBias, Nothing}
-    linear_no_bias_r::Union{LinearNoBias, Nothing}
-    linear_no_bias_cl::LinearNoBias
-    linear_no_bias_cm::LinearNoBias
-    small_mlp_1::LinearNoBias
-    small_mlp_2::LinearNoBias
-    small_mlp_3::LinearNoBias
-    atom_transformer::DiffusionTransformer
-    linear_no_bias_q::LinearNoBias
+@concrete struct AtomAttentionEncoder
+    has_coords
+    c_atom
+    c_atompair
+    c_token
+    c_s
+    c_z
+    n_queries
+    n_keys
+    linear_no_bias_ref_pos
+    linear_no_bias_ref_charge
+    linear_no_bias_f
+    linear_no_bias_d
+    linear_no_bias_invd
+    linear_no_bias_v
+    layernorm_s
+    linear_no_bias_s
+    layernorm_z
+    linear_no_bias_z
+    linear_no_bias_r
+    linear_no_bias_cl
+    linear_no_bias_cm
+    small_mlp_1
+    small_mlp_2
+    small_mlp_3
+    atom_transformer
+    linear_no_bias_q
 end
+@layer AtomAttentionEncoder
 
 function AtomAttentionEncoder(
     c_token::Int;
@@ -369,7 +385,7 @@ function (encoder::AtomAttentionEncoder)(
     size(ref_pos, 2) == 3 || error("ref_pos must be [N_atom, 3]")
     ref_charge = _has_feat(input_feature_dict, "ref_charge") ?
                  _column_f32(_feat(input_feature_dict, "ref_charge"), "ref_charge", n_atom) :
-                 zeros(Float32, n_atom, 1)
+                 fill!(similar(ref_pos, Float32, n_atom, 1), 0f0)
     ref_mask = _column_f32(_feat(input_feature_dict, "ref_mask"), "ref_mask", n_atom)
     ref_element = _matrix_f32(_feat(input_feature_dict, "ref_element"), "ref_element")
     size(ref_element) == (n_atom, 128) || error("ref_element must be [N_atom, 128]")
@@ -431,11 +447,11 @@ function (encoder::AtomAttentionEncoder)(
     size(z_f, 2) == n_token || error("z token axis mismatch.")
     size(z_f, 3) == n_token || error("z token axis mismatch.")
 
-    a_out = Array{Float32}(undef, n_sample, n_token, encoder.c_token)
-    q_skip = Array{Float32}(undef, n_sample, n_atom, encoder.c_atom)
-    c_skip = Array{Float32}(undef, n_sample, n_atom, encoder.c_atom)
+    a_out = similar(c_base, Float32, n_sample, n_token, encoder.c_token)
+    q_skip = similar(c_base, Float32, n_sample, n_atom, encoder.c_atom)
+    c_skip = similar(c_base, Float32, n_sample, n_atom, encoder.c_atom)
     n_trunks = cld(n_atom, encoder.n_queries)
-    p_skip = Array{Float32}(undef, n_sample, n_trunks, encoder.n_queries, encoder.n_keys, encoder.c_atompair)
+    p_skip = similar(c_base, Float32, n_sample, n_trunks, encoder.n_queries, encoder.n_keys, encoder.c_atompair)
 
     for i in 1:n_sample
         c_l = copy(c_base)
@@ -443,14 +459,14 @@ function (encoder::AtomAttentionEncoder)(
         encoder.layernorm_s === nothing && error("layernorm_s missing for has_coords=true")
         encoder.linear_no_bias_s === nothing && error("linear_no_bias_s missing for has_coords=true")
         c_l .+= _broadcast_token_to_atom(
-            encoder.linear_no_bias_s(encoder.layernorm_s(Array{Float32,2}(s_f[i, :, :]))),
+            encoder.linear_no_bias_s(encoder.layernorm_s(Float32.(s_f[i, :, :]))),
             atom_to_token_idx,
         )
 
         encoder.layernorm_z === nothing && error("layernorm_z missing for has_coords=true")
         encoder.linear_no_bias_z === nothing && error("linear_no_bias_z missing for has_coords=true")
         p_trunk .+= _broadcast_token_pair_to_local_trunks(
-            encoder.linear_no_bias_z(encoder.layernorm_z(Array{Float32,3}(z_f[i, :, :, :]))),
+            encoder.linear_no_bias_z(encoder.layernorm_z(Float32.(z_f[i, :, :, :]))),
             atom_to_token_idx,
             encoder.n_queries,
             encoder.n_keys,
@@ -469,7 +485,7 @@ function (encoder::AtomAttentionEncoder)(
         )
 
         encoder.linear_no_bias_r === nothing && error("linear_no_bias_r missing for has_coords=true")
-        q_l = c_l + encoder.linear_no_bias_r(Array{Float32,2}(r_f[i, :, :]))
+        q_l = c_l + encoder.linear_no_bias_r(Float32.(r_f[i, :, :]))
         q_l = encoder.atom_transformer(q_l, c_l, p_trunk, encoder.n_queries, encoder.n_keys)
         a_i = _aggregate_atom_to_token_mean(max.(encoder.linear_no_bias_q(q_l), 0f0), atom_to_token_idx, n_token)
         @inbounds a_out[i, :, :] = a_i
@@ -481,17 +497,18 @@ function (encoder::AtomAttentionEncoder)(
     return a_out, q_skip, c_skip, p_skip
 end
 
-struct AtomAttentionDecoder
-    c_token::Int
-    c_atom::Int
-    c_atompair::Int
-    n_queries::Int
-    n_keys::Int
-    linear_no_bias_a::LinearNoBias
-    layernorm_q::LayerNormNoOffset
-    linear_no_bias_out::LinearNoBias
-    atom_transformer::DiffusionTransformer
+@concrete struct AtomAttentionDecoder
+    c_token
+    c_atom
+    c_atompair
+    n_queries
+    n_keys
+    linear_no_bias_a
+    layernorm_q
+    linear_no_bias_out
+    atom_transformer
 end
+@layer AtomAttentionDecoder
 
 function AtomAttentionDecoder(
     c_token::Int;
@@ -546,15 +563,15 @@ function (decoder::AtomAttentionDecoder)(
     size(p_skip, 5) == decoder.c_atompair || error("p_skip pair channel mismatch.")
     n_atom = size(q_skip, 2)
 
-    out = Array{Float32}(undef, n_sample, n_atom, 3)
+    out = similar(a, Float32, n_sample, n_atom, 3)
     for i in 1:n_sample
-        a_i = Array{Float32,2}(a[i, :, :])
+        a_i = Float32.(a[i, :, :])
         size(a_i, 1) == n_token || error("a token axis mismatch.")
-        q = _broadcast_token_to_atom(decoder.linear_no_bias_a(a_i), atom_to_token_idx) + Array{Float32,2}(q_skip[i, :, :])
+        q = _broadcast_token_to_atom(decoder.linear_no_bias_a(a_i), atom_to_token_idx) + Float32.(q_skip[i, :, :])
         q = decoder.atom_transformer(
             q,
-            Array{Float32,2}(c_skip[i, :, :]),
-            Array{Float32,4}(p_skip[i, :, :, :, :]),
+            Float32.(c_skip[i, :, :]),
+            Float32.(p_skip[i, :, :, :, :]),
             decoder.n_queries,
             decoder.n_keys,
         )

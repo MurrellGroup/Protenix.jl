@@ -2,6 +2,8 @@ module Primitives
 
 using Random
 using Statistics
+using ConcreteStructs
+using Flux: @layer
 
 export Linear,
     LinearNoBias,
@@ -14,10 +16,11 @@ silu(x::AbstractArray) = x ./ (1 .+ exp.(-x))
 
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 
-struct Linear
-    weight::Matrix{Float32} # [out, in]
-    bias::Union{Vector{Float32}, Nothing}
+@concrete struct Linear
+    weight # [out, in]
+    bias   # Union{Vector, Nothing}
 end
+@layer Linear
 
 function Linear(
     out_features::Int,
@@ -40,14 +43,15 @@ function (lin::Linear)(x::AbstractArray{<:Real})
     flat = reshape(x_f, :, in_features)
     y = flat * transpose(lin.weight)
     if lin.bias !== nothing
-        y .+= reshape(lin.bias, 1, :)
+        y = y .+ reshape(lin.bias, 1, :)
     end
     return reshape(y, (size(x)[1:(ndims(x)-1)]..., size(lin.weight, 1)))
 end
 
-struct LinearNoBias
-    weight::Matrix{Float32} # [out, in]
+@concrete struct LinearNoBias
+    weight # [out, in]
 end
+@layer LinearNoBias
 
 function LinearNoBias(out_features::Int, in_features::Int; rng::AbstractRNG = Random.default_rng())
     out_features > 0 || error("out_features must be positive")
@@ -66,11 +70,12 @@ function (lin::LinearNoBias)(x::AbstractArray{<:Real})
     return reshape(y, (size(x)[1:(ndims(x)-1)]..., size(lin.weight, 1)))
 end
 
-struct LayerNorm
-    weight::Vector{Float32}
-    bias::Vector{Float32}
-    eps::Float32
+@concrete struct LayerNorm
+    weight
+    bias
+    eps
 end
+@layer LayerNorm
 
 function LayerNorm(c::Int; eps::Real = 1f-5)
     c > 0 || error("LayerNorm channel must be positive")
@@ -83,14 +88,11 @@ function (ln::LayerNorm)(x::AbstractArray{<:Real})
     length(ln.bias) == c || error("LayerNorm bias length mismatch")
     x_f = _as_f32_array(x)
     flat = reshape(x_f, :, c)
-    out = similar(flat)
-    @inbounds for i in 1:size(flat, 1)
-        row = @view flat[i, :]
-        μ = mean(row)
-        v = mean((row .- μ) .^ 2)
-        inv_std = inv(sqrt(v + ln.eps))
-        out[i, :] .= (row .- μ) .* inv_std .* ln.weight .+ ln.bias
-    end
+    μ = mean(flat; dims=2)
+    diff = flat .- μ
+    v = mean(diff .^ 2; dims=2)
+    inv_std = 1f0 ./ sqrt.(v .+ ln.eps)
+    out = diff .* inv_std .* reshape(ln.weight, 1, :) .+ reshape(ln.bias, 1, :)
     return reshape(out, size(x_f))
 end
 

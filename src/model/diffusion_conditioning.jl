@@ -1,32 +1,35 @@
 module DiffusionConditioningModule
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Embedders: RelativePositionEncoding, fourier_embedding
 import ..Primitives: LayerNormNoOffset, LinearNoBias, Transition
 
 export DiffusionConditioning, prepare_pair_cache
 
-struct DiffusionConditioning
-    sigma_data::Float32
-    c_z::Int
-    c_s::Int
-    c_s_inputs::Int
-    c_noise_embedding::Int
-    relpe::RelativePositionEncoding
-    layernorm_z::LayerNormNoOffset
-    linear_no_bias_z::LinearNoBias
-    transition_z1::Transition
-    transition_z2::Transition
-    layernorm_s::LayerNormNoOffset
-    linear_no_bias_s::LinearNoBias
-    w_noise::Vector{Float32}
-    b_noise::Vector{Float32}
-    layernorm_n::LayerNormNoOffset
-    linear_no_bias_n::LinearNoBias
-    transition_s1::Transition
-    transition_s2::Transition
+@concrete struct DiffusionConditioning
+    sigma_data
+    c_z
+    c_s
+    c_s_inputs
+    c_noise_embedding
+    relpe
+    layernorm_z
+    linear_no_bias_z
+    transition_z1
+    transition_z2
+    layernorm_s
+    linear_no_bias_s
+    w_noise
+    b_noise
+    layernorm_n
+    linear_no_bias_n
+    transition_s1
+    transition_s2
 end
+@layer DiffusionConditioning
 
 function DiffusionConditioning(
     sigma_data::Real = 16.0;
@@ -61,13 +64,13 @@ function DiffusionConditioning(
     )
 end
 
-function _cat_lastdim(a::Array{Float32,3}, b::Array{Float32,3})
+function _cat_lastdim(a::AbstractArray{Float32,3}, b::AbstractArray{Float32,3})
     size(a, 1) == size(b, 1) || error("cat_lastdim axis-1 mismatch")
     size(a, 2) == size(b, 2) || error("cat_lastdim axis-2 mismatch")
     return cat(a, b; dims = 3)
 end
 
-function _cat_lastdim(a::Array{Float32,2}, b::Array{Float32,2})
+function _cat_lastdim(a::AbstractArray{Float32,2}, b::AbstractArray{Float32,2})
     size(a, 1) == size(b, 1) || error("cat_lastdim axis-1 mismatch")
     return cat(a, b; dims = 2)
 end
@@ -87,15 +90,10 @@ function prepare_pair_cache(
     return pair_z
 end
 
-function _expand_noise_to_tokens(single_s::Array{Float32,2}, n_token::Int)
+function _expand_noise_to_tokens(single_s::AbstractMatrix{Float32}, n_token::Int)
     n_sample, c_s = size(single_s)
-    out = Array{Float32}(undef, n_sample, n_token, c_s)
-    for i in 1:n_sample
-        for t in 1:n_token
-            @inbounds out[i, t, :] = single_s[i, :]
-        end
-    end
-    return out
+    # Broadcast [n_sample, 1, c_s] → [n_sample, n_token, c_s]
+    return repeat(reshape(single_s, n_sample, 1, c_s), 1, n_token, 1)
 end
 
 function (cond::DiffusionConditioning)(

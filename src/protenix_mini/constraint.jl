@@ -1,6 +1,8 @@
 module Constraint
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm
 
@@ -16,9 +18,10 @@ _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Flo
 
 abstract type AbstractSubstructureEmbedder end
 
-struct SubstructureLinearEmbedder <: AbstractSubstructureEmbedder
-    proj::LinearNoBias
+@concrete struct SubstructureLinearEmbedder <: AbstractSubstructureEmbedder
+    proj
 end
+@layer SubstructureLinearEmbedder
 
 SubstructureLinearEmbedder(n_classes::Int, c_pair_dim::Int; rng::AbstractRNG = Random.default_rng()) =
     SubstructureLinearEmbedder(LinearNoBias(c_pair_dim, n_classes; rng = rng))
@@ -27,9 +30,10 @@ function (m::SubstructureLinearEmbedder)(x::AbstractArray{<:Real})
     return m.proj(x)
 end
 
-struct SubstructureMLPEmbedder <: AbstractSubstructureEmbedder
-    layers::Vector{LinearNoBias}
+@concrete struct SubstructureMLPEmbedder <: AbstractSubstructureEmbedder
+    layers
 end
+@layer SubstructureMLPEmbedder
 
 function SubstructureMLPEmbedder(
     n_classes::Int,
@@ -57,23 +61,19 @@ function (m::SubstructureMLPEmbedder)(x::AbstractArray{<:Real})
     return h
 end
 
-function _row_softmax!(scores::Matrix{Float32})
-    @inbounds for i in axes(scores, 1)
-        row = @view scores[i, :]
-        m = maximum(row)
-        row .= exp.(row .- m)
-        s = sum(row)
-        row ./= s
-    end
-    return scores
+function _row_softmax(scores::AbstractMatrix{<:Real})
+    m = maximum(scores; dims=2)
+    ex = exp.(scores .- m)
+    return ex ./ sum(ex; dims=2)
 end
 
-struct SubstructureSelfAttention
-    in_proj_weight::Matrix{Float32} # [3H, H]
-    in_proj_bias::Vector{Float32} # [3H]
-    out_proj::Linear
-    n_heads::Int
+@concrete struct SubstructureSelfAttention
+    in_proj_weight # [3H, H]
+    in_proj_bias # [3H]
+    out_proj
+    n_heads
 end
+@layer SubstructureSelfAttention
 
 function SubstructureSelfAttention(
     hidden_dim::Int;
@@ -106,7 +106,7 @@ function (m::SubstructureSelfAttention)(x::AbstractArray{<:Real,3})
 
     n_heads = m.n_heads
     head_dim = fld(hidden, n_heads)
-    merged = Array{Float32}(undef, bsz, seq_len, hidden)
+    merged = similar(h, Float32, bsz, seq_len, hidden)
     scale = inv(sqrt(Float32(head_dim)))
     @inbounds for b in 1:bsz, hidx in 1:n_heads
         head_start = (hidx - 1) * head_dim + 1
@@ -114,21 +114,21 @@ function (m::SubstructureSelfAttention)(x::AbstractArray{<:Real,3})
         qmat = @view q[b, :, head_start:head_stop]
         kmat = @view k[b, :, head_start:head_stop]
         vmat = @view v[b, :, head_start:head_stop]
-        scores = (qmat * transpose(kmat)) .* scale
-        _row_softmax!(scores)
+        scores = _row_softmax((qmat * transpose(kmat)) .* scale)
         @view(merged[b, :, head_start:head_stop]) .= scores * vmat
     end
 
     return m.out_proj(merged)
 end
 
-struct SubstructureTransformerLayer
-    self_attn::SubstructureSelfAttention
-    linear1::Linear
-    linear2::Linear
-    norm1::LayerNorm
-    norm2::LayerNorm
+@concrete struct SubstructureTransformerLayer
+    self_attn
+    linear1
+    linear2
+    norm1
+    norm2
 end
+@layer SubstructureTransformerLayer
 
 function SubstructureTransformerLayer(
     hidden_dim::Int;
@@ -151,11 +151,12 @@ function (m::SubstructureTransformerLayer)(x::AbstractArray{<:Real,3})
     return b
 end
 
-struct SubstructureTransformerEmbedder <: AbstractSubstructureEmbedder
-    input_proj::LinearNoBias
-    layers::Vector{SubstructureTransformerLayer}
-    output_proj::LinearNoBias
+@concrete struct SubstructureTransformerEmbedder <: AbstractSubstructureEmbedder
+    input_proj
+    layers
+    output_proj
 end
+@layer SubstructureTransformerEmbedder
 
 function SubstructureTransformerEmbedder(
     n_classes::Int,
@@ -187,21 +188,13 @@ function (m::SubstructureTransformerEmbedder)(x::AbstractArray{<:Real})
     batch = n > 3 ? prod(lead_dims) : 1
     x4 = reshape(_as_f32_array(x), batch, n_tok1, n_tok2, in_dim)
     x4 = m.input_proj(x4)
-    h = Array{Float32}(undef, batch, n_tok1 * n_tok2, size(x4, 4))
-    @inbounds for b in 1:batch, i in 1:n_tok1, j in 1:n_tok2
-        seq_idx = (i - 1) * n_tok2 + j
-        @views h[b, seq_idx, :] .= x4[b, i, j, :]
-    end
+    h = reshape(x4, batch, n_tok1 * n_tok2, size(x4, 4))
 
     for layer in m.layers
         h = layer(h)
     end
     y = m.output_proj(h)
-    y4 = Array{Float32}(undef, batch, n_tok1, n_tok2, size(y, 3))
-    @inbounds for b in 1:batch, i in 1:n_tok1, j in 1:n_tok2
-        seq_idx = (i - 1) * n_tok2 + j
-        @views y4[b, i, j, :] .= y[b, seq_idx, :]
-    end
+    y4 = reshape(y, batch, n_tok1, n_tok2, size(y, 3))
     if isempty(lead_dims)
         return reshape(y4, n_tok1, n_tok2, size(y4, 4))
     end
@@ -230,10 +223,11 @@ function _constraint_get(constraint_feature, key::String)
 end
 
 function _substructure_from_index(sub_raw::AbstractMatrix{<:Integer}, n_classes::Int)
-    out = zeros(Float32, size(sub_raw, 1), size(sub_raw, 2), n_classes)
-    @inbounds for i in axes(sub_raw, 1), j in axes(sub_raw, 2)
-        cls = clamp(Int(sub_raw[i, j]) + 1, 1, n_classes)
-        out[i, j, cls] = 1f0
+    n1, n2 = size(sub_raw)
+    cls = clamp.(Int.(sub_raw) .+ 1, 1, n_classes)
+    out = zeros(Float32, n1, n2, n_classes)
+    @inbounds for i in 1:n1, j in 1:n2
+        out[i, j, cls[i, j]] = 1f0
     end
     return out
 end
@@ -247,12 +241,13 @@ function _prepare_substructure_feature(sub_raw, n_classes::Int)
     return sub
 end
 
-struct ConstraintEmbedder{P, C, CA, S}
-    pocket_z_embedder::P
-    contact_z_embedder::C
-    contact_atom_z_embedder::CA
-    substructure_z_embedder::S
+@concrete struct ConstraintEmbedder
+    pocket_z_embedder
+    contact_z_embedder
+    contact_atom_z_embedder
+    substructure_z_embedder
 end
+@layer ConstraintEmbedder
 
 function ConstraintEmbedder(
     c_constraint_z::Int;

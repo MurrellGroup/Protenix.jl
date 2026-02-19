@@ -1,6 +1,8 @@
 module DesignConditionEmbedderModule
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Embedders: ConditionTemplateEmbedder, condition_template_embedding
 import ..AtomAttentionModule: AtomAttentionEncoder
@@ -39,12 +41,13 @@ DesignAtomAttentionEncoder(
     rng = rng,
 )
 
-struct InputFeatureEmbedderDesign
-    c_s_inputs::Int
-    atom_attention_encoder::AtomAttentionEncoder
-    input_map_weight::Matrix{Float32} # [c_s_inputs, c_token + 46]
-    input_map_bias::Vector{Float32}   # [c_s_inputs]
+@concrete struct InputFeatureEmbedderDesign
+    c_s_inputs
+    atom_attention_encoder
+    input_map_weight # [c_s_inputs, c_token + 46]
+    input_map_bias   # [c_s_inputs]
 end
+@layer InputFeatureEmbedderDesign
 
 function InputFeatureEmbedderDesign(
     c_token::Int;
@@ -79,11 +82,11 @@ function (embedder::InputFeatureEmbedderDesign)(input_feature_dict::AbstractDict
 
     plddt = haskey(input_feature_dict, "plddt") ?
             _column_f32(input_feature_dict["plddt"], "plddt", n_token) :
-            zeros(Float32, n_token, 1)
+            fill!(similar(restype, Float32, n_token, 1), 0f0)
     hotspot = haskey(input_feature_dict, "hotspot") ?
               _column_f32(input_feature_dict["hotspot"], "hotspot", n_token) :
-              zeros(Float32, n_token, 1)
-    add_feat = zeros(Float32, n_token, 4)
+              fill!(similar(restype, Float32, n_token, 1), 0f0)
+    add_feat = fill!(similar(restype, Float32, n_token, 4), 0f0)
     add_feat[:, 1] .= 1f0
 
     a_token, _, _, _ = embedder.atom_attention_encoder(input_feature_dict)
@@ -96,10 +99,11 @@ function (embedder::InputFeatureEmbedderDesign)(input_feature_dict::AbstractDict
     return s_cat * transpose(embedder.input_map_weight) .+ reshape(embedder.input_map_bias, 1, :)
 end
 
-struct DesignConditionEmbedder
-    input_embedder::InputFeatureEmbedderDesign
-    condition_template_embedder::ConditionTemplateEmbedder
+@concrete struct DesignConditionEmbedder
+    input_embedder
+    condition_template_embedder
 end
+@layer DesignConditionEmbedder
 
 function DesignConditionEmbedder(
     c_token::Int;

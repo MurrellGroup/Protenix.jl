@@ -1,6 +1,8 @@
 module Model
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: LinearNoBias, LayerNorm
 import ..Features: ProtenixFeatures, as_protenix_features, relpos_input, atom_attention_input
@@ -14,35 +16,36 @@ export ProtenixMiniModel, get_pairformer_output, run_inference
 
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 
-struct ProtenixMiniModel
-    n_cycle::Int
-    input_embedder::InputFeatureEmbedder
-    relative_position_encoding::RelativePositionEncoding
-    template_embedder::TemplateEmbedder
-    noisy_structure_embedder::Union{NoisyStructureEmbedder, Nothing}
-    msa_module::MSAModule
-    constraint_embedder::Union{Nothing, ConstraintEmbedder}
-    pairformer_stack::PairformerStack
-    diffusion_module::DiffusionModule
-    distogram_head::DistogramHead
-    confidence_head::ConfidenceHead
-    linear_no_bias_sinit::LinearNoBias
-    linear_no_bias_zinit1::LinearNoBias
-    linear_no_bias_zinit2::LinearNoBias
-    linear_no_bias_token_bond::LinearNoBias
-    linear_no_bias_z_cycle::LinearNoBias
-    linear_no_bias_s::LinearNoBias
-    layernorm_z_cycle::LayerNorm
-    layernorm_s::LayerNorm
-    diffusion_batch_size::Int
-    sample_gamma0::Float32
-    sample_gamma_min::Float32
-    sample_noise_scale_lambda::Float32
-    sample_step_scale_eta::Float32
-    sample_n_step::Int
-    sample_n_sample::Int
-    scheduler::InferenceNoiseScheduler
+@concrete struct ProtenixMiniModel
+    n_cycle
+    input_embedder
+    relative_position_encoding
+    template_embedder
+    noisy_structure_embedder
+    msa_module
+    constraint_embedder
+    pairformer_stack
+    diffusion_module
+    distogram_head
+    confidence_head
+    linear_no_bias_sinit
+    linear_no_bias_zinit1
+    linear_no_bias_zinit2
+    linear_no_bias_token_bond
+    linear_no_bias_z_cycle
+    linear_no_bias_s
+    layernorm_z_cycle
+    layernorm_s
+    diffusion_batch_size
+    sample_gamma0
+    sample_gamma_min
+    sample_noise_scale_lambda
+    sample_step_scale_eta
+    sample_n_step
+    sample_n_sample
+    scheduler
 end
+@layer ProtenixMiniModel
 
 function ProtenixMiniModel(
     c_token_diffusion::Int,
@@ -153,14 +156,10 @@ function _pair_mask(feat::ProtenixFeatures)
     if feat.token_mask !== nothing
         m = feat.token_mask
         n = length(m)
-        out = zeros(Float32, n, n)
-        @inbounds for i in 1:n, j in 1:n
-            out[i, j] = m[i] * m[j]
-        end
-        return out
+        return reshape(m, n, 1) .* reshape(m, 1, n)
     end
     n = length(feat.token_index)
-    return ones(Float32, n, n)
+    return fill!(similar(feat.restype, Float32, n, n), 1f0)
 end
 
 function get_pairformer_output(
@@ -194,8 +193,8 @@ function get_pairformer_output(
         end
     end
 
-    z = zeros(Float32, size(z_init))
-    s = zeros(Float32, size(s_init))
+    z = fill!(similar(z_init), 0f0)
+    s = fill!(similar(s_init), 0f0)
     pair_mask = _pair_mask(feat)
 
     for _ in 1:n_cycle

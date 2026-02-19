@@ -1,6 +1,8 @@
 module Heads
 
 using Random
+using ConcreteStructs
+using Flux: @layer
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm
 import ..Features: ProtenixFeatures, as_protenix_features
@@ -12,11 +14,12 @@ export DistogramHead, ConfidenceHead
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 _as_f32_copy(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? copy(x) : Float32.(x)
 
-struct DistogramHead
-    c_z::Int
-    no_bins::Int
-    linear::Linear
+@concrete struct DistogramHead
+    c_z
+    no_bins
+    linear
 end
+@layer DistogramHead
 
 function DistogramHead(c_z::Int; no_bins::Int = 64, rng::AbstractRNG = Random.default_rng())
     return DistogramHead(c_z, no_bins, Linear(no_bins, c_z; bias = true, rng = rng))
@@ -25,41 +28,38 @@ end
 function (m::DistogramHead)(z::AbstractArray{<:Real,3})
     size(z, 3) == m.c_z || error("DistogramHead c_z mismatch")
     logits = m.linear(z)
-    n_i, n_j, n_b = size(logits)
-    out = similar(logits)
-    @inbounds for i in 1:n_i, j in 1:n_j, b in 1:n_b
-        out[i, j, b] = logits[i, j, b] + logits[j, i, b]
-    end
-    return out
+    # Symmetrize: out[i,j,:] = logits[i,j,:] + logits[j,i,:]
+    return logits .+ permutedims(logits, (2, 1, 3))
 end
 
-struct ConfidenceHead
-    c_s::Int
-    c_z::Int
-    c_s_inputs::Int
-    b_pae::Int
-    b_pde::Int
-    b_plddt::Int
-    b_resolved::Int
-    max_atoms_per_token::Int
-    stop_gradient::Bool
-    lower_bins::Vector{Float32}
-    upper_bins::Vector{Float32}
-    linear_no_bias_s1::LinearNoBias
-    linear_no_bias_s2::LinearNoBias
-    linear_no_bias_d::LinearNoBias
-    linear_no_bias_d_wo_onehot::LinearNoBias
-    pairformer_stack::PairformerStack
-    linear_no_bias_pae::LinearNoBias
-    linear_no_bias_pde::LinearNoBias
-    plddt_weight::Array{Float32,3} # [max_atoms_per_token, c_s, b_plddt]
-    resolved_weight::Array{Float32,3} # [max_atoms_per_token, c_s, b_resolved]
-    input_strunk_ln::LayerNorm
-    pae_ln::LayerNorm
-    pde_ln::LayerNorm
-    plddt_ln::LayerNorm
-    resolved_ln::LayerNorm
+@concrete struct ConfidenceHead
+    c_s
+    c_z
+    c_s_inputs
+    b_pae
+    b_pde
+    b_plddt
+    b_resolved
+    max_atoms_per_token
+    stop_gradient
+    lower_bins
+    upper_bins
+    linear_no_bias_s1
+    linear_no_bias_s2
+    linear_no_bias_d
+    linear_no_bias_d_wo_onehot
+    pairformer_stack
+    linear_no_bias_pae
+    linear_no_bias_pde
+    plddt_weight # [max_atoms_per_token, c_s, b_plddt]
+    resolved_weight # [max_atoms_per_token, c_s, b_resolved]
+    input_strunk_ln
+    pae_ln
+    pde_ln
+    plddt_ln
+    resolved_ln
 end
+@layer ConfidenceHead
 
 function ConfidenceHead(
     c_s::Int,
@@ -113,36 +113,28 @@ function _select_rep_coords(
     x_pred_coords::AbstractArray{<:Real,3},
     rep_mask::AbstractVector{Bool},
 )
-    n_sample = size(x_pred_coords, 1)
-    n_rep = count(identity, rep_mask)
-    out = zeros(Float32, n_sample, n_rep, 3)
     idx = findall(identity, rep_mask)
-    @inbounds for s in 1:n_sample, r in 1:n_rep
-        out[s, r, 1] = Float32(x_pred_coords[s, idx[r], 1])
-        out[s, r, 2] = Float32(x_pred_coords[s, idx[r], 2])
-        out[s, r, 3] = Float32(x_pred_coords[s, idx[r], 3])
-    end
-    return out
+    return Float32.(x_pred_coords[:, idx, :])
 end
 
 function _atom_head(
     a::AbstractMatrix{<:Real},
     atom_to_tokatom_idx::AbstractVector{<:Integer},
-    w::Array{Float32,3},
+    w::AbstractArray{Float32,3},
 )
     n_atom, c_s = size(a)
     size(w, 2) == c_s || error("atom head weight c_s mismatch")
     out_bins = size(w, 3)
-    out = zeros(Float32, n_atom, out_bins)
-    @inbounds for n in 1:n_atom
-        t = Int(atom_to_tokatom_idx[n]) + 1
-        1 <= t <= size(w, 1) || error("atom_to_tokatom_idx[$n] out of range")
-        for b in 1:out_bins
-            acc = 0f0
-            for c in 1:c_s
-                acc += Float32(a[n, c]) * w[t, c, b]
-            end
-            out[n, b] = acc
+    # Gather per-atom weight slices: w_sel[n, c, b] = w[tokatom[n]+1, c, b]
+    idx = Int.(atom_to_tokatom_idx) .+ 1
+    all(i -> 1 <= i <= size(w, 1), idx) || error("atom_to_tokatom_idx out of range")
+    w_sel = w[idx, :, :] # [n_atom, c_s, out_bins]
+    # out[n, b] = sum_c a[n, c] * w_sel[n, c, b]
+    a_f = Float32.(a)
+    out = fill!(similar(a_f, Float32, n_atom, out_bins), 0f0)
+    for b in 1:out_bins
+        for c in 1:c_s
+            out[:, b] .+= a_f[:, c] .* w_sel[:, c, b]
         end
     end
     return out
@@ -161,12 +153,7 @@ function _distance_augmented_z(
 end
 
 function _symmetrize_pair_lastdim(x::AbstractArray{<:Real,3})
-    n_i, n_j, n_c = size(x)
-    out = zeros(Float32, n_i, n_j, n_c)
-    @inbounds for i in 1:n_i, j in 1:n_j, c in 1:n_c
-        out[i, j, c] = Float32(x[i, j, c]) + Float32(x[j, i, c])
-    end
-    return out
+    return Float32.(x) .+ permutedims(Float32.(x), (2, 1, 3))
 end
 
 function (m::ConfidenceHead)(;
@@ -215,10 +202,10 @@ function (m::ConfidenceHead)(;
     x_rep = _select_rep_coords(x_pred, rep_mask)
     n_sample = size(x_rep, 1)
 
-    plddt_preds = Vector{Array{Float32,2}}(undef, n_sample)
-    pae_preds = Vector{Array{Float32,3}}(undef, n_sample)
-    pde_preds = Vector{Array{Float32,3}}(undef, n_sample)
-    resolved_preds = Vector{Array{Float32,2}}(undef, n_sample)
+    plddt_preds = Vector{AbstractArray{Float32,2}}(undef, n_sample)
+    pae_preds = Vector{AbstractArray{Float32,3}}(undef, n_sample)
+    pde_preds = Vector{AbstractArray{Float32,3}}(undef, n_sample)
+    resolved_preds = Vector{AbstractArray{Float32,2}}(undef, n_sample)
 
     for i in 1:n_sample
         z_i = _distance_augmented_z(m, z_base, @view(x_rep[i, :, :]))

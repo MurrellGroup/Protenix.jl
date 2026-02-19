@@ -2,6 +2,8 @@ module Primitives
 
 using Random
 using Statistics
+using ConcreteStructs
+using Flux: @layer
 
 export LinearNoBias,
     LayerNormNoOffset,
@@ -14,9 +16,10 @@ silu(x::AbstractArray) = x ./ (1 .+ exp.(-x))
 
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 
-struct LinearNoBias
-    weight::Matrix{Float32} # [out_features, in_features]
+@concrete struct LinearNoBias
+    weight # [out_features, in_features]
 end
+@layer LinearNoBias
 
 function LinearNoBias(out_features::Int, in_features::Int; rng::AbstractRNG = Random.default_rng())
     out_features > 0 || error("out_features must be positive.")
@@ -37,11 +40,12 @@ function (linear::LinearNoBias)(x::AbstractArray{<:Real})
     return reshape(y, out_shape)
 end
 
-struct LayerNormNoOffset
-    weight::Vector{Float32}
-    bias::Vector{Float32}
-    eps::Float32
+@concrete struct LayerNormNoOffset
+    weight
+    bias
+    eps
 end
+@layer LayerNormNoOffset
 
 function LayerNormNoOffset(c::Int; eps::Real = 1f-5, with_bias::Bool = false)
     c > 0 || error("LayerNorm channel dim must be positive.")
@@ -55,24 +59,22 @@ function (ln::LayerNormNoOffset)(x::AbstractArray{<:Real})
     length(ln.bias) == c || error("LayerNorm bias length mismatch: $(length(ln.bias)) vs $c")
 
     flat = reshape(_as_f32_array(x), :, c)
-    out = similar(flat)
-    for i in 1:size(flat, 1)
-        row = @view flat[i, :]
-        μ = mean(row)
-        v = mean((row .- μ) .^ 2)
-        inv_std = inv(sqrt(v + ln.eps))
-        out[i, :] .= (row .- μ) .* inv_std .* ln.weight .+ ln.bias
-    end
+    μ = mean(flat; dims=2)
+    diff = flat .- μ
+    v = mean(diff .^ 2; dims=2)
+    inv_std = 1f0 ./ sqrt.(v .+ ln.eps)
+    out = diff .* inv_std .* reshape(ln.weight, 1, :) .+ reshape(ln.bias, 1, :)
     return reshape(out, size(x))
 end
 
-struct AdaptiveLayerNorm
-    layernorm_a::LayerNormNoOffset
-    layernorm_s::LayerNormNoOffset
-    linear_s::LinearNoBias
-    linear_nobias_s::LinearNoBias
-    bias_s::Vector{Float32} # explicit bias for linear_s
+@concrete struct AdaptiveLayerNorm
+    layernorm_a
+    layernorm_s
+    linear_s
+    linear_nobias_s
+    bias_s # explicit bias for linear_s
 end
+@layer AdaptiveLayerNorm
 
 function AdaptiveLayerNorm(c_a::Int, c_s::Int; rng::AbstractRNG = Random.default_rng())
     return AdaptiveLayerNorm(
@@ -93,19 +95,20 @@ function (ada::AdaptiveLayerNorm)(a::AbstractArray{<:Real}, s::AbstractArray{<:R
     s0 = ada.layernorm_s(s)
 
     g = ada.linear_s(s0)
-    g .+= reshape(ada.bias_s, ntuple(_ -> 1, ndims(g)-1)..., :)
+    g = g .+ reshape(ada.bias_s, ntuple(_ -> 1, ndims(g)-1)..., :)
     shift = ada.linear_nobias_s(s0)
     return (1f0 ./ (1f0 .+ exp.(-g))) .* a0 .+ shift
 end
 
-struct Transition
-    n::Int
-    c_in::Int
-    layernorm::LayerNormNoOffset
-    linear_a::LinearNoBias
-    linear_b::LinearNoBias
-    linear_out::LinearNoBias
+@concrete struct Transition
+    n
+    c_in
+    layernorm
+    linear_a
+    linear_b
+    linear_out
 end
+@layer Transition
 
 function Transition(c_in::Int, n::Int; rng::AbstractRNG = Random.default_rng())
     c_in > 0 || error("Transition c_in must be positive.")
