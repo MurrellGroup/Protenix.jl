@@ -1856,7 +1856,7 @@ end
         @test counts["_unmatched"] == 1
     end
 
-    real_idx = joinpath(dirname(@__DIR__), "docs", "checkpoint_index.json")
+    real_idx = joinpath(dirname(@__DIR__), "porting", "docs", "checkpoint_index.json")
     if isfile(real_idx)
         keys = PXDesign.Model.load_checkpoint_index(real_idx)
         counts = PXDesign.Model.checkpoint_prefix_counts(keys)
