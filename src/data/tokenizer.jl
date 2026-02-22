@@ -101,19 +101,19 @@ function tokenize_atoms(atoms::Vector{AtomRecord})::TokenArray
         first_atom = atoms[start]
         res_name = first_atom.res_name
         mol_type = first_atom.mol_type
-        if mol_type != "ligand"
-            res_token = get(STD_RESIDUES, res_name, _unknown_token_value(mol_type))
+        res_token = get(STD_RESIDUES, res_name, nothing)
+        if res_token !== nothing && mol_type != "ligand"
+            # Standard polymer residue → single token
             atom_idx = collect(start:stop)
             atom_names = [atoms[i].atom_name for i in start:stop]
             centre_idx = _select_centre_atom_index(atoms, start, stop)
             push!(tokens, Token(res_token, atom_idx, atom_names, centre_idx))
         else
+            # Ligand or non-standard residue → per-atom tokenization
             for i in start:stop
                 elem = uppercase(atoms[i].element)
                 elem_token = get(ELEMS, elem, nothing)
                 if elem_token === nothing
-                    # Unrecognised element (e.g. single-letter inference "A").
-                    # Fall back to Carbon, the most common organic element.
                     elem_token = ELEMS["C"]
                 end
                 push!(tokens, Token(elem_token, [i], [atoms[i].atom_name], i))
