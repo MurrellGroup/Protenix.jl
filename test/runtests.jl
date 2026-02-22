@@ -430,8 +430,8 @@ end
     PXDesign.ProtenixAPI._inject_task_covalent_token_bonds!(feat, bundle["atoms"], bond_task, parsed_bond.entity_chain_ids)
 
     token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
-    tok_a = findfirst(==("A0"), token_chain_ids)
-    tok_b = findfirst(==("B0"), token_chain_ids)
+    tok_a = findfirst(==("A"), token_chain_ids)
+    tok_b = findfirst(==("B"), token_chain_ids)
     @test tok_a !== nothing
     @test tok_b !== nothing
     @test feat["token_bonds"][tok_a, tok_b] == 1
@@ -469,8 +469,8 @@ end
         parsed_smiles.entity_atom_map,
     )
     token_chain_ids_smiles = [bundle_smiles["atoms"][tok.centre_atom_index].chain_id for tok in bundle_smiles["tokens"]]
-    prot_cols = findall(==("A0"), token_chain_ids_smiles)
-    lig_cols = findall(==("B0"), token_chain_ids_smiles)
+    prot_cols = findall(==("A"), token_chain_ids_smiles)
+    lig_cols = findall(==("B"), token_chain_ids_smiles)
     @test !isempty(prot_cols)
     @test !isempty(lig_cols)
     @test any(feat_smiles["token_bonds"][i, j] == 1 for i in prot_cols, j in lig_cols)
@@ -779,8 +779,8 @@ A-D
         )
 
         msa = Int.(feat["msa"])
-        a_cols = findall(==("A0"), token_chain_ids)
-        b_cols = findall(==("B0"), token_chain_ids)
+        a_cols = findall(==("A"), token_chain_ids)
+        b_cols = findall(==("B"), token_chain_ids)
         q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
         q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
         pair1_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
@@ -838,8 +838,8 @@ A-D
         )
 
         msa = Int.(feat["msa"])
-        a_cols = findall(==("A0"), token_chain_ids)
-        b_cols = findall(==("B0"), token_chain_ids)
+        a_cols = findall(==("A"), token_chain_ids)
+        b_cols = findall(==("B"), token_chain_ids)
         q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
         q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
         tax111_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
@@ -897,8 +897,8 @@ A-D
         )
 
         msa = Int.(feat["msa"])
-        a_cols = findall(==("A0"), token_chain_ids)
-        b_cols = findall(==("B0"), token_chain_ids)
+        a_cols = findall(==("A"), token_chain_ids)
+        b_cols = findall(==("B"), token_chain_ids)
         q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
         q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
         homo_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
@@ -1061,7 +1061,7 @@ end
                 auto_feat,
                 auto_bundle["atoms"],
                 auto_bundle["tokens"],
-                Dict("A0" => "AC"),
+                Dict("A" => "AC"),
                 params,
                 "auto esm test",
             )
@@ -1083,7 +1083,7 @@ end
                 auto_feat,
                 auto_bundle["atoms"],
                 auto_bundle["tokens"],
-                Dict("A0" => "AC"),
+                Dict("A" => "AC"),
                 params,
                 "auto esm no-overwrite",
             )
@@ -1098,7 +1098,7 @@ end
 @testset "ProtenixBase sequence wrappers" begin
     atoms = PXDesign.ProtenixBase.build_sequence_atoms("ACD")
     @test !isempty(atoms)
-    @test atoms[1].chain_id == "A0"
+    @test atoms[1].chain_id == "A"
 
     bundle = PXDesign.ProtenixBase.build_sequence_feature_bundle("ACD")
     @test bundle["task_name"] == "protenix_base_sequence"
@@ -2631,7 +2631,7 @@ ATOM 4 O O . ALA A 1 1 ? 3.000 0.200 0.000 1.00 10.00 ? 1 ALA A O 1
         cif_text = read(joinpath(pred_dir, first(sort(cif_files))), String)
         @test occursin("_entity_poly.", cif_text)
         @test occursin("_struct_conn.", cif_text)
-        @test occursin(" A0 ", cif_text)
+        @test occursin(" A ", cif_text)
         @test occursin(" B0 ", cif_text)
         @test isfile(joinpath(pred_dir, "sample_level_output.csv"))
         @test isfile(joinpath(cfg["dump_dir"], "global_run_0", "demo_infer", "seed_12345", "SUCCESS_FILE"))
