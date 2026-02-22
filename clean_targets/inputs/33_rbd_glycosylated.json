@@ -1,0 +1,44 @@
+[{
+  "name": "sars_cov2_rbd_glycosylated",
+  "sequences": [
+    {"proteinChain": {
+      "sequence": "RVQPTESIVRFPNITNLCPFGEVFNATRFASVYAWNRKRISNCVADYSVLYNSASFSTFKCYGVSPTKLNDLCFTNVYADSFVIRGDEVRQIAPGQTGKIADYNYKLPDDFTGCVIAWNSNNLDSKVGGNYNYLYRLFRKSNLKPFERDISTEIYQAGSTPCNGVEGFNCYFPLQSYGFQPTNGVGYQPYRVVVLSFELLHAPATVCGPKKSTNLVKNKCVNF",
+      "count": 1,
+      "msa": {
+        "precomputed_msa_dir": "../../clean_targets/msa/rbd_glyco",
+        "pairing_db": "uniref100"
+      }
+    }},
+
+    {"ligand": {"ligand": "CCD_NAG_NAG_BMA_MAN_NAG_GAL", "count": 1}},
+    {"ligand": {"ligand": "CCD_MAN_NAG_GAL", "count": 1}},
+    {"ligand": {"ligand": "CCD_FUC", "count": 1}},
+
+    {"ligand": {"ligand": "CCD_NAG_NAG_BMA_MAN_NAG_GAL", "count": 1}},
+    {"ligand": {"ligand": "CCD_MAN_NAG_GAL", "count": 1}},
+    {"ligand": {"ligand": "CCD_FUC", "count": 1}}
+  ],
+  "covalent_bonds": [
+    {"entity1": "1", "position1": "13",  "atom1": "ND2", "entity2": "2", "position2": "1", "atom2": "C1"},
+    {"entity1": "2", "position1": "2",   "atom1": "C1",  "entity2": "2", "position2": "1", "atom2": "O4"},
+    {"entity1": "2", "position1": "3",   "atom1": "C1",  "entity2": "2", "position2": "2", "atom2": "O4"},
+    {"entity1": "2", "position1": "4",   "atom1": "C1",  "entity2": "2", "position2": "3", "atom2": "O3"},
+    {"entity1": "2", "position1": "5",   "atom1": "C1",  "entity2": "2", "position2": "4", "atom2": "O2"},
+    {"entity1": "2", "position1": "6",   "atom1": "C1",  "entity2": "2", "position2": "5", "atom2": "O4"},
+    {"entity1": "3", "position1": "1",   "atom1": "C1",  "entity2": "2", "position2": "3", "atom2": "O6"},
+    {"entity1": "3", "position1": "2",   "atom1": "C1",  "entity2": "3", "position2": "1", "atom2": "O2"},
+    {"entity1": "3", "position1": "3",   "atom1": "C1",  "entity2": "3", "position2": "2", "atom2": "O4"},
+    {"entity1": "4", "position1": "1",   "atom1": "C1",  "entity2": "2", "position2": "1", "atom2": "O6"},
+
+    {"entity1": "1", "position1": "25",  "atom1": "ND2", "entity2": "5", "position2": "1", "atom2": "C1"},
+    {"entity1": "5", "position1": "2",   "atom1": "C1",  "entity2": "5", "position2": "1", "atom2": "O4"},
+    {"entity1": "5", "position1": "3",   "atom1": "C1",  "entity2": "5", "position2": "2", "atom2": "O4"},
+    {"entity1": "5", "position1": "4",   "atom1": "C1",  "entity2": "5", "position2": "3", "atom2": "O3"},
+    {"entity1": "5", "position1": "5",   "atom1": "C1",  "entity2": "5", "position2": "4", "atom2": "O2"},
+    {"entity1": "5", "position1": "6",   "atom1": "C1",  "entity2": "5", "position2": "5", "atom2": "O4"},
+    {"entity1": "6", "position1": "1",   "atom1": "C1",  "entity2": "5", "position2": "3", "atom2": "O6"},
+    {"entity1": "6", "position1": "2",   "atom1": "C1",  "entity2": "6", "position2": "1", "atom2": "O2"},
+    {"entity1": "6", "position1": "3",   "atom1": "C1",  "entity2": "6", "position2": "2", "atom2": "O4"},
+    {"entity1": "7", "position1": "1",   "atom1": "C1",  "entity2": "5", "position2": "1", "atom2": "O6"}
+  ]
+}]
