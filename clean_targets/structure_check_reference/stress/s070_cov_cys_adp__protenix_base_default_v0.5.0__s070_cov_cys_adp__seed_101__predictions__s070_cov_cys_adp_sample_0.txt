@@ -1,0 +1,44 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s070_cov_cys_adp__protenix_base_default_v0.5.0/s070_cov_cys_adp/seed_101/predictions/s070_cov_cys_adp_sample_0.cif
+  atoms=87, residues=9
+  bonds: checked=90 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=4 mild=1 moderate=0 severe=3 pair_rate=0.22% atom_rate=5.75%
+  inter-residue clashes: total=4 mild=1 moderate=0 severe=3 pair_rate=0.25%
+  clashscore/1000 atoms: all=45.98 inter=45.98 severe=34.48 inter_severe=34.48
+  overall_issue_score=2.465 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:CE vs A:TYR6:CA d=2.176 allowed=3.000 overlap=1.224
+    severe(inter) A:MET1:CE vs A:TYR6:CB d=2.285 allowed=3.000 overlap=1.115
+    severe(inter) A:MET1:SD vs A:TYR6:CB d=2.698 allowed=3.100 overlap=0.802
+    mild(inter) A:MET1:CE vs A:TYR6:N d=2.775 allowed=2.850 overlap=0.475
+  Clash hotspots:
+    A:MET1:CE count=3 max_overlap=1.224
+    A:TYR6:CB count=2 max_overlap=1.115
+    A:TYR6:CA count=1 max_overlap=1.224
+    A:MET1:SD count=1 max_overlap=0.802
+    A:TYR6:N count=1 max_overlap=0.475
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 87
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 90
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1857
+clashes: 4
+mild_clashes: 1
+moderate_clashes: 0
+severe_clashes: 3
+inter_residue_clashes: 4
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.2154011847065159
+percent_atoms_in_clashes: 5.747126436781609
+clashscore_per_1000_atoms: 45.97701149425287
+inter_residue_clashscore_per_1000_atoms: 45.97701149425287
+severe_clashscore_per_1000_atoms: 34.48275862068966
+inter_residue_severe_clashscore_per_1000_atoms: 34.48275862068966
+overall_issue_score: 2.4645717806531118

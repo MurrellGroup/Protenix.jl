@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s055_ptm_tys__protenix_mini_default_v0.5.0/s055_ptm_tys/seed_101/predictions/s055_ptm_tys_sample_0.cif
+  atoms=63, residues=8
+  bonds: checked=50 expected=50 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=34 mild=5 moderate=3 severe=26 pair_rate=4.33% atom_rate=23.81%
+  inter-residue clashes: total=0 mild=0 moderate=0 severe=0 pair_rate=0.00%
+  clashscore/1000 atoms: all=539.68 inter=0.00 severe=412.70 inter_severe=0.00
+  overall_issue_score=0.000 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:TYS6:CA vs A:TYS6:CB d=1.248 allowed=3.000 overlap=2.152
+    severe(intra) A:TYS6:CD1 vs A:TYS6:CE1 d=1.390 allowed=3.000 overlap=2.010
+    severe(intra) A:TYS6:CE2 vs A:TYS6:CZ d=1.406 allowed=3.000 overlap=1.994
+    severe(intra) A:TYS6:CG vs A:TYS6:CD2 d=1.408 allowed=3.000 overlap=1.992
+    severe(intra) A:TYS6:CE1 vs A:TYS6:CZ d=1.410 allowed=3.000 overlap=1.990
+    severe(intra) A:TYS6:CD2 vs A:TYS6:CE2 d=1.420 allowed=3.000 overlap=1.980
+    severe(intra) A:TYS6:CG vs A:TYS6:CD1 d=1.471 allowed=3.000 overlap=1.929
+    severe(intra) A:TYS6:S vs A:TYS6:O3 d=1.411 allowed=2.920 overlap=1.909
+    severe(intra) A:TYS6:CB vs A:TYS6:CG d=1.569 allowed=3.000 overlap=1.831
+    severe(intra) A:TYS6:S vs A:TYS6:O2 d=1.551 allowed=2.920 overlap=1.769
+    severe(intra) A:TYS6:OH vs A:TYS6:S d=1.568 allowed=2.920 overlap=1.752
+    severe(intra) A:TYS6:CZ vs A:TYS6:OH d=1.479 allowed=2.820 overlap=1.741
+    severe(intra) A:TYS6:S vs A:TYS6:O1 d=1.585 allowed=2.920 overlap=1.735
+    severe(intra) A:TYS6:CA vs A:TYS6:CG d=2.330 allowed=3.000 overlap=1.070
+    severe(intra) A:TYS6:CB vs A:TYS6:C d=2.358 allowed=3.000 overlap=1.042
+    severe(intra) A:TYS6:CE1 vs A:TYS6:CE2 d=2.414 allowed=3.000 overlap=0.986
+    severe(intra) A:TYS6:CG vs A:TYS6:CE1 d=2.436 allowed=3.000 overlap=0.964
+    severe(intra) A:TYS6:CD2 vs A:TYS6:CZ d=2.448 allowed=3.000 overlap=0.952
+    severe(intra) A:TYS6:CG vs A:TYS6:CE2 d=2.465 allowed=3.000 overlap=0.935
+    severe(intra) A:TYS6:CD1 vs A:TYS6:CZ d=2.478 allowed=3.000 overlap=0.922
+  Clash hotspots:
+    A:TYS6:CG count=8 max_overlap=1.992
+    A:TYS6:CZ count=7 max_overlap=1.994
+    A:TYS6:CB count=6 max_overlap=2.152
+    A:TYS6:CE1 count=6 max_overlap=2.010
+    A:TYS6:CD1 count=6 max_overlap=2.010
+    A:TYS6:CE2 count=6 max_overlap=1.994
+    A:TYS6:CD2 count=6 max_overlap=1.992
+    A:TYS6:S count=5 max_overlap=1.909
+    A:TYS6:OH count=4 max_overlap=1.752
+    A:TYS6:O3 count=3 max_overlap=1.909
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 63
+n_residues: 8
+expected_bonds: 50
+checked_bonds: 50
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 786
+clashes: 34
+mild_clashes: 5
+moderate_clashes: 3
+severe_clashes: 26
+inter_residue_clashes: 0
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 4.325699745547074
+percent_atoms_in_clashes: 23.80952380952381
+clashscore_per_1000_atoms: 539.6825396825396
+inter_residue_clashscore_per_1000_atoms: 0.0
+severe_clashscore_per_1000_atoms: 412.6984126984127
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 0.0

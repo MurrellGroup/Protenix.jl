@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s098_edge_dna_only__protenix_base_default_v0.5.0/s098_edge_dna_only/seed_101/predictions/s098_edge_dna_only_sample_0.cif
+  atoms=165, residues=8
+  bonds: checked=183 expected=183 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=36 mild=10 moderate=9 severe=17 pair_rate=0.60% atom_rate=21.21%
+  inter-residue clashes: total=33 mild=10 moderate=8 severe=15 pair_rate=0.64%
+  clashscore/1000 atoms: all=218.18 inter=200.00 severe=103.03 inter_severe=90.91
+  overall_issue_score=6.357 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:DA1:OP3 vs A:DA1:P d=1.468 allowed=2.920 overlap=1.852
+    severe(inter) A:DA5:C2 vs A:DC8:N4 d=1.517 allowed=2.850 overlap=1.733
+    severe(inter) A:DA5:N1 vs A:DC8:N4 d=1.375 allowed=2.700 overlap=1.725
+    severe(inter) A:DG7:N2 vs A:DC8:C5 d=1.686 allowed=2.850 overlap=1.564
+    severe(inter) A:DT2:O2 vs A:DA5:N6 d=1.522 allowed=2.670 overlap=1.548
+    severe(inter) A:DG3:N2 vs A:DC4:N4 d=1.753 allowed=2.700 overlap=1.347
+    severe(inter) A:DG3:C2 vs A:DC4:N4 d=2.204 allowed=2.850 overlap=1.046
+    severe(inter) A:DT2:C2 vs A:DA5:N6 d=2.230 allowed=2.850 overlap=1.020
+    severe(inter) A:DA5:C2 vs A:DG7:N1 d=2.236 allowed=2.850 overlap=1.014
+    severe(inter) A:DA5:C2 vs A:DC8:C4 d=2.405 allowed=3.000 overlap=0.995
+    severe(inter) A:DG7:N2 vs A:DC8:C4 d=2.280 allowed=2.850 overlap=0.970
+    severe(inter) A:DA5:N3 vs A:DG7:N1 d=2.131 allowed=2.700 overlap=0.969
+    severe(inter) A:DG7:C2 vs A:DC8:C5 d=2.516 allowed=3.000 overlap=0.884
+    severe(inter) A:DT2:N3 vs A:DT6:O4 d=2.196 allowed=2.670 overlap=0.874
+    severe(inter) A:DT2:O2 vs A:DA5:C6 d=2.360 allowed=2.820 overlap=0.860
+    severe(intra) A:DA1:OP3 vs A:DA1:OP2 d=2.241 allowed=2.640 overlap=0.799
+    severe(inter) A:DG3:N3 vs A:DC4:N4 d=2.307 allowed=2.700 overlap=0.793
+    moderate(inter) A:DA5:N1 vs A:DC8:C4 d=2.555 allowed=2.850 overlap=0.695
+    moderate(inter) A:DA5:C2 vs A:DG7:N2 d=2.605 allowed=2.850 overlap=0.645
+    moderate(intra) A:DA1:OP3 vs A:DA1:OP1 d=2.413 allowed=2.640 overlap=0.627
+  Clash hotspots:
+    A:DA5:C2 count=5 max_overlap=1.733
+    A:DC8:N4 count=5 max_overlap=1.733
+    A:DG7:N2 count=5 max_overlap=1.564
+    A:DC8:C4 count=5 max_overlap=0.995
+    A:DA1:OP3 count=3 max_overlap=1.852
+    A:DC4:N4 count=3 max_overlap=1.347
+    A:DG7:N1 count=3 max_overlap=1.014
+    A:DG7:C2 count=3 max_overlap=0.884
+    A:DG3:N3 count=3 max_overlap=0.793
+    A:DA5:N1 count=2 max_overlap=1.725
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 165
+n_residues: 8
+expected_bonds: 183
+checked_bonds: 183
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 5999
+clashes: 36
+mild_clashes: 10
+moderate_clashes: 9
+severe_clashes: 17
+inter_residue_clashes: 33
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.6001000166694449
+percent_atoms_in_clashes: 21.21212121212121
+clashscore_per_1000_atoms: 218.1818181818182
+inter_residue_clashscore_per_1000_atoms: 200.0
+severe_clashscore_per_1000_atoms: 103.03030303030303
+inter_residue_severe_clashscore_per_1000_atoms: 90.9090909090909
+overall_issue_score: 6.357156617222115

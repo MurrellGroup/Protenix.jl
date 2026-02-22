@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s048_ptm_aly__protenix_base_default_v0.5.0/s048_ptm_aly/seed_101/predictions/s048_ptm_aly_sample_0.cif
+  atoms=63, residues=8
+  bonds: checked=55 expected=55 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=26 mild=6 moderate=1 severe=19 pair_rate=2.25% atom_rate=30.16%
+  inter-residue clashes: total=6 mild=5 moderate=0 severe=1 pair_rate=0.57%
+  clashscore/1000 atoms: all=412.70 inter=95.24 severe=301.59 inter_severe=15.87
+  overall_issue_score=5.714 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:ALY8:CE vs A:ALY8:CD d=1.343 allowed=3.000 overlap=2.057
+    severe(intra) A:ALY8:CG vs A:ALY8:CB d=1.345 allowed=3.000 overlap=2.055
+    severe(intra) A:ALY8:OH vs A:ALY8:CH d=1.166 allowed=2.820 overlap=2.054
+    severe(intra) A:ALY8:CH vs A:ALY8:NZ d=1.260 allowed=2.850 overlap=1.990
+    severe(intra) A:ALY8:CB vs A:ALY8:CA d=1.450 allowed=3.000 overlap=1.950
+    severe(intra) A:ALY8:CD vs A:ALY8:CG d=1.452 allowed=3.000 overlap=1.948
+    severe(intra) A:ALY8:CH vs A:ALY8:CH3 d=1.497 allowed=3.000 overlap=1.903
+    severe(intra) A:ALY8:NZ vs A:ALY8:CE d=1.387 allowed=2.850 overlap=1.863
+    severe(intra) A:ALY8:CH vs A:ALY8:CE d=2.266 allowed=3.000 overlap=1.134
+    severe(intra) A:ALY8:CE vs A:ALY8:CG d=2.289 allowed=3.000 overlap=1.111
+    severe(intra) A:ALY8:CD vs A:ALY8:CB d=2.293 allowed=3.000 overlap=1.107
+    severe(intra) A:ALY8:CG vs A:ALY8:CA d=2.321 allowed=3.000 overlap=1.079
+    severe(intra) A:ALY8:CB vs A:ALY8:C d=2.419 allowed=3.000 overlap=0.981
+    severe(intra) A:ALY8:NZ vs A:ALY8:CD d=2.279 allowed=2.850 overlap=0.971
+    severe(intra) A:ALY8:OH vs A:ALY8:NZ d=2.120 allowed=2.670 overlap=0.950
+    severe(inter) A:MET1:O vs A:ALY8:O d=2.111 allowed=2.640 overlap=0.929
+    severe(intra) A:ALY8:OH vs A:ALY8:CH3 d=2.317 allowed=2.820 overlap=0.903
+    severe(intra) A:ALY8:CH3 vs A:ALY8:NZ d=2.363 allowed=2.850 overlap=0.887
+    severe(intra) A:ALY8:CB vs A:ALY8:N d=2.524 allowed=2.850 overlap=0.726
+    moderate(intra) A:ALY8:OH vs A:ALY8:CE d=2.532 allowed=2.820 overlap=0.688
+  Clash hotspots:
+    A:ALY8:CE count=5 max_overlap=2.057
+    A:ALY8:CB count=5 max_overlap=2.055
+    A:ALY8:CG count=5 max_overlap=2.055
+    A:ALY8:NZ count=5 max_overlap=1.990
+    A:ALY8:CD count=4 max_overlap=2.057
+    A:ALY8:CH count=4 max_overlap=2.054
+    A:ALY8:OH count=4 max_overlap=2.054
+    A:ALY8:CH3 count=3 max_overlap=1.903
+    A:ALY8:C count=3 max_overlap=0.981
+    A:ALY8:O count=3 max_overlap=0.929
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 63
+n_residues: 8
+expected_bonds: 55
+checked_bonds: 55
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1156
+clashes: 26
+mild_clashes: 6
+moderate_clashes: 1
+severe_clashes: 19
+inter_residue_clashes: 6
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 2.2491349480968856
+percent_atoms_in_clashes: 30.158730158730158
+clashscore_per_1000_atoms: 412.6984126984127
+inter_residue_clashscore_per_1000_atoms: 95.23809523809524
+severe_clashscore_per_1000_atoms: 301.58730158730157
+inter_residue_severe_clashscore_per_1000_atoms: 15.873015873015873
+overall_issue_score: 5.714285714285714

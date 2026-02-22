@@ -1,0 +1,52 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s044_ptm_mse__protenix_mini_default_v0.5.0/s044_ptm_mse/seed_101/predictions/s044_ptm_mse_sample_0.cif
+  atoms=62, residues=8
+  bonds: checked=58 expected=58 length_violations=1 (1.72%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=8 mild=0 moderate=1 severe=7 pair_rate=1.28% atom_rate=11.29%
+  inter-residue clashes: total=0 mild=0 moderate=0 severe=0 pair_rate=0.00%
+  clashscore/1000 atoms: all=129.03 inter=0.00 severe=112.90 inter_severe=0.00
+  overall_issue_score=0.862 (lower is better)
+  Top bond length issues:
+    too_short A:LYS8 C-OXT observed=0.989 expected=1.250 [1.000, 1.562] severity=0.009 source=polymer
+  Top clashes by overlap:
+    severe(intra) A:MSE3:CB vs A:MSE3:CG d=1.510 allowed=3.000 overlap=1.890
+    severe(intra) A:MSE3:CA vs A:MSE3:CB d=1.728 allowed=3.000 overlap=1.672
+    severe(intra) A:MSE3:CG vs A:MSE3:SE d=1.949 allowed=3.200 overlap=1.651
+    severe(intra) A:MSE3:SE vs A:MSE3:CE d=1.985 allowed=3.200 overlap=1.615
+    severe(intra) A:MSE3:C vs A:MSE3:CB d=2.540 allowed=3.000 overlap=0.860
+    severe(intra) A:MSE3:CB vs A:MSE3:SE d=2.797 allowed=3.200 overlap=0.803
+    severe(intra) A:MSE3:CA vs A:MSE3:CG d=2.611 allowed=3.000 overlap=0.789
+    moderate(intra) A:MSE3:N vs A:MSE3:CB d=2.654 allowed=2.850 overlap=0.596
+  Clash hotspots:
+    A:MSE3:CB count=5 max_overlap=1.890
+    A:MSE3:CG count=3 max_overlap=1.890
+    A:MSE3:SE count=3 max_overlap=1.651
+    A:MSE3:CA count=2 max_overlap=1.672
+    A:MSE3:CE count=1 max_overlap=1.615
+    A:MSE3:C count=1 max_overlap=0.860
+    A:MSE3:N count=1 max_overlap=0.596
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 62
+n_residues: 8
+expected_bonds: 58
+checked_bonds: 58
+bond_length_violations: 1
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 623
+clashes: 8
+mild_clashes: 0
+moderate_clashes: 1
+severe_clashes: 7
+inter_residue_clashes: 0
+percent_bond_length_violations: 1.7241379310344827
+percent_missing_bonds: 0.0
+percent_clashes: 1.2841091492776886
+percent_atoms_in_clashes: 11.290322580645162
+clashscore_per_1000_atoms: 129.03225806451613
+inter_residue_clashscore_per_1000_atoms: 0.0
+severe_clashscore_per_1000_atoms: 112.90322580645162
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 0.8620689655172413

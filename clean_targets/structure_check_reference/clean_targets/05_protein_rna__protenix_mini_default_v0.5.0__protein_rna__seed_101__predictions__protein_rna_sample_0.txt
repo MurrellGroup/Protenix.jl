@@ -1,0 +1,67 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/05_protein_rna__protenix_mini_default_v0.5.0/protein_rna/seed_101/predictions/protein_rna_sample_0.cif
+  atoms=739, residues=67
+  bonds: checked=790 expected=790 length_violations=1 (0.13%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=21 mild=6 moderate=2 severe=13 pair_rate=0.07% atom_rate=4.06%
+  inter-residue clashes: total=13 mild=5 moderate=1 severe=7 pair_rate=0.05%
+  clashscore/1000 atoms: all=28.42 inter=17.59 severe=17.59 inter_severe=9.47
+  overall_issue_score=0.544 (lower is better)
+  Top bond length issues:
+    too_short B:G1 P-OP1 observed=1.195 expected=1.500 [1.200, 1.875] severity=0.004 source=polymer
+  Top clashes by overlap:
+    severe(intra) B:G1:OP3 vs B:G1:P d=1.084 allowed=2.920 overlap=2.236
+    severe(inter) A:VAL2:CG2 vs B:U2:O2' d=1.836 allowed=2.820 overlap=1.384
+    severe(intra) B:G1:OP3 vs B:G1:O5' d=1.763 allowed=2.640 overlap=1.277
+    severe(intra) B:G1:OP3 vs B:G1:OP1 d=1.956 allowed=2.640 overlap=1.084
+    severe(intra) B:G1:OP3 vs B:G1:OP2 d=2.003 allowed=2.640 overlap=1.037
+    severe(inter) A:TYR43:CZ vs B:G5:OP2 d=2.364 allowed=2.820 overlap=0.856
+    severe(inter) A:TYR43:CE1 vs B:G5:OP2 d=2.397 allowed=2.820 overlap=0.823
+    severe(inter) A:TYR43:CE1 vs B:G5:C5' d=2.634 allowed=3.000 overlap=0.766
+    severe(intra) A:ASP48:O vs A:ASP48:OD1 d=2.276 allowed=2.640 overlap=0.764
+    severe(inter) A:ASP48:OD2 vs A:HIS51:CE1 d=2.463 allowed=2.820 overlap=0.757
+    severe(inter) A:LYS17:O vs A:HIS21:CD2 d=2.466 allowed=2.820 overlap=0.754
+    severe(inter) A:TYR43:OH vs B:G5:OP2 d=2.313 allowed=2.640 overlap=0.727
+    severe(intra) B:G1:OP3 vs B:G1:C5' d=2.500 allowed=2.820 overlap=0.720
+    moderate(inter) A:MET1:CG vs A:THR42:CG2 d=2.712 allowed=3.000 overlap=0.688
+    moderate(intra) A:ASP48:O vs A:ASP48:CG d=2.657 allowed=2.820 overlap=0.563
+    mild(intra) A:MET1:O vs A:MET1:CG d=2.672 allowed=2.820 overlap=0.548
+    mild(inter) A:PRO45:CG vs A:PHE47:CE2 d=2.933 allowed=3.000 overlap=0.467
+    mild(inter) A:TYR43:CE1 vs B:G5:P d=3.041 allowed=3.100 overlap=0.459
+    mild(inter) A:ASP48:CG vs A:HIS51:CE1 d=2.944 allowed=3.000 overlap=0.456
+    mild(inter) A:HIS21:O vs A:ALA22:C d=2.781 allowed=2.820 overlap=0.439
+  Clash hotspots:
+    B:G1:OP3 count=5 max_overlap=2.236
+    B:G5:OP2 count=3 max_overlap=0.856
+    A:TYR43:CE1 count=3 max_overlap=0.823
+    A:ASP48:O count=2 max_overlap=0.764
+    A:HIS51:CE1 count=2 max_overlap=0.757
+    A:MET1:CG count=2 max_overlap=0.688
+    A:ASP48:CG count=2 max_overlap=0.563
+    B:G1:P count=1 max_overlap=2.236
+    B:U2:O2' count=1 max_overlap=1.384
+    A:VAL2:CG2 count=1 max_overlap=1.384
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 739
+n_residues: 67
+expected_bonds: 790
+checked_bonds: 790
+bond_length_violations: 1
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 29326
+clashes: 21
+mild_clashes: 6
+moderate_clashes: 2
+severe_clashes: 13
+inter_residue_clashes: 13
+percent_bond_length_violations: 0.12658227848101267
+percent_missing_bonds: 0.0
+percent_clashes: 0.07160881129373252
+percent_atoms_in_clashes: 4.059539918809202
+clashscore_per_1000_atoms: 28.416779431664413
+inter_residue_clashscore_per_1000_atoms: 17.591339648173207
+severe_clashscore_per_1000_atoms: 17.591339648173207
+inter_residue_severe_clashscore_per_1000_atoms: 9.472259810554803
+overall_issue_score: 0.5437760594060889

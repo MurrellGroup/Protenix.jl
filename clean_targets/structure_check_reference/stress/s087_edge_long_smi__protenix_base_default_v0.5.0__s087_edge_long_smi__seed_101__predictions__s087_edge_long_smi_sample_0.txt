@@ -1,0 +1,43 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s087_edge_long_smi__protenix_base_default_v0.5.0/s087_edge_long_smi/seed_101/predictions/s087_edge_long_smi_sample_0.cif
+  atoms=88, residues=9
+  bonds: checked=91 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=3 mild=1 moderate=1 severe=1 pair_rate=0.16% atom_rate=5.68%
+  inter-residue clashes: total=3 mild=1 moderate=1 severe=1 pair_rate=0.19%
+  clashscore/1000 atoms: all=34.09 inter=34.09 severe=11.36 inter_severe=11.36
+  overall_issue_score=1.881 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:N vs A:LEU7:O d=1.950 allowed=2.670 overlap=1.120
+    moderate(inter) A:MET1:N vs A:LEU7:C d=2.594 allowed=2.850 overlap=0.656
+    mild(inter) A:MET1:O vs A:ALA2:C d=2.753 allowed=2.820 overlap=0.467
+  Clash hotspots:
+    A:MET1:N count=2 max_overlap=1.120
+    A:LEU7:O count=1 max_overlap=1.120
+    A:LEU7:C count=1 max_overlap=0.656
+    A:MET1:O count=1 max_overlap=0.467
+    A:ALA2:C count=1 max_overlap=0.467
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 88
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 91
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1835
+clashes: 3
+mild_clashes: 1
+moderate_clashes: 1
+severe_clashes: 1
+inter_residue_clashes: 3
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.16348773841961853
+percent_atoms_in_clashes: 5.681818181818182
+clashscore_per_1000_atoms: 34.09090909090909
+inter_residue_clashscore_per_1000_atoms: 34.09090909090909
+severe_clashscore_per_1000_atoms: 11.363636363636363
+inter_residue_severe_clashscore_per_1000_atoms: 11.363636363636363
+overall_issue_score: 1.8808777429467085

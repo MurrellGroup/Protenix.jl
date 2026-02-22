@@ -1,0 +1,48 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s007_ccd_fmn__protenix_base_default_v0.5.0/s007_ccd_fmn/seed_101/predictions/s007_ccd_fmn_sample_0.cif
+  atoms=91, residues=9
+  bonds: checked=93 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=5 mild=2 moderate=2 severe=1 pair_rate=0.24% atom_rate=8.79%
+  inter-residue clashes: total=5 mild=2 moderate=2 severe=1 pair_rate=0.28%
+  clashscore/1000 atoms: all=54.95 inter=54.95 severe=10.99 inter_severe=10.99
+  overall_issue_score=2.770 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:CE vs A:TYR6:OH d=1.974 allowed=2.820 overlap=1.246
+    moderate(inter) A:SER4:OG vs A:TYR6:CE2 d=2.570 allowed=2.820 overlap=0.650
+    moderate(inter) A:LYS8:O vs B:FMN1:O2 d=2.417 allowed=2.640 overlap=0.623
+    mild(inter) A:TYR6:CA vs B:FMN1:O2 d=2.711 allowed=2.820 overlap=0.509
+    mild(inter) A:LYS8:O vs B:FMN1:C2 d=2.715 allowed=2.820 overlap=0.505
+  Clash hotspots:
+    B:FMN1:O2 count=2 max_overlap=0.623
+    A:LYS8:O count=2 max_overlap=0.623
+    A:TYR6:OH count=1 max_overlap=1.246
+    A:MET1:CE count=1 max_overlap=1.246
+    A:SER4:OG count=1 max_overlap=0.650
+    A:TYR6:CE2 count=1 max_overlap=0.650
+    A:TYR6:CA count=1 max_overlap=0.509
+    B:FMN1:C2 count=1 max_overlap=0.505
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 91
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 93
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 2093
+clashes: 5
+mild_clashes: 2
+moderate_clashes: 2
+severe_clashes: 1
+inter_residue_clashes: 5
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.23889154323936931
+percent_atoms_in_clashes: 8.791208791208792
+clashscore_per_1000_atoms: 54.94505494505494
+inter_residue_clashscore_per_1000_atoms: 54.94505494505494
+severe_clashscore_per_1000_atoms: 10.989010989010989
+inter_residue_severe_clashscore_per_1000_atoms: 10.989010989010989
+overall_issue_score: 2.770083102493075

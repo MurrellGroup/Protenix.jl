@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s042_ptm_tpo__protenix_base_default_v0.5.0/s042_ptm_tpo/seed_101/predictions/s042_ptm_tpo_sample_0.cif
+  atoms=65, residues=8
+  bonds: checked=58 expected=58 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=21 mild=5 moderate=0 severe=16 pair_rate=2.45% atom_rate=18.46%
+  inter-residue clashes: total=4 mild=1 moderate=0 severe=3 pair_rate=0.53%
+  clashscore/1000 atoms: all=323.08 inter=61.54 severe=246.15 inter_severe=46.15
+  overall_issue_score=5.284 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:TPO4:CA vs A:TPO4:CB d=1.519 allowed=3.000 overlap=1.881
+    severe(intra) A:TPO4:P vs A:TPO4:O1P d=1.488 allowed=2.920 overlap=1.832
+    severe(intra) A:TPO4:CB vs A:TPO4:OG1 d=1.390 allowed=2.820 overlap=1.830
+    severe(intra) A:TPO4:CB vs A:TPO4:CG2 d=1.578 allowed=3.000 overlap=1.822
+    severe(intra) A:TPO4:P vs A:TPO4:O2P d=1.511 allowed=2.920 overlap=1.809
+    severe(intra) A:TPO4:P vs A:TPO4:O3P d=1.538 allowed=2.920 overlap=1.782
+    severe(intra) A:TPO4:OG1 vs A:TPO4:P d=1.581 allowed=2.920 overlap=1.739
+    severe(inter) A:MET1:O vs A:TPO4:O1P d=1.763 allowed=2.640 overlap=1.277
+    severe(intra) A:TPO4:CB vs A:TPO4:C d=2.424 allowed=3.000 overlap=0.976
+    severe(intra) A:TPO4:CB vs A:TPO4:P d=2.553 allowed=3.100 overlap=0.947
+    severe(intra) A:TPO4:CA vs A:TPO4:OG1 d=2.340 allowed=2.820 overlap=0.880
+    severe(intra) A:TPO4:CA vs A:TPO4:CG2 d=2.553 allowed=3.000 overlap=0.847
+    severe(intra) A:TPO4:CG2 vs A:TPO4:OG1 d=2.373 allowed=2.820 overlap=0.847
+    severe(intra) A:TPO4:N vs A:TPO4:CB d=2.451 allowed=2.850 overlap=0.799
+    severe(inter) A:MET1:O vs A:TPO4:P d=2.542 allowed=2.920 overlap=0.778
+    severe(inter) A:MET1:N vs A:TPO4:O3P d=2.347 allowed=2.670 overlap=0.723
+    mild(intra) A:TPO4:O2P vs A:TPO4:O3P d=2.492 allowed=2.640 overlap=0.548
+    mild(inter) A:MET1:O vs A:TPO4:O3P d=2.498 allowed=2.640 overlap=0.542
+    mild(intra) A:TPO4:O1P vs A:TPO4:O2P d=2.500 allowed=2.640 overlap=0.540
+    mild(intra) A:TPO4:O1P vs A:TPO4:O3P d=2.506 allowed=2.640 overlap=0.534
+  Clash hotspots:
+    A:TPO4:CB count=6 max_overlap=1.881
+    A:TPO4:P count=6 max_overlap=1.832
+    A:TPO4:O3P count=5 max_overlap=1.782
+    A:TPO4:O1P count=4 max_overlap=1.832
+    A:TPO4:OG1 count=4 max_overlap=1.830
+    A:TPO4:CG2 count=4 max_overlap=1.822
+    A:TPO4:CA count=3 max_overlap=1.881
+    A:TPO4:O2P count=3 max_overlap=1.809
+    A:MET1:O count=3 max_overlap=1.277
+    A:TPO4:C count=2 max_overlap=0.976
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 65
+n_residues: 8
+expected_bonds: 58
+checked_bonds: 58
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 858
+clashes: 21
+mild_clashes: 5
+moderate_clashes: 0
+severe_clashes: 16
+inter_residue_clashes: 4
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 2.4475524475524475
+percent_atoms_in_clashes: 18.46153846153846
+clashscore_per_1000_atoms: 323.0769230769231
+inter_residue_clashscore_per_1000_atoms: 61.53846153846154
+severe_clashscore_per_1000_atoms: 246.15384615384616
+inter_residue_severe_clashscore_per_1000_atoms: 46.15384615384615
+overall_issue_score: 5.284015852047557

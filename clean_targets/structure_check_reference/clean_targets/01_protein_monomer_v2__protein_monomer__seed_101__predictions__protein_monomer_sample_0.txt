@@ -1,0 +1,83 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/01_protein_monomer_v2/protein_monomer/seed_101/predictions/protein_monomer_sample_0.cif
+  atoms=398, residues=51
+  bonds: checked=411 expected=409 length_violations=38 (9.25%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=17 mild=5 moderate=5 severe=7 pair_rate=0.12% atom_rate=5.78%
+  inter-residue clashes: total=10 mild=5 moderate=1 severe=4 pair_rate=0.07%
+  clashscore/1000 atoms: all=42.71 inter=25.13 severe=17.59 inter_severe=10.05
+  overall_issue_score=5.331 (lower is better)
+  Top bond length issues:
+    too_short A:MET1 CG-SD observed=0.547 expected=1.828 [1.463, 2.285] severity=0.501 source=polymer
+    too_short A:HIS51 CE1-NE2 observed=0.469 expected=1.320 [1.056, 1.650] severity=0.445 source=polymer
+    too_short A:HIS51 CB-CG observed=0.662 expected=1.500 [1.200, 1.875] severity=0.359 source=polymer
+    too_short A:GLU28 CD-OE2 observed=0.553 expected=1.250 [1.000, 1.562] severity=0.357 source=polymer
+    too_short A:GLU31 CD-OE1 observed=0.592 expected=1.250 [1.000, 1.562] severity=0.326 source=polymer
+    too_short A:THR40 CB-CG2 observed=0.755 expected=1.531 [1.225, 1.914] severity=0.307 source=polymer
+    too_short A:THR39 CB-OG1 observed=0.796 expected=1.406 [1.124, 1.757] severity=0.234 source=polymer
+    too_short A:GLU24 CD-OE2 observed=0.748 expected=1.250 [1.000, 1.562] severity=0.201 source=polymer
+    too_short A:THR39 CB-CG2 observed=0.921 expected=1.531 [1.225, 1.914] severity=0.198 source=polymer
+    too_short A:VAL2 CB-CG1 observed=0.941 expected=1.536 [1.229, 1.920] severity=0.187 source=polymer
+    too_short A:THR40 CB-OG1 observed=0.864 expected=1.406 [1.124, 1.757] severity=0.185 source=polymer
+    too_short A:PHE34 CE1-CZ observed=0.888 expected=1.380 [1.104, 1.725] severity=0.157 source=polymer
+    too_short A:PHE34 CG-CD2 observed=0.932 expected=1.380 [1.104, 1.725] severity=0.124 source=polymer
+    too_short A:HIS51 CD2-NE2 observed=0.932 expected=1.370 [1.096, 1.713] severity=0.119 source=polymer
+    too_short A:PHE34 CE2-CZ observed=0.959 expected=1.380 [1.104, 1.725] severity=0.105 source=polymer
+    too_short A:LYS12 CD-CE observed=1.071 expected=1.535 [1.228, 1.918] severity=0.102 source=polymer
+    too_short A:GLU31 CD-OE2 observed=0.880 expected=1.250 [1.000, 1.562] severity=0.096 source=polymer
+    too_short A:PHE34 CG-CD1 observed=0.976 expected=1.380 [1.104, 1.725] severity=0.093 source=polymer
+    too_short A:THR42 CB-OG1 observed=0.998 expected=1.406 [1.124, 1.757] severity=0.090 source=polymer
+    too_short A:GLU24 CG-CD observed=1.074 expected=1.496 [1.197, 1.870] severity=0.082 source=polymer
+  Top clashes by overlap:
+    severe(intra) A:HIS51:O vs A:HIS51:ND1 d=1.550 allowed=2.670 overlap=1.520
+    severe(intra) A:HIS51:O vs A:HIS51:CG d=1.819 allowed=2.820 overlap=1.401
+    severe(inter) A:TRP15:CZ2 vs A:PHE34:CE2 d=2.301 allowed=3.000 overlap=1.099
+    severe(inter) A:TRP15:CH2 vs A:PHE34:CD2 d=2.417 allowed=3.000 overlap=0.983
+    severe(intra) A:HIS51:C vs A:HIS51:ND1 d=2.388 allowed=2.850 overlap=0.862
+    severe(inter) A:TRP15:CH2 vs A:PHE34:CE2 d=2.619 allowed=3.000 overlap=0.781
+    severe(inter) A:TRP15:CZ2 vs A:PHE34:CD2 d=2.676 allowed=3.000 overlap=0.724
+    moderate(intra) A:HIS51:O vs A:HIS51:CE1 d=2.555 allowed=2.820 overlap=0.665
+    moderate(inter) A:TRP15:NE1 vs A:PHE44:CD1 d=2.607 allowed=2.850 overlap=0.643
+    moderate(intra) A:HIS51:O vs A:HIS51:CD2 d=2.593 allowed=2.820 overlap=0.627
+    moderate(intra) A:MET1:C vs A:MET1:SD d=2.899 allowed=3.100 overlap=0.601
+    moderate(intra) A:MET1:O vs A:MET1:SD d=2.749 allowed=2.920 overlap=0.571
+    mild(inter) A:TRP15:CZ2 vs A:PHE34:CZ d=2.931 allowed=3.000 overlap=0.469
+    mild(inter) A:TRP15:CH2 vs A:PHE34:CG d=2.955 allowed=3.000 overlap=0.445
+    mild(inter) A:PHE37:O vs A:THR40:CG2 d=2.796 allowed=2.820 overlap=0.424
+    mild(inter) A:SER4:O vs A:PRO5:C d=2.804 allowed=2.820 overlap=0.416
+    mild(inter) A:HIS21:O vs A:ALA22:C d=2.815 allowed=2.820 overlap=0.405
+  Clash hotspots:
+    A:HIS51:O count=4 max_overlap=1.520
+    A:TRP15:CZ2 count=3 max_overlap=1.099
+    A:TRP15:CH2 count=3 max_overlap=0.983
+    A:HIS51:ND1 count=2 max_overlap=1.520
+    A:PHE34:CE2 count=2 max_overlap=1.099
+    A:PHE34:CD2 count=2 max_overlap=0.983
+    A:MET1:SD count=2 max_overlap=0.601
+    A:HIS51:CG count=1 max_overlap=1.401
+    A:HIS51:C count=1 max_overlap=0.862
+    A:HIS51:CE1 count=1 max_overlap=0.665
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 398
+n_residues: 51
+expected_bonds: 409
+checked_bonds: 411
+bond_length_violations: 38
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 14535
+clashes: 17
+mild_clashes: 5
+moderate_clashes: 5
+severe_clashes: 7
+inter_residue_clashes: 10
+percent_bond_length_violations: 9.245742092457421
+percent_missing_bonds: 0.0
+percent_clashes: 0.11695906432748537
+percent_atoms_in_clashes: 5.778894472361809
+clashscore_per_1000_atoms: 42.71356783919598
+inter_residue_clashscore_per_1000_atoms: 25.12562814070352
+severe_clashscore_per_1000_atoms: 17.587939698492463
+inter_residue_severe_clashscore_per_1000_atoms: 10.050251256281408
+overall_issue_score: 5.330685315764384

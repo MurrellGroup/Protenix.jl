@@ -1,0 +1,49 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s052_ptm_aib__protenix_mini_default_v0.5.0/s052_ptm_aib/seed_101/predictions/s052_ptm_aib_sample_0.cif
+  atoms=58, residues=8
+  bonds: checked=56 expected=56 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=8 mild=2 moderate=1 severe=5 pair_rate=1.30% atom_rate=10.34%
+  inter-residue clashes: total=0 mild=0 moderate=0 severe=0 pair_rate=0.00%
+  clashscore/1000 atoms: all=137.93 inter=0.00 severe=86.21 inter_severe=0.00
+  overall_issue_score=0.000 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:AIB3:CA vs A:AIB3:CB1 d=1.693 allowed=3.000 overlap=1.707
+    severe(intra) A:AIB3:CA vs A:AIB3:CB2 d=1.861 allowed=3.000 overlap=1.539
+    severe(intra) A:AIB3:N vs A:AIB3:CB2 d=2.186 allowed=2.850 overlap=1.064
+    severe(intra) A:AIB3:C vs A:AIB3:CB1 d=2.528 allowed=3.000 overlap=0.872
+    severe(intra) A:AIB3:CB1 vs A:AIB3:CB2 d=2.535 allowed=3.000 overlap=0.865
+    moderate(intra) A:AIB3:C vs A:AIB3:CB2 d=2.745 allowed=3.000 overlap=0.655
+    mild(intra) A:AIB3:N vs A:AIB3:CB1 d=2.835 allowed=2.850 overlap=0.415
+    mild(intra) A:AIB3:O vs A:AIB3:CB2 d=2.811 allowed=2.820 overlap=0.409
+  Clash hotspots:
+    A:AIB3:CB2 count=5 max_overlap=1.539
+    A:AIB3:CB1 count=4 max_overlap=1.707
+    A:AIB3:CA count=2 max_overlap=1.707
+    A:AIB3:N count=2 max_overlap=1.064
+    A:AIB3:C count=2 max_overlap=0.872
+    A:AIB3:O count=1 max_overlap=0.409
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 58
+n_residues: 8
+expected_bonds: 56
+checked_bonds: 56
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 616
+clashes: 8
+mild_clashes: 2
+moderate_clashes: 1
+severe_clashes: 5
+inter_residue_clashes: 0
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 1.2987012987012987
+percent_atoms_in_clashes: 10.344827586206897
+clashscore_per_1000_atoms: 137.93103448275863
+inter_residue_clashscore_per_1000_atoms: 0.0
+severe_clashscore_per_1000_atoms: 86.20689655172414
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 0.0

@@ -1,0 +1,72 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/27_design_multichain__pxdesign/global_run_0/27_design_multichain/seed_101/predictions/27_design_multichain_sample_0.cif
+  atoms=1337, residues=215
+  bonds: checked=1325 expected=1327 length_violations=2 (0.15%) missing=0 (0.00%) missing_atoms=3
+  clashes: total=139 mild=26 moderate=20 severe=93 pair_rate=0.24% atom_rate=7.26%
+  inter-residue clashes: total=59 mild=17 moderate=12 severe=30 pair_rate=0.10%
+  clashscore/1000 atoms: all=103.96 inter=44.13 severe=69.56 inter_severe=22.44
+  overall_issue_score=1.101 (lower is better)
+  Top bond length issues:
+    too_long B:PHE1 C-N observed=2.149 expected=1.470 [1.103, 1.911] severity=0.162 source=declared
+    too_long B:SAR9 C-N+1 observed=1.768 expected=1.329 [1.063, 1.661] severity=0.081 source=polymer
+  Top missing bond issues:
+    missing_atom B:NH215 N-CA (atom missing)
+    missing_atom B:NH215 CA-C (atom missing)
+    missing_atom B:NH215 C-O (atom missing)
+  Top clashes by overlap:
+    severe(intra) B:MEA2:CE1 vs B:MEA2:CZ d=1.356 allowed=3.000 overlap=2.044
+    severe(intra) B:MEA7:CZ vs B:MEA7:CE2 d=1.358 allowed=3.000 overlap=2.042
+    severe(intra) B:MEA2:CG vs B:MEA2:CD1 d=1.368 allowed=3.000 overlap=2.032
+    severe(intra) B:MEA2:CG vs B:MEA2:CD2 d=1.381 allowed=3.000 overlap=2.019
+    severe(intra) B:MEA7:CG vs B:MEA7:CD1 d=1.387 allowed=3.000 overlap=2.013
+    severe(intra) B:MEA7:CG vs B:MEA7:CD2 d=1.405 allowed=3.000 overlap=1.995
+    severe(intra) B:MEA2:CZ vs B:MEA2:CE2 d=1.419 allowed=3.000 overlap=1.981
+    severe(intra) B:9KK3:CE vs B:9KK3:CD d=1.439 allowed=3.000 overlap=1.961
+    severe(intra) B:MEA7:CE2 vs B:MEA7:CD2 d=1.449 allowed=3.000 overlap=1.951
+    severe(intra) B:SAR4:N vs B:SAR4:CN d=1.303 allowed=2.850 overlap=1.947
+    severe(intra) B:MEA7:CD1 vs B:MEA7:CE1 d=1.456 allowed=3.000 overlap=1.944
+    severe(intra) B:MEA7:CE1 vs B:MEA7:CZ d=1.457 allowed=3.000 overlap=1.943
+    severe(intra) B:MEA2:CE2 vs B:MEA2:CD2 d=1.458 allowed=3.000 overlap=1.942
+    severe(intra) B:MEA2:CD1 vs B:MEA2:CE1 d=1.468 allowed=3.000 overlap=1.932
+    severe(intra) B:MEA7:CA vs B:MEA7:CB d=1.494 allowed=3.000 overlap=1.906
+    severe(intra) B:CCS13:CA vs B:CCS13:CB d=1.494 allowed=3.000 overlap=1.906
+    severe(intra) B:CCS13:CE vs B:CCS13:OZ1 d=1.321 allowed=2.820 overlap=1.899
+    severe(intra) B:9KK3:CB vs B:9KK3:CA d=1.515 allowed=3.000 overlap=1.885
+    severe(intra) B:CCS13:CD vs B:CCS13:CE d=1.518 allowed=3.000 overlap=1.882
+    severe(intra) B:9KK3:N vs B:9KK3:CM d=1.399 allowed=2.850 overlap=1.851
+  Clash hotspots:
+    B:MEA7:CD2 count=11 max_overlap=1.995
+    B:MEA7:CE2 count=9 max_overlap=2.042
+    B:MEA7:CG count=9 max_overlap=2.013
+    B:9KK3:CE count=8 max_overlap=1.961
+    B:MEA7:CB count=8 max_overlap=1.906
+    B:MEA2:CG count=7 max_overlap=2.032
+    B:MEA7:CD1 count=7 max_overlap=2.013
+    B:MEA2:CB count=7 max_overlap=1.849
+    B:MEA7:CZ count=6 max_overlap=2.042
+    B:MEA2:CD1 count=6 max_overlap=2.032
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 1337
+n_residues: 215
+expected_bonds: 1327
+checked_bonds: 1325
+bond_length_violations: 2
+missing_bonds: 0
+missing_atoms_for_bonds: 3
+nonbonded_pairs_evaluated: 58666
+clashes: 139
+mild_clashes: 26
+moderate_clashes: 20
+severe_clashes: 93
+inter_residue_clashes: 59
+percent_bond_length_violations: 0.1509433962264151
+percent_missing_bonds: 0.0
+percent_clashes: 0.23693451061943885
+percent_atoms_in_clashes: 7.255048616305161
+clashscore_per_1000_atoms: 103.96409872849664
+inter_residue_clashscore_per_1000_atoms: 44.12864622288706
+severe_clashscore_per_1000_atoms: 69.55871353777113
+inter_residue_severe_clashscore_per_1000_atoms: 22.43829468960359
+overall_issue_score: 1.1012018789198836

@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/14_constraint_pocket__protenix_base_constraint_v0.5.0/constraint_pocket/seed_101/predictions/constraint_pocket_sample_0.cif
+  atoms=966, residues=130
+  bonds: checked=983 expected=983 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=69 mild=22 moderate=12 severe=35 pair_rate=0.13% atom_rate=11.39%
+  inter-residue clashes: total=68 mild=21 moderate=12 severe=35 pair_rate=0.13%
+  clashscore/1000 atoms: all=71.43 inter=70.39 severe=36.23 inter_severe=36.23
+  overall_issue_score=1.348 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:TYR1:OH vs A:HIS42:CD2 d=1.757 allowed=2.820 overlap=1.463
+    severe(inter) A:SER40:O vs A:ASN50:ND2 d=1.718 allowed=2.670 overlap=1.352
+    severe(inter) B:ARG38:NH1 vs B:ARG45:NH1 d=1.762 allowed=2.700 overlap=1.338
+    severe(inter) A:GLY22:O vs B:LEU47:CD2 d=2.009 allowed=2.820 overlap=1.211
+    severe(inter) A:TYR1:CB vs B:LEU4:CD2 d=2.191 allowed=3.000 overlap=1.209
+    severe(inter) A:TYR1:OH vs A:HIS42:NE2 d=1.865 allowed=2.670 overlap=1.205
+    severe(inter) A:CYS14:CB vs B:CYS22:SG d=2.305 allowed=3.100 overlap=1.195
+    severe(inter) A:CYS54:SG vs B:LEU20:CD2 d=2.436 allowed=3.100 overlap=1.064
+    severe(inter) B:SER21:OG vs B:ALA24:O d=2.002 allowed=2.640 overlap=1.038
+    severe(inter) A:ARG74:NH2 vs B:SER25:OG d=2.059 allowed=2.670 overlap=1.011
+    severe(inter) A:ARG32:O vs A:TYR55:OH d=2.050 allowed=2.640 overlap=0.990
+    severe(inter) A:ASN53:O vs B:TRP36:CZ2 d=2.231 allowed=2.820 overlap=0.989
+    severe(inter) A:CYS54:CA vs B:TRP36:CH2 d=2.438 allowed=3.000 overlap=0.962
+    severe(inter) A:ASN53:O vs B:TRP36:CH2 d=2.292 allowed=2.820 overlap=0.928
+    severe(inter) A:LEU68:CD1 vs B:LEU18:CD1 d=2.485 allowed=3.000 overlap=0.915
+    severe(inter) A:TYR13:CE2 vs A:GLY23:CA d=2.497 allowed=3.000 overlap=0.903
+    severe(inter) A:THR10:O vs A:VAL56:O d=2.147 allowed=2.640 overlap=0.893
+    severe(inter) A:CYS14:SG vs B:PHE29:CE1 d=2.617 allowed=3.100 overlap=0.883
+    severe(inter) B:GLU6:OE1 vs B:LEU11:CD1 d=2.339 allowed=2.820 overlap=0.881
+    severe(inter) A:VAL78:CG1 vs B:LEU4:CD1 d=2.521 allowed=3.000 overlap=0.879
+  Clash hotspots:
+    A:CYS14:SG count=4 max_overlap=0.883
+    B:ARG45:NH1 count=3 max_overlap=1.338
+    A:CYS54:SG count=3 max_overlap=1.064
+    B:TRP36:CH2 count=3 max_overlap=0.962
+    A:TYR1:OH count=2 max_overlap=1.463
+    A:HIS42:CD2 count=2 max_overlap=1.463
+    A:SER40:O count=2 max_overlap=1.352
+    B:ARG38:NH1 count=2 max_overlap=1.338
+    B:CYS22:SG count=2 max_overlap=1.195
+    B:LEU20:CD2 count=2 max_overlap=1.064
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 966
+n_residues: 130
+expected_bonds: 983
+checked_bonds: 983
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 51346
+clashes: 69
+mild_clashes: 22
+moderate_clashes: 12
+severe_clashes: 35
+inter_residue_clashes: 68
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.1343824251158805
+percent_atoms_in_clashes: 11.387163561076605
+clashscore_per_1000_atoms: 71.42857142857143
+inter_residue_clashscore_per_1000_atoms: 70.39337474120083
+severe_clashscore_per_1000_atoms: 36.231884057971016
+inter_residue_severe_clashscore_per_1000_atoms: 36.231884057971016
+overall_issue_score: 1.3480027752998316

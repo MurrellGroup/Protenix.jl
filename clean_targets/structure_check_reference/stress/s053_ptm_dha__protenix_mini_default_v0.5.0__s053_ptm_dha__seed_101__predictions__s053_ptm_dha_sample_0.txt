@@ -1,0 +1,42 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s053_ptm_dha__protenix_mini_default_v0.5.0/s053_ptm_dha/seed_101/predictions/s053_ptm_dha_sample_0.cif
+  atoms=57, residues=8
+  bonds: checked=56 expected=56 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=3 mild=0 moderate=0 severe=3 pair_rate=0.48% atom_rate=7.02%
+  inter-residue clashes: total=0 mild=0 moderate=0 severe=0 pair_rate=0.00%
+  clashscore/1000 atoms: all=52.63 inter=0.00 severe=52.63 inter_severe=0.00
+  overall_issue_score=0.000 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:DHA3:CA vs A:DHA3:CB d=1.493 allowed=3.000 overlap=1.907
+    severe(intra) A:DHA3:CB vs A:DHA3:C d=2.514 allowed=3.000 overlap=0.886
+    severe(intra) A:DHA3:N vs A:DHA3:CB d=2.492 allowed=2.850 overlap=0.758
+  Clash hotspots:
+    A:DHA3:CB count=3 max_overlap=1.907
+    A:DHA3:CA count=1 max_overlap=1.907
+    A:DHA3:C count=1 max_overlap=0.886
+    A:DHA3:N count=1 max_overlap=0.758
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 57
+n_residues: 8
+expected_bonds: 56
+checked_bonds: 56
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 624
+clashes: 3
+mild_clashes: 0
+moderate_clashes: 0
+severe_clashes: 3
+inter_residue_clashes: 0
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.4807692307692308
+percent_atoms_in_clashes: 7.017543859649122
+clashscore_per_1000_atoms: 52.63157894736842
+inter_residue_clashscore_per_1000_atoms: 0.0
+severe_clashscore_per_1000_atoms: 52.63157894736842
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 0.0

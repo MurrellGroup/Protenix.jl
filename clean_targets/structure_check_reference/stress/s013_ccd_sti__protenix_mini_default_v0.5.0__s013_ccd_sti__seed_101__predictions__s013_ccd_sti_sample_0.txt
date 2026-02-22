@@ -1,0 +1,44 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s013_ccd_sti__protenix_mini_default_v0.5.0/s013_ccd_sti/seed_101/predictions/s013_ccd_sti_sample_0.cif
+  atoms=97, residues=9
+  bonds: checked=101 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=4 mild=2 moderate=0 severe=2 pair_rate=0.24% atom_rate=5.15%
+  inter-residue clashes: total=4 mild=2 moderate=0 severe=2 pair_rate=0.31%
+  clashscore/1000 atoms: all=41.24 inter=41.24 severe=20.62 inter_severe=20.62
+  overall_issue_score=3.091 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:THR5:O vs B:STI1:C25 d=1.956 allowed=2.820 overlap=1.264
+    severe(inter) A:THR5:OG1 vs B:STI1:O29 d=2.313 allowed=2.640 overlap=0.727
+    mild(inter) A:THR5:O vs B:STI1:O29 d=2.518 allowed=2.640 overlap=0.522
+    mild(inter) A:THR5:O vs B:STI1:C26 d=2.743 allowed=2.820 overlap=0.477
+  Clash hotspots:
+    A:THR5:O count=3 max_overlap=1.264
+    B:STI1:O29 count=2 max_overlap=0.727
+    B:STI1:C25 count=1 max_overlap=1.264
+    A:THR5:OG1 count=1 max_overlap=0.727
+    B:STI1:C26 count=1 max_overlap=0.477
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 97
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 101
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1635
+clashes: 4
+mild_clashes: 2
+moderate_clashes: 0
+severe_clashes: 2
+inter_residue_clashes: 4
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.24464831804281345
+percent_atoms_in_clashes: 5.154639175257732
+clashscore_per_1000_atoms: 41.23711340206186
+inter_residue_clashscore_per_1000_atoms: 41.23711340206186
+severe_clashscore_per_1000_atoms: 20.61855670103093
+inter_residue_severe_clashscore_per_1000_atoms: 20.61855670103093
+overall_issue_score: 3.091190108191654

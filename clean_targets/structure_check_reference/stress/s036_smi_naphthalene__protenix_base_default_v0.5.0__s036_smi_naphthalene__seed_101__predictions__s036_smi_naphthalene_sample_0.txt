@@ -1,0 +1,43 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s036_smi_naphthalene__protenix_base_default_v0.5.0/s036_smi_naphthalene/seed_101/predictions/s036_smi_naphthalene_sample_0.cif
+  atoms=70, residues=9
+  bonds: checked=71 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=3 mild=1 moderate=1 severe=1 pair_rate=0.21% atom_rate=7.14%
+  inter-residue clashes: total=3 mild=1 moderate=1 severe=1 pair_rate=0.22%
+  clashscore/1000 atoms: all=42.86 inter=42.86 severe=14.29 inter_severe=14.29
+  overall_issue_score=2.227 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:N vs A:LEU7:O d=1.924 allowed=2.670 overlap=1.146
+    moderate(inter) A:MET1:N vs A:LEU7:C d=2.593 allowed=2.850 overlap=0.657
+    mild(inter) A:MET1:O vs A:ALA2:C d=2.795 allowed=2.820 overlap=0.425
+  Clash hotspots:
+    A:MET1:N count=2 max_overlap=1.146
+    A:LEU7:O count=1 max_overlap=1.146
+    A:LEU7:C count=1 max_overlap=0.657
+    A:MET1:O count=1 max_overlap=0.425
+    A:ALA2:C count=1 max_overlap=0.425
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 70
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 71
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1403
+clashes: 3
+mild_clashes: 1
+moderate_clashes: 1
+severe_clashes: 1
+inter_residue_clashes: 3
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.21382751247327156
+percent_atoms_in_clashes: 7.142857142857143
+clashscore_per_1000_atoms: 42.857142857142854
+inter_residue_clashscore_per_1000_atoms: 42.857142857142854
+severe_clashscore_per_1000_atoms: 14.285714285714286
+inter_residue_severe_clashscore_per_1000_atoms: 14.285714285714286
+overall_issue_score: 2.2271714922049

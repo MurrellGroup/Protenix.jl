@@ -1,0 +1,61 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s080_multi_prot_dna_rna__protenix_base_default_v0.5.0/s080_multi_prot_dna_rna/seed_101/predictions/s080_multi_prot_dna_rna_sample_0.cif
+  atoms=229, residues=16
+  bonds: checked=245 expected=245 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=16 mild=3 moderate=6 severe=7 pair_rate=0.19% atom_rate=10.48%
+  inter-residue clashes: total=10 mild=2 moderate=3 severe=5 pair_rate=0.14%
+  clashscore/1000 atoms: all=69.87 inter=43.67 severe=30.57 inter_severe=21.83
+  overall_issue_score=1.386 (lower is better)
+  Top clashes by overlap:
+    severe(intra) B:DA1:OP3 vs B:DA1:P d=1.471 allowed=2.920 overlap=1.849
+    severe(intra) C:A1:OP3 vs C:A1:P d=1.514 allowed=2.920 overlap=1.806
+    severe(inter) A:ALA2:CB vs C:U2:O2' d=1.537 allowed=2.820 overlap=1.683
+    severe(inter) A:ALA2:CB vs C:U2:C2' d=2.292 allowed=3.000 overlap=1.108
+    severe(inter) A:ALA2:O vs C:U2:O2 d=2.020 allowed=2.640 overlap=1.020
+    severe(inter) A:TYR6:CD2 vs B:DT2:OP2 d=2.422 allowed=2.820 overlap=0.798
+    severe(inter) A:GLY3:CA vs B:DG3:O6 d=2.500 allowed=2.820 overlap=0.720
+    moderate(inter) A:TYR6:CE2 vs B:DT2:OP2 d=2.536 allowed=2.820 overlap=0.684
+    moderate(inter) A:GLY3:C vs B:DG3:O6 d=2.562 allowed=2.820 overlap=0.658
+    moderate(intra) B:DA1:OP3 vs B:DA1:OP2 d=2.392 allowed=2.640 overlap=0.648
+    moderate(intra) C:A1:OP3 vs C:A1:OP2 d=2.430 allowed=2.640 overlap=0.610
+    moderate(intra) B:DA1:OP3 vs B:DA1:OP1 d=2.436 allowed=2.640 overlap=0.604
+    moderate(inter) A:ALA2:CA vs C:C4:N4 d=2.664 allowed=2.850 overlap=0.586
+    mild(intra) C:A1:OP3 vs C:A1:OP1 d=2.518 allowed=2.640 overlap=0.522
+    mild(inter) A:GLY3:N vs C:C4:N4 d=2.626 allowed=2.700 overlap=0.474
+    mild(inter) A:MET1:N vs A:LYS8:C d=2.798 allowed=2.850 overlap=0.452
+  Clash hotspots:
+    B:DA1:OP3 count=3 max_overlap=1.849
+    C:A1:OP3 count=3 max_overlap=1.806
+    A:ALA2:CB count=2 max_overlap=1.683
+    B:DT2:OP2 count=2 max_overlap=0.798
+    B:DG3:O6 count=2 max_overlap=0.720
+    C:C4:N4 count=2 max_overlap=0.586
+    B:DA1:P count=1 max_overlap=1.849
+    C:A1:P count=1 max_overlap=1.806
+    C:U2:O2' count=1 max_overlap=1.683
+    C:U2:C2' count=1 max_overlap=1.108
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 229
+n_residues: 16
+expected_bonds: 245
+checked_bonds: 245
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 8219
+clashes: 16
+mild_clashes: 3
+moderate_clashes: 6
+severe_clashes: 7
+inter_residue_clashes: 10
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.19467088453583162
+percent_atoms_in_clashes: 10.480349344978166
+clashscore_per_1000_atoms: 69.86899563318778
+inter_residue_clashscore_per_1000_atoms: 43.66812227074236
+severe_clashscore_per_1000_atoms: 30.56768558951965
+inter_residue_severe_clashscore_per_1000_atoms: 21.83406113537118
+overall_issue_score: 1.386193512614361

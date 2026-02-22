@@ -1,0 +1,50 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s032_smi_ethanol__protenix_base_default_v0.5.0/s032_smi_ethanol/seed_101/predictions/s032_smi_ethanol_sample_0.cif
+  atoms=63, residues=9
+  bonds: checked=62 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=7 mild=3 moderate=0 severe=4 pair_rate=0.58% atom_rate=12.70%
+  inter-residue clashes: total=7 mild=3 moderate=0 severe=4 pair_rate=0.61%
+  clashscore/1000 atoms: all=111.11 inter=111.11 severe=63.49 inter_severe=63.49
+  overall_issue_score=6.119 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:N vs A:LEU7:O d=2.031 allowed=2.670 overlap=1.039
+    severe(inter) A:MET1:N vs A:LYS8:C d=2.342 allowed=2.850 overlap=0.908
+    severe(inter) A:MET1:N vs A:LYS8:CA d=2.358 allowed=2.850 overlap=0.892
+    severe(inter) A:MET1:N vs A:LEU7:C d=2.473 allowed=2.850 overlap=0.777
+    mild(inter) A:MET1:N vs A:LYS8:N d=2.588 allowed=2.700 overlap=0.512
+    mild(inter) A:MET1:O vs A:LEU7:O d=2.586 allowed=2.640 overlap=0.454
+    mild(inter) A:MET1:O vs A:ALA2:C d=2.812 allowed=2.820 overlap=0.408
+  Clash hotspots:
+    A:MET1:N count=5 max_overlap=1.039
+    A:LEU7:O count=2 max_overlap=1.039
+    A:MET1:O count=2 max_overlap=0.454
+    A:LYS8:C count=1 max_overlap=0.908
+    A:LYS8:CA count=1 max_overlap=0.892
+    A:LEU7:C count=1 max_overlap=0.777
+    A:LYS8:N count=1 max_overlap=0.512
+    A:ALA2:C count=1 max_overlap=0.408
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 63
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 62
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1205
+clashes: 7
+mild_clashes: 3
+moderate_clashes: 0
+severe_clashes: 4
+inter_residue_clashes: 7
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.5809128630705395
+percent_atoms_in_clashes: 12.698412698412698
+clashscore_per_1000_atoms: 111.11111111111111
+inter_residue_clashscore_per_1000_atoms: 111.11111111111111
+severe_clashscore_per_1000_atoms: 63.492063492063494
+inter_residue_severe_clashscore_per_1000_atoms: 63.492063492063494
+overall_issue_score: 6.118881118881119

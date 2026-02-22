@@ -1,0 +1,52 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s005_ccd_fad__protenix_base_default_v0.5.0/s005_ccd_fad/seed_101/predictions/s005_ccd_fad_sample_0.cif
+  atoms=113, residues=9
+  bonds: checked=118 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=7 mild=3 moderate=2 severe=2 pair_rate=0.25% atom_rate=9.73%
+  inter-residue clashes: total=6 mild=2 moderate=2 severe=2 pair_rate=0.27%
+  clashscore/1000 atoms: all=61.95 inter=53.10 severe=17.70 inter_severe=17.70
+  overall_issue_score=2.671 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:N vs B:FAD1:O1A d=1.987 allowed=2.670 overlap=1.083
+    severe(inter) A:TYR6:CB vs B:FAD1:O2 d=2.212 allowed=2.820 overlap=1.008
+    moderate(inter) A:MET1:CA vs B:FAD1:O1A d=2.629 allowed=2.820 overlap=0.591
+    moderate(inter) A:TYR6:CB vs B:FAD1:C2 d=2.829 allowed=3.000 overlap=0.571
+    mild(inter) A:SER4:O vs A:LYS8:CE d=2.711 allowed=2.820 overlap=0.509
+    mild(inter) A:MET1:CE vs B:FAD1:C2 d=2.911 allowed=3.000 overlap=0.489
+    mild(intra) B:FAD1:N1 vs B:FAD1:C2' d=2.817 allowed=2.850 overlap=0.433
+  Clash hotspots:
+    B:FAD1:O1A count=2 max_overlap=1.083
+    A:TYR6:CB count=2 max_overlap=1.008
+    B:FAD1:C2 count=2 max_overlap=0.571
+    A:MET1:N count=1 max_overlap=1.083
+    B:FAD1:O2 count=1 max_overlap=1.008
+    A:MET1:CA count=1 max_overlap=0.591
+    A:LYS8:CE count=1 max_overlap=0.509
+    A:SER4:O count=1 max_overlap=0.509
+    A:MET1:CE count=1 max_overlap=0.489
+    B:FAD1:N1 count=1 max_overlap=0.433
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 113
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 118
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 2814
+clashes: 7
+mild_clashes: 3
+moderate_clashes: 2
+severe_clashes: 2
+inter_residue_clashes: 6
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.24875621890547264
+percent_atoms_in_clashes: 9.734513274336283
+clashscore_per_1000_atoms: 61.94690265486726
+inter_residue_clashscore_per_1000_atoms: 53.097345132743364
+severe_clashscore_per_1000_atoms: 17.699115044247787
+inter_residue_severe_clashscore_per_1000_atoms: 17.699115044247787
+overall_issue_score: 2.6714158504007126

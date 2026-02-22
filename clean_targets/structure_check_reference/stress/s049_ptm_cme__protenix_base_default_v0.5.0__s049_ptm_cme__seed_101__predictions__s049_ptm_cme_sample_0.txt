@@ -1,0 +1,57 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s049_ptm_cme__protenix_base_default_v0.5.0/s049_ptm_cme/seed_101/predictions/s049_ptm_cme_sample_0.cif
+  atoms=64, residues=8
+  bonds: checked=58 expected=58 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=13 mild=0 moderate=2 severe=11 pair_rate=1.58% atom_rate=14.06%
+  inter-residue clashes: total=0 mild=0 moderate=0 severe=0 pair_rate=0.00%
+  clashscore/1000 atoms: all=203.12 inter=0.00 severe=171.88 inter_severe=0.00
+  overall_issue_score=0.000 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:CME3:CA vs A:CME3:CB d=1.422 allowed=3.000 overlap=1.978
+    severe(intra) A:CME3:CE vs A:CME3:CZ d=1.423 allowed=3.000 overlap=1.977
+    severe(intra) A:CME3:CB vs A:CME3:SG d=1.643 allowed=3.100 overlap=1.857
+    severe(intra) A:CME3:SD vs A:CME3:CE d=1.659 allowed=3.100 overlap=1.841
+    severe(intra) A:CME3:CZ vs A:CME3:OH d=1.383 allowed=2.820 overlap=1.837
+    severe(intra) A:CME3:SG vs A:CME3:SD d=1.885 allowed=3.200 overlap=1.715
+    severe(intra) A:CME3:CB vs A:CME3:C d=2.348 allowed=3.000 overlap=1.052
+    severe(intra) A:CME3:SD vs A:CME3:CZ d=2.593 allowed=3.100 overlap=0.907
+    severe(intra) A:CME3:CA vs A:CME3:SG d=2.595 allowed=3.100 overlap=0.905
+    severe(intra) A:CME3:N vs A:CME3:CB d=2.356 allowed=2.850 overlap=0.894
+    severe(intra) A:CME3:CE vs A:CME3:OH d=2.352 allowed=2.820 overlap=0.868
+    moderate(intra) A:CME3:CB vs A:CME3:SD d=2.810 allowed=3.100 overlap=0.690
+    moderate(intra) A:CME3:SG vs A:CME3:CE d=2.926 allowed=3.100 overlap=0.574
+  Clash hotspots:
+    A:CME3:CB count=5 max_overlap=1.978
+    A:CME3:CE count=4 max_overlap=1.977
+    A:CME3:SG count=4 max_overlap=1.857
+    A:CME3:SD count=4 max_overlap=1.841
+    A:CME3:CZ count=3 max_overlap=1.977
+    A:CME3:CA count=2 max_overlap=1.978
+    A:CME3:OH count=2 max_overlap=1.837
+    A:CME3:C count=1 max_overlap=1.052
+    A:CME3:N count=1 max_overlap=0.894
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 64
+n_residues: 8
+expected_bonds: 58
+checked_bonds: 58
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 825
+clashes: 13
+mild_clashes: 0
+moderate_clashes: 2
+severe_clashes: 11
+inter_residue_clashes: 0
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 1.5757575757575757
+percent_atoms_in_clashes: 14.0625
+clashscore_per_1000_atoms: 203.125
+inter_residue_clashscore_per_1000_atoms: 0.0
+severe_clashscore_per_1000_atoms: 171.875
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 0.0

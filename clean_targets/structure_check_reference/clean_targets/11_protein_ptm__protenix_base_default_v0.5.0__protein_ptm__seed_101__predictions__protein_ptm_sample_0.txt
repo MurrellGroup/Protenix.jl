@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/11_protein_ptm__protenix_base_default_v0.5.0/protein_ptm/seed_101/predictions/protein_ptm_sample_0.cif
+  atoms=414, residues=51
+  bonds: checked=403 expected=403 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=55 mild=1 moderate=1 severe=53 pair_rate=0.37% atom_rate=7.97%
+  inter-residue clashes: total=2 mild=1 moderate=1 severe=0 pair_rate=0.01%
+  clashscore/1000 atoms: all=132.85 inter=4.83 severe=128.02 inter_severe=0.00
+  overall_issue_score=0.139 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:P1L5:C7 vs A:P1L5:O7 d=1.171 allowed=2.820 overlap=2.049
+    severe(intra) A:P1L5:CA vs A:P1L5:CB d=1.405 allowed=3.000 overlap=1.995
+    severe(intra) A:P1L5:C10 vs A:P1L5:C11 d=1.419 allowed=3.000 overlap=1.981
+    severe(intra) A:P1L5:C8 vs A:P1L5:C9 d=1.423 allowed=3.000 overlap=1.977
+    severe(intra) A:P1L5:C9 vs A:P1L5:C10 d=1.424 allowed=3.000 overlap=1.976
+    severe(intra) A:P1L5:C14 vs A:P1L5:C15 d=1.426 allowed=3.000 overlap=1.974
+    severe(intra) A:P1L5:C11 vs A:P1L5:C12 d=1.428 allowed=3.000 overlap=1.972
+    severe(intra) A:P1L5:C12 vs A:P1L5:C13 d=1.428 allowed=3.000 overlap=1.972
+    severe(intra) A:P1L5:C7 vs A:P1L5:C8 d=1.428 allowed=3.000 overlap=1.972
+    severe(intra) A:P1L5:C13 vs A:P1L5:C14 d=1.429 allowed=3.000 overlap=1.971
+    severe(intra) A:P1L5:C16 vs A:P1L5:C17 d=1.436 allowed=3.000 overlap=1.964
+    severe(intra) A:P1L5:C18 vs A:P1L5:C19 d=1.441 allowed=3.000 overlap=1.959
+    severe(intra) A:P1L5:C17 vs A:P1L5:C18 d=1.447 allowed=3.000 overlap=1.953
+    severe(intra) A:P1L5:C15 vs A:P1L5:C16 d=1.449 allowed=3.000 overlap=1.951
+    severe(intra) A:HY31:C4 vs A:HY31:C5 d=1.452 allowed=3.000 overlap=1.948
+    severe(intra) A:P1L5:C19 vs A:P1L5:C20 d=1.458 allowed=3.000 overlap=1.942
+    severe(intra) A:P1L5:C21 vs A:P1L5:C22 d=1.464 allowed=3.000 overlap=1.936
+    severe(intra) A:HY31:C3 vs A:HY31:C4 d=1.466 allowed=3.000 overlap=1.934
+    severe(intra) A:P1L5:C20 vs A:P1L5:C21 d=1.475 allowed=3.000 overlap=1.925
+    severe(intra) A:HY31:CA vs A:HY31:C3 d=1.511 allowed=3.000 overlap=1.889
+  Clash hotspots:
+    A:HY31:C3 count=6 max_overlap=1.934
+    A:P1L5:C7 count=5 max_overlap=2.049
+    A:P1L5:CB count=5 max_overlap=1.995
+    A:P1L5:C8 count=5 max_overlap=1.977
+    A:HY31:C4 count=5 max_overlap=1.948
+    A:P1L5:SG count=5 max_overlap=1.853
+    A:P1L5:C10 count=4 max_overlap=1.981
+    A:P1L5:C11 count=4 max_overlap=1.981
+    A:P1L5:C9 count=4 max_overlap=1.977
+    A:P1L5:C14 count=4 max_overlap=1.974
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 414
+n_residues: 51
+expected_bonds: 403
+checked_bonds: 403
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 14933
+clashes: 55
+mild_clashes: 1
+moderate_clashes: 1
+severe_clashes: 53
+inter_residue_clashes: 2
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.3683117926739436
+percent_atoms_in_clashes: 7.971014492753623
+clashscore_per_1000_atoms: 132.8502415458937
+inter_residue_clashscore_per_1000_atoms: 4.830917874396135
+severe_clashscore_per_1000_atoms: 128.01932367149757
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 0.1390530487380936

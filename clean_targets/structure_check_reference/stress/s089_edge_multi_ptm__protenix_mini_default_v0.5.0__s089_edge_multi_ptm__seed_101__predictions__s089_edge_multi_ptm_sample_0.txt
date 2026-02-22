@@ -1,0 +1,73 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s089_edge_multi_ptm__protenix_mini_default_v0.5.0/s089_edge_multi_ptm/seed_101/predictions/s089_edge_multi_ptm_sample_0.cif
+  atoms=72, residues=8
+  bonds: checked=55 expected=52 length_violations=5 (9.09%) missing=1 (1.92%) missing_atoms=0
+  clashes: total=47 mild=11 moderate=4 severe=32 pair_rate=3.13% atom_rate=43.06%
+  inter-residue clashes: total=6 mild=4 moderate=0 severe=2 pair_rate=0.45%
+  clashscore/1000 atoms: all=652.78 inter=83.33 severe=444.44 inter_severe=27.78
+  overall_issue_score=10.011 (lower is better)
+  Top bond length issues:
+    too_short A:MET1 C-N observed=0.877 expected=1.470 [1.103, 1.911] severity=0.153 source=declared
+    too_long A:SEP2 C-O observed=1.654 expected=1.240 [0.992, 1.550] severity=0.084 source=polymer
+    too_short A:TPO4 CA-C observed=1.174 expected=1.530 [1.224, 1.913] severity=0.033 source=polymer
+    too_short A:TPO4 C-N observed=1.086 expected=1.470 [1.103, 1.911] severity=0.011 source=declared
+    too_short A:SEP2 C-N observed=1.089 expected=1.470 [1.103, 1.911] severity=0.009 source=declared
+  Top missing bond issues:
+    missing_bond A:TPO4 C-O observed=1.801 threshold=1.798 severity=0.003
+  Top clashes by overlap:
+    severe(intra) A:MSE5:CB vs A:MSE5:CG d=1.417 allowed=3.000 overlap=1.983
+    severe(intra) A:SEP2:CA vs A:SEP2:CB d=1.427 allowed=3.000 overlap=1.973
+    severe(intra) A:TPO4:CB vs A:TPO4:CG2 d=1.518 allowed=3.000 overlap=1.882
+    severe(intra) A:TPO4:P vs A:TPO4:O1P d=1.450 allowed=2.920 overlap=1.870
+    severe(intra) A:MSE5:CG vs A:MSE5:SE d=1.746 allowed=3.200 overlap=1.854
+    severe(intra) A:TPO4:CB vs A:TPO4:OG1 d=1.375 allowed=2.820 overlap=1.845
+    severe(intra) A:MSE5:SE vs A:MSE5:CE d=1.761 allowed=3.200 overlap=1.839
+    severe(intra) A:TPO4:P vs A:TPO4:O2P d=1.491 allowed=2.920 overlap=1.829
+    severe(intra) A:SEP2:P vs A:SEP2:O3P d=1.492 allowed=2.920 overlap=1.828
+    severe(intra) A:SEP2:CB vs A:SEP2:OG d=1.392 allowed=2.820 overlap=1.828
+    severe(intra) A:SEP2:P vs A:SEP2:O2P d=1.501 allowed=2.920 overlap=1.819
+    severe(intra) A:SEP2:P vs A:SEP2:O1P d=1.513 allowed=2.920 overlap=1.807
+    severe(intra) A:TPO4:OG1 vs A:TPO4:P d=1.549 allowed=2.920 overlap=1.771
+    severe(intra) A:TPO4:P vs A:TPO4:O3P d=1.579 allowed=2.920 overlap=1.741
+    severe(intra) A:MSE5:CA vs A:MSE5:CB d=1.694 allowed=3.000 overlap=1.706
+    severe(intra) A:SEP2:OG vs A:SEP2:P d=1.666 allowed=2.920 overlap=1.654
+    severe(intra) A:TPO4:CA vs A:TPO4:CB d=1.751 allowed=3.000 overlap=1.649
+    severe(intra) A:TPO4:C vs A:TPO4:O d=1.801 allowed=2.820 overlap=1.419
+    severe(intra) A:MSE5:CB vs A:MSE5:SE d=2.430 allowed=3.200 overlap=1.170
+    severe(inter) A:TPO4:O vs A:MSE5:N d=1.964 allowed=2.670 overlap=1.106
+  Clash hotspots:
+    A:TPO4:CB count=7 max_overlap=1.882
+    A:TPO4:CG2 count=7 max_overlap=1.882
+    A:TPO4:P count=6 max_overlap=1.870
+    A:MSE5:CB count=5 max_overlap=1.983
+    A:SEP2:CB count=5 max_overlap=1.973
+    A:SEP2:P count=5 max_overlap=1.828
+    A:TPO4:OG1 count=4 max_overlap=1.845
+    A:TPO4:O2P count=4 max_overlap=1.829
+    A:TPO4:CA count=4 max_overlap=1.649
+    A:TPO4:O count=4 max_overlap=1.419
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 72
+n_residues: 8
+expected_bonds: 52
+checked_bonds: 55
+bond_length_violations: 5
+missing_bonds: 1
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1503
+clashes: 47
+mild_clashes: 11
+moderate_clashes: 4
+severe_clashes: 32
+inter_residue_clashes: 6
+percent_bond_length_violations: 9.090909090909092
+percent_missing_bonds: 1.9230769230769231
+percent_clashes: 3.1270791749833666
+percent_atoms_in_clashes: 43.05555555555556
+clashscore_per_1000_atoms: 652.7777777777778
+inter_residue_clashscore_per_1000_atoms: 83.33333333333333
+severe_clashscore_per_1000_atoms: 444.44444444444446
+inter_residue_severe_clashscore_per_1000_atoms: 27.77777777777778
+overall_issue_score: 10.011497511497513

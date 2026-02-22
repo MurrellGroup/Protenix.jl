@@ -1,0 +1,53 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s083_multi_homodimer_lig__protenix_base_default_v0.5.0/s083_multi_homodimer_lig/seed_101/predictions/s083_multi_homodimer_lig_sample_0.cif
+  atoms=173, residues=17
+  bonds: checked=178 expected=120 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=8 mild=5 moderate=0 severe=3 pair_rate=0.15% atom_rate=7.51%
+  inter-residue clashes: total=8 mild=5 moderate=0 severe=3 pair_rate=0.17%
+  clashscore/1000 atoms: all=46.24 inter=46.24 severe=17.34 inter_severe=17.34
+  overall_issue_score=1.719 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:ALA2:O vs B:THR5:OG1 d=2.030 allowed=2.640 overlap=1.010
+    severe(inter) A:GLY3:O vs B:GLY3:O d=2.060 allowed=2.640 overlap=0.980
+    severe(inter) B:MET1:N vs B:LEU7:O d=2.130 allowed=2.670 overlap=0.940
+    mild(inter) A:GLY3:C vs B:GLY3:O d=2.672 allowed=2.820 overlap=0.548
+    mild(inter) A:MET1:O vs C:FAD1:O2P d=2.530 allowed=2.640 overlap=0.510
+    mild(inter) A:MET1:O vs A:ALA2:C d=2.730 allowed=2.820 overlap=0.490
+    mild(inter) B:MET1:O vs B:ALA2:C d=2.806 allowed=2.820 overlap=0.414
+    mild(inter) A:GLY3:O vs B:GLY3:C d=2.813 allowed=2.820 overlap=0.407
+  Clash hotspots:
+    A:GLY3:O count=2 max_overlap=0.980
+    B:GLY3:O count=2 max_overlap=0.980
+    A:MET1:O count=2 max_overlap=0.510
+    A:ALA2:O count=1 max_overlap=1.010
+    B:THR5:OG1 count=1 max_overlap=1.010
+    B:LEU7:O count=1 max_overlap=0.940
+    B:MET1:N count=1 max_overlap=0.940
+    A:GLY3:C count=1 max_overlap=0.548
+    C:FAD1:O2P count=1 max_overlap=0.510
+    A:ALA2:C count=1 max_overlap=0.490
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 173
+n_residues: 17
+expected_bonds: 120
+checked_bonds: 178
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 5248
+clashes: 8
+mild_clashes: 5
+moderate_clashes: 0
+severe_clashes: 3
+inter_residue_clashes: 8
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.1524390243902439
+percent_atoms_in_clashes: 7.514450867052023
+clashscore_per_1000_atoms: 46.24277456647399
+inter_residue_clashscore_per_1000_atoms: 46.24277456647399
+severe_clashscore_per_1000_atoms: 17.341040462427745
+inter_residue_severe_clashscore_per_1000_atoms: 17.341040462427745
+overall_issue_score: 1.7193208682570387

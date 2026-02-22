@@ -1,0 +1,54 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/13_multi_ccd_glycan__protenix_base_default_v0.5.0/multi_ccd_glycan/seed_101/predictions/multi_ccd_glycan_sample_0.cif
+  atoms=437, residues=54
+  bonds: checked=450 expected=411 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=9 mild=6 moderate=0 severe=3 pair_rate=0.05% atom_rate=3.66%
+  inter-residue clashes: total=9 mild=6 moderate=0 severe=3 pair_rate=0.05%
+  clashscore/1000 atoms: all=20.59 inter=20.59 severe=6.86 inter_severe=6.86
+  overall_issue_score=0.514 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:VAL11:CG2 vs A:THR40:CG2 d=2.315 allowed=3.000 overlap=1.085
+    severe(inter) A:TRP15:NE1 vs A:LEU30:O d=2.332 allowed=2.670 overlap=0.738
+    severe(inter) A:TRP15:CD1 vs A:PHE34:CB d=2.681 allowed=3.000 overlap=0.719
+    mild(inter) A:THR39:OG1 vs A:THR42:CB d=2.706 allowed=2.820 overlap=0.514
+    mild(inter) A:TRP15:NE1 vs A:PHE34:CB d=2.789 allowed=2.850 overlap=0.461
+    mild(inter) A:MET1:SD vs A:LYS41:CG d=3.072 allowed=3.100 overlap=0.428
+    mild(inter) A:PHE37:CE2 vs A:PHE44:CE2 d=2.982 allowed=3.000 overlap=0.418
+    mild(inter) A:MET1:O vs A:THR39:CG2 d=2.805 allowed=2.820 overlap=0.415
+    mild(inter) A:VAL11:CG1 vs A:LEU49:CD1 d=2.986 allowed=3.000 overlap=0.414
+  Clash hotspots:
+    A:TRP15:NE1 count=2 max_overlap=0.738
+    A:PHE34:CB count=2 max_overlap=0.719
+    A:VAL11:CG2 count=1 max_overlap=1.085
+    A:THR40:CG2 count=1 max_overlap=1.085
+    A:LEU30:O count=1 max_overlap=0.738
+    A:TRP15:CD1 count=1 max_overlap=0.719
+    A:THR39:OG1 count=1 max_overlap=0.514
+    A:THR42:CB count=1 max_overlap=0.514
+    A:MET1:SD count=1 max_overlap=0.428
+    A:LYS41:CG count=1 max_overlap=0.428
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 437
+n_residues: 54
+expected_bonds: 411
+checked_bonds: 450
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 17991
+clashes: 9
+mild_clashes: 6
+moderate_clashes: 0
+severe_clashes: 3
+inter_residue_clashes: 9
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.05002501250625312
+percent_atoms_in_clashes: 3.6613272311212817
+clashscore_per_1000_atoms: 20.594965675057207
+inter_residue_clashscore_per_1000_atoms: 20.594965675057207
+severe_clashscore_per_1000_atoms: 6.864988558352403
+inter_residue_severe_clashscore_per_1000_atoms: 6.864988558352403
+overall_issue_score: 0.5142269454919438

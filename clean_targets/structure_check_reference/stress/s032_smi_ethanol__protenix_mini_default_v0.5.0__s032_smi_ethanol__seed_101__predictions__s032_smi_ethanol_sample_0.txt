@@ -1,0 +1,38 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s032_smi_ethanol__protenix_mini_default_v0.5.0/s032_smi_ethanol/seed_101/predictions/s032_smi_ethanol_sample_0.cif
+  atoms=63, residues=9
+  bonds: checked=62 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=1 mild=1 moderate=0 severe=0 pair_rate=0.15% atom_rate=3.17%
+  inter-residue clashes: total=1 mild=1 moderate=0 severe=0 pair_rate=0.17%
+  clashscore/1000 atoms: all=15.87 inter=15.87 severe=0.00 inter_severe=0.00
+  overall_issue_score=1.704 (lower is better)
+  Top clashes by overlap:
+    mild(inter) A:LYS8:CE vs B:UNL1:O1 d=2.735 allowed=2.820 overlap=0.485
+  Clash hotspots:
+    B:UNL1:O1 count=1 max_overlap=0.485
+    A:LYS8:CE count=1 max_overlap=0.485
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 63
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 62
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 648
+clashes: 1
+mild_clashes: 1
+moderate_clashes: 0
+severe_clashes: 0
+inter_residue_clashes: 1
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.15432098765432098
+percent_atoms_in_clashes: 3.1746031746031744
+clashscore_per_1000_atoms: 15.873015873015873
+inter_residue_clashscore_per_1000_atoms: 15.873015873015873
+severe_clashscore_per_1000_atoms: 0.0
+inter_residue_severe_clashscore_per_1000_atoms: 0.0
+overall_issue_score: 1.7035775127768313

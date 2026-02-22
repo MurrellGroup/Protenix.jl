@@ -1,0 +1,55 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s094_edge_multi_cov__protenix_mini_default_v0.5.0/s094_edge_multi_cov/seed_101/predictions/s094_edge_multi_cov_sample_0.cif
+  atoms=68, residues=9
+  bonds: checked=83 expected=60 length_violations=4 (4.82%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=7 mild=5 moderate=0 severe=2 pair_rate=0.72% atom_rate=11.76%
+  inter-residue clashes: total=7 mild=5 moderate=0 severe=2 pair_rate=0.76%
+  clashscore/1000 atoms: all=102.94 inter=102.94 severe=29.41 inter_severe=29.41
+  overall_issue_score=10.052 (lower is better)
+  Top bond length issues:
+    too_short B:SF41 FE2-FE4 observed=1.037 expected=2.480 [1.860, 3.224] severity=0.332 source=inferred
+    too_short A:MET1 SD-CE observed=0.895 expected=1.823 [1.458, 2.278] severity=0.309 source=polymer
+    too_short B:SF41 FE2-S1 observed=1.438 expected=2.290 [1.718, 2.977] severity=0.122 source=inferred
+    too_short B:SF41 FE1-S4 observed=1.593 expected=2.290 [1.718, 2.977] severity=0.054 source=inferred
+  Top clashes by overlap:
+    severe(inter) A:CYS3:N vs B:SF41:S2 d=2.285 allowed=2.950 overlap=1.065
+    severe(inter) A:CYS4:N vs B:SF41:S2 d=2.534 allowed=2.950 overlap=0.816
+    mild(inter) A:CYS3:N vs B:SF41:FE4 d=2.952 allowed=3.090 overlap=0.538
+    mild(inter) A:CYS2:C vs B:SF41:S2 d=2.989 allowed=3.100 overlap=0.511
+    mild(inter) A:CYS3:CA vs B:SF41:S2 d=3.066 allowed=3.100 overlap=0.434
+    mild(inter) A:CYS4:N vs B:SF41:FE3 d=3.068 allowed=3.090 overlap=0.422
+    mild(inter) A:CYS3:C vs B:SF41:S2 d=3.087 allowed=3.100 overlap=0.413
+  Clash hotspots:
+    B:SF41:S2 count=5 max_overlap=1.065
+    A:CYS3:N count=2 max_overlap=1.065
+    A:CYS4:N count=2 max_overlap=0.816
+    B:SF41:FE4 count=1 max_overlap=0.538
+    A:CYS2:C count=1 max_overlap=0.511
+    A:CYS3:CA count=1 max_overlap=0.434
+    B:SF41:FE3 count=1 max_overlap=0.422
+    A:CYS3:C count=1 max_overlap=0.413
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 68
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 83
+bond_length_violations: 4
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 977
+clashes: 7
+mild_clashes: 5
+moderate_clashes: 0
+severe_clashes: 2
+inter_residue_clashes: 7
+percent_bond_length_violations: 4.819277108433735
+percent_missing_bonds: 0.0
+percent_clashes: 0.7164790174002047
+percent_atoms_in_clashes: 11.764705882352942
+clashscore_per_1000_atoms: 102.94117647058823
+inter_residue_clashscore_per_1000_atoms: 102.94117647058823
+severe_clashscore_per_1000_atoms: 29.41176470588235
+inter_residue_severe_clashscore_per_1000_atoms: 29.41176470588235
+overall_issue_score: 10.051559951596781

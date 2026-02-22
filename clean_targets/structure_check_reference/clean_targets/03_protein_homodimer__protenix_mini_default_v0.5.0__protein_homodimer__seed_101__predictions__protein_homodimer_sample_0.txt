@@ -1,0 +1,72 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/03_protein_homodimer__protenix_mini_default_v0.5.0/protein_homodimer/seed_101/predictions/protein_homodimer_sample_0.cif
+  atoms=796, residues=102
+  bonds: checked=822 expected=822 length_violations=6 (0.73%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=47 mild=11 moderate=9 severe=27 pair_rate=0.12% atom_rate=6.16%
+  inter-residue clashes: total=43 mild=11 moderate=9 severe=23 pair_rate=0.11%
+  clashscore/1000 atoms: all=59.05 inter=54.02 severe=33.92 inter_severe=28.89
+  overall_issue_score=1.500 (lower is better)
+  Top bond length issues:
+    too_short A:ARG32 CZ-NH2 observed=0.513 expected=1.330 [1.064, 1.663] severity=0.414 source=polymer
+    too_short A:LYS17 CE-NZ observed=0.683 expected=1.463 [1.170, 1.828] severity=0.333 source=polymer
+    too_short A:MET1 CG-SD observed=1.010 expected=1.828 [1.463, 2.285] severity=0.248 source=polymer
+    too_short B:HIS51 CG-ND1 observed=0.883 expected=1.370 [1.096, 1.713] severity=0.155 source=polymer
+    too_short B:LYS41 CG-CD observed=0.994 expected=1.534 [1.227, 1.917] severity=0.152 source=polymer
+    too_short A:MET1 CA-CB observed=1.031 expected=1.544 [1.235, 1.930] severity=0.132 source=polymer
+  Top clashes by overlap:
+    severe(inter) B:LEU49:C vs B:HIS51:NE2 d=0.535 allowed=2.850 overlap=2.715
+    severe(inter) B:LEU49:O vs B:HIS51:CE1 d=0.827 allowed=2.820 overlap=2.393
+    severe(inter) B:LEU49:C vs B:HIS51:CE1 d=1.152 allowed=3.000 overlap=2.248
+    severe(inter) B:LEU49:O vs B:HIS51:NE2 d=0.913 allowed=2.670 overlap=2.157
+    severe(inter) B:LEU49:C vs B:HIS51:CD2 d=1.506 allowed=3.000 overlap=1.894
+    severe(inter) B:LEU49:O vs B:HIS51:CD2 d=1.461 allowed=2.820 overlap=1.759
+    severe(inter) B:SER50:N vs B:HIS51:NE2 d=1.471 allowed=2.700 overlap=1.629
+    severe(inter) B:LEU49:CA vs B:HIS51:CE1 d=1.814 allowed=3.000 overlap=1.586
+    severe(inter) B:SER50:C vs B:HIS51:CD2 d=1.883 allowed=3.000 overlap=1.517
+    severe(inter) B:SER50:N vs B:HIS51:CD2 d=1.843 allowed=2.850 overlap=1.407
+    severe(inter) B:LEU49:O vs B:HIS51:ND1 d=1.753 allowed=2.670 overlap=1.317
+    severe(inter) B:SER50:CA vs B:HIS51:CD2 d=2.091 allowed=3.000 overlap=1.309
+    severe(inter) B:LEU49:N vs B:HIS51:CE1 d=1.998 allowed=2.850 overlap=1.252
+    severe(inter) B:LEU49:CA vs B:HIS51:NE2 d=2.035 allowed=2.850 overlap=1.215
+    severe(inter) B:LEU49:O vs B:HIS51:CG d=2.022 allowed=2.820 overlap=1.198
+    severe(intra) A:MET1:N vs A:MET1:SD d=2.219 allowed=2.950 overlap=1.131
+    severe(intra) B:HIS51:N vs B:HIS51:CD2 d=2.138 allowed=2.850 overlap=1.112
+    severe(inter) B:SER50:CA vs B:HIS51:NE2 d=2.193 allowed=2.850 overlap=1.057
+    severe(inter) B:LEU49:C vs B:HIS51:ND1 d=2.205 allowed=2.850 overlap=1.045
+    severe(intra) A:MET1:C vs A:MET1:SD d=2.463 allowed=3.100 overlap=1.037
+  Clash hotspots:
+    B:HIS51:NE2 count=7 max_overlap=2.715
+    B:HIS51:CE1 count=7 max_overlap=2.393
+    B:HIS51:CD2 count=7 max_overlap=1.894
+    B:LEU49:C count=5 max_overlap=2.715
+    B:LEU49:O count=5 max_overlap=2.393
+    B:LEU49:CA count=4 max_overlap=1.586
+    B:HIS51:ND1 count=4 max_overlap=1.317
+    B:SER50:N count=3 max_overlap=1.629
+    B:SER50:C count=3 max_overlap=1.517
+    B:HIS51:CG count=3 max_overlap=1.198
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 796
+n_residues: 102
+expected_bonds: 822
+checked_bonds: 822
+bond_length_violations: 6
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 38699
+clashes: 47
+mild_clashes: 11
+moderate_clashes: 9
+severe_clashes: 27
+inter_residue_clashes: 43
+percent_bond_length_violations: 0.7299270072992701
+percent_missing_bonds: 0.0
+percent_clashes: 0.12145016667097341
+percent_atoms_in_clashes: 6.155778894472362
+clashscore_per_1000_atoms: 59.04522613065327
+inter_residue_clashscore_per_1000_atoms: 54.02010050251256
+severe_clashscore_per_1000_atoms: 33.91959798994975
+inter_residue_severe_clashscore_per_1000_atoms: 28.894472361809044
+overall_issue_score: 1.5003369887181535

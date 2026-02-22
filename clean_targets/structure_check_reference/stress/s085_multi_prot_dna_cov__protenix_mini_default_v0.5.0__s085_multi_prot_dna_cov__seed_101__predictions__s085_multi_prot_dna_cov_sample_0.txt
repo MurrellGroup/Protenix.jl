@@ -1,0 +1,55 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s085_multi_prot_dna_cov__protenix_mini_default_v0.5.0/s085_multi_prot_dna_cov/seed_101/predictions/s085_multi_prot_dna_cov_sample_0.cif
+  atoms=174, residues=13
+  bonds: checked=185 expected=151 length_violations=3 (1.62%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=6 mild=0 moderate=1 severe=5 pair_rate=0.13% atom_rate=5.75%
+  inter-residue clashes: total=2 mild=0 moderate=0 severe=2 pair_rate=0.05%
+  clashscore/1000 atoms: all=34.48 inter=11.49 severe=28.74 inter_severe=11.49
+  overall_issue_score=1.320 (lower is better)
+  Top bond length issues:
+    too_short B:DA1 P-OP2 observed=0.662 expected=1.500 [1.200, 1.875] severity=0.359 source=polymer
+    too_short B:DA1 P-O5' observed=1.142 expected=1.600 [1.280, 2.000] severity=0.086 source=polymer
+    too_long B:DA1 P-OP1 observed=1.992 expected=1.500 [1.200, 1.875] severity=0.078 source=polymer
+  Top clashes by overlap:
+    severe(intra) B:DA1:OP3 vs B:DA1:P d=1.914 allowed=2.920 overlap=1.406
+    severe(inter) A:MET1:O vs C:ATP1:O3G d=2.035 allowed=2.640 overlap=1.005
+    severe(intra) B:DA1:OP3 vs B:DA1:OP2 d=2.129 allowed=2.640 overlap=0.911
+    severe(inter) A:CYS3:CA vs C:ATP1:O2A d=2.348 allowed=2.820 overlap=0.872
+    severe(intra) B:DA1:OP3 vs B:DA1:O5' d=2.301 allowed=2.640 overlap=0.739
+    moderate(intra) C:ATP1:O1B vs C:ATP1:O1A d=2.460 allowed=2.640 overlap=0.580
+  Clash hotspots:
+    B:DA1:OP3 count=3 max_overlap=1.406
+    B:DA1:P count=1 max_overlap=1.406
+    A:MET1:O count=1 max_overlap=1.005
+    C:ATP1:O3G count=1 max_overlap=1.005
+    B:DA1:OP2 count=1 max_overlap=0.911
+    C:ATP1:O2A count=1 max_overlap=0.872
+    A:CYS3:CA count=1 max_overlap=0.872
+    B:DA1:O5' count=1 max_overlap=0.739
+    C:ATP1:O1B count=1 max_overlap=0.580
+    C:ATP1:O1A count=1 max_overlap=0.580
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 174
+n_residues: 13
+expected_bonds: 151
+checked_bonds: 185
+bond_length_violations: 3
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 4633
+clashes: 6
+mild_clashes: 0
+moderate_clashes: 1
+severe_clashes: 5
+inter_residue_clashes: 2
+percent_bond_length_violations: 1.6216216216216217
+percent_missing_bonds: 0.0
+percent_clashes: 0.12950571983595943
+percent_atoms_in_clashes: 5.747126436781609
+clashscore_per_1000_atoms: 34.48275862068966
+inter_residue_clashscore_per_1000_atoms: 11.494252873563218
+severe_clashscore_per_1000_atoms: 28.735632183908045
+inter_residue_severe_clashscore_per_1000_atoms: 11.494252873563218
+overall_issue_score: 1.319975780260913

@@ -1,0 +1,58 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/08_protein_ion__protenix_mini_default_v0.5.0/protein_ion/seed_101/predictions/protein_ion_sample_0.cif
+  atoms=401, residues=54
+  bonds: checked=415 expected=411 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=13 mild=6 moderate=5 severe=2 pair_rate=0.09% atom_rate=4.49%
+  inter-residue clashes: total=13 mild=6 moderate=5 severe=2 pair_rate=0.09%
+  clashscore/1000 atoms: all=32.42 inter=32.42 severe=4.99 inter_severe=4.99
+  overall_issue_score=0.939 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:TRP15:NE1 vs A:PHE44:CD1 d=1.956 allowed=2.850 overlap=1.294
+    severe(inter) A:MET1:CE vs A:TYR43:CE1 d=2.254 allowed=3.000 overlap=1.146
+    moderate(inter) A:TRP15:NE1 vs A:PHE44:CE1 d=2.586 allowed=2.850 overlap=0.664
+    moderate(inter) A:TRP15:CE2 vs A:PHE44:CD1 d=2.740 allowed=3.000 overlap=0.660
+    moderate(inter) A:TRP15:CZ2 vs A:PHE44:CG d=2.788 allowed=3.000 overlap=0.612
+    moderate(inter) A:ALA22:O vs A:TYR25:O d=2.431 allowed=2.640 overlap=0.609
+    moderate(inter) A:TRP15:CZ2 vs A:PHE44:CB d=2.838 allowed=3.000 overlap=0.562
+    mild(inter) A:MET1:CE vs A:TYR43:CD1 d=2.867 allowed=3.000 overlap=0.533
+    mild(inter) A:LEU30:CD2 vs A:PHE34:CE2 d=2.876 allowed=3.000 overlap=0.524
+    mild(inter) A:LEU30:CD2 vs A:PHE34:CD2 d=2.919 allowed=3.000 overlap=0.481
+    mild(inter) A:TYR25:O vs A:GLY26:C d=2.765 allowed=2.820 overlap=0.455
+    mild(inter) A:ALA27:CB vs A:LEU49:CD1 d=2.947 allowed=3.000 overlap=0.453
+    mild(inter) A:TRP15:NE1 vs A:PHE44:CG d=2.843 allowed=2.850 overlap=0.407
+  Clash hotspots:
+    A:TRP15:NE1 count=3 max_overlap=1.294
+    A:PHE44:CD1 count=2 max_overlap=1.294
+    A:MET1:CE count=2 max_overlap=1.146
+    A:TRP15:CZ2 count=2 max_overlap=0.612
+    A:PHE44:CG count=2 max_overlap=0.612
+    A:TYR25:O count=2 max_overlap=0.609
+    A:LEU30:CD2 count=2 max_overlap=0.524
+    A:TYR43:CE1 count=1 max_overlap=1.146
+    A:PHE44:CE1 count=1 max_overlap=0.664
+    A:TRP15:CE2 count=1 max_overlap=0.660
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 401
+n_residues: 54
+expected_bonds: 411
+checked_bonds: 415
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 14260
+clashes: 13
+mild_clashes: 6
+moderate_clashes: 5
+severe_clashes: 2
+inter_residue_clashes: 13
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.091164095371669
+percent_atoms_in_clashes: 4.488778054862843
+clashscore_per_1000_atoms: 32.418952618453865
+inter_residue_clashscore_per_1000_atoms: 32.418952618453865
+severe_clashscore_per_1000_atoms: 4.987531172069826
+inter_residue_severe_clashscore_per_1000_atoms: 4.987531172069826
+overall_issue_score: 0.9390349609939324

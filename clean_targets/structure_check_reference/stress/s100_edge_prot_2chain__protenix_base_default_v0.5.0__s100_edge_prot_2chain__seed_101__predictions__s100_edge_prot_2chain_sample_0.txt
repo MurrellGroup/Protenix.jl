@@ -1,0 +1,64 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s100_edge_prot_2chain__protenix_base_default_v0.5.0/s100_edge_prot_2chain/seed_101/predictions/s100_edge_prot_2chain_sample_0.cif
+  atoms=212, residues=26
+  bonds: checked=217 expected=180 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=19 mild=4 moderate=3 severe=12 pair_rate=0.28% atom_rate=12.74%
+  inter-residue clashes: total=19 mild=4 moderate=3 severe=12 pair_rate=0.30%
+  clashscore/1000 atoms: all=89.62 inter=89.62 severe=56.60 inter_severe=56.60
+  overall_issue_score=3.020 (lower is better)
+  Top clashes by overlap:
+    severe(inter) B:LEU7:O vs C:SER6:O d=1.463 allowed=2.640 overlap=1.577
+    severe(inter) B:CYS3:O vs C:LYS2:O d=1.511 allowed=2.640 overlap=1.529
+    severe(inter) B:THR5:O vs C:TYR4:O d=1.522 allowed=2.640 overlap=1.518
+    severe(inter) A:TYR6:O vs C:THR5:O d=1.730 allowed=2.640 overlap=1.310
+    severe(inter) A:GLY4:O vs C:LEU3:O d=1.860 allowed=2.640 overlap=1.180
+    severe(inter) A:ALA2:O vs C:GLY1:O d=1.887 allowed=2.640 overlap=1.153
+    severe(inter) B:CYS3:O vs C:LYS2:C d=2.368 allowed=2.820 overlap=0.852
+    severe(inter) A:ALA2:C vs C:GLY1:O d=2.455 allowed=2.820 overlap=0.765
+    severe(inter) B:LEU7:C vs C:SER6:O d=2.498 allowed=2.820 overlap=0.722
+    severe(inter) B:LEU7:O vs C:SER6:C d=2.498 allowed=2.820 overlap=0.722
+    severe(inter) A:GLY4:O vs C:LEU3:CB d=2.511 allowed=2.820 overlap=0.709
+    severe(inter) A:GLY4:O vs C:LEU3:C d=2.512 allowed=2.820 overlap=0.708
+    moderate(inter) B:GLY4:CA vs C:LEU3:CD2 d=2.756 allowed=3.000 overlap=0.644
+    moderate(inter) B:CYS3:C vs C:LYS2:O d=2.615 allowed=2.820 overlap=0.605
+    moderate(inter) B:THR5:C vs C:TYR4:O d=2.660 allowed=2.820 overlap=0.560
+    mild(inter) B:THR5:O vs C:TYR4:C d=2.697 allowed=2.820 overlap=0.523
+    mild(inter) B:CYS3:O vs C:LEU3:CA d=2.718 allowed=2.820 overlap=0.502
+    mild(inter) B:TYR6:OH vs C:TYR4:CD1 d=2.813 allowed=2.820 overlap=0.407
+    mild(inter) A:GLY4:C vs C:LEU3:O d=2.814 allowed=2.820 overlap=0.406
+  Clash hotspots:
+    B:CYS3:O count=3 max_overlap=1.529
+    A:GLY4:O count=3 max_overlap=1.180
+    C:SER6:O count=2 max_overlap=1.577
+    B:LEU7:O count=2 max_overlap=1.577
+    C:LYS2:O count=2 max_overlap=1.529
+    C:TYR4:O count=2 max_overlap=1.518
+    B:THR5:O count=2 max_overlap=1.518
+    C:LEU3:O count=2 max_overlap=1.180
+    C:GLY1:O count=2 max_overlap=1.153
+    A:TYR6:O count=1 max_overlap=1.310
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 212
+n_residues: 26
+expected_bonds: 180
+checked_bonds: 217
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 6703
+clashes: 19
+mild_clashes: 4
+moderate_clashes: 3
+severe_clashes: 12
+inter_residue_clashes: 19
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.28345516932716697
+percent_atoms_in_clashes: 12.735849056603774
+clashscore_per_1000_atoms: 89.62264150943396
+inter_residue_clashscore_per_1000_atoms: 89.62264150943396
+severe_clashscore_per_1000_atoms: 56.60377358490566
+inter_residue_severe_clashscore_per_1000_atoms: 56.60377358490566
+overall_issue_score: 3.0201875695437934

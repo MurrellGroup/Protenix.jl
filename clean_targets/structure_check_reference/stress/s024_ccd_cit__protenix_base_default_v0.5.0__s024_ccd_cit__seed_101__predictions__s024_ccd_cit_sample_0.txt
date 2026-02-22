@@ -1,0 +1,46 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s024_ccd_cit__protenix_base_default_v0.5.0/s024_ccd_cit/seed_101/predictions/s024_ccd_cit_sample_0.cif
+  atoms=73, residues=9
+  bonds: checked=72 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=4 mild=2 moderate=1 severe=1 pair_rate=0.34% atom_rate=9.59%
+  inter-residue clashes: total=3 mild=1 moderate=1 severe=1 pair_rate=0.27%
+  clashscore/1000 atoms: all=54.79 inter=41.10 severe=13.70 inter_severe=13.70
+  overall_issue_score=2.705 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:CE vs A:TYR6:OH d=1.613 allowed=2.820 overlap=1.607
+    moderate(inter) A:GLY3:O vs B:CIT1:O7 d=2.364 allowed=2.640 overlap=0.676
+    mild(intra) B:CIT1:O2 vs B:CIT1:C6 d=2.744 allowed=2.820 overlap=0.476
+    mild(inter) A:MET1:CE vs A:TYR6:CZ d=2.970 allowed=3.000 overlap=0.430
+  Clash hotspots:
+    A:MET1:CE count=2 max_overlap=1.607
+    A:TYR6:OH count=1 max_overlap=1.607
+    A:GLY3:O count=1 max_overlap=0.676
+    B:CIT1:O7 count=1 max_overlap=0.676
+    B:CIT1:O2 count=1 max_overlap=0.476
+    B:CIT1:C6 count=1 max_overlap=0.476
+    A:TYR6:CZ count=1 max_overlap=0.430
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 73
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 72
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1193
+clashes: 4
+mild_clashes: 2
+moderate_clashes: 1
+severe_clashes: 1
+inter_residue_clashes: 3
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.3352891869237217
+percent_atoms_in_clashes: 9.58904109589041
+clashscore_per_1000_atoms: 54.794520547945204
+inter_residue_clashscore_per_1000_atoms: 41.0958904109589
+severe_clashscore_per_1000_atoms: 13.698630136986301
+inter_residue_severe_clashscore_per_1000_atoms: 13.698630136986301
+overall_issue_score: 2.7051397655545535

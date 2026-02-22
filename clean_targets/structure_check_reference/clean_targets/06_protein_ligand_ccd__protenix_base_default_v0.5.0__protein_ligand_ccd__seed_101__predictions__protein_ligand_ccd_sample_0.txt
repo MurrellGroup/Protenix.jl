@@ -1,0 +1,57 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/06_protein_ligand_ccd__protenix_base_default_v0.5.0/protein_ligand_ccd/seed_101/predictions/protein_ligand_ccd_sample_0.cif
+  atoms=429, residues=52
+  bonds: checked=444 expected=411 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=12 mild=4 moderate=4 severe=4 pair_rate=0.06% atom_rate=4.90%
+  inter-residue clashes: total=12 mild=4 moderate=4 severe=4 pair_rate=0.07%
+  clashscore/1000 atoms: all=27.97 inter=27.97 severe=9.32 inter_severe=9.32
+  overall_issue_score=0.662 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:VAL18:CG1 vs A:PHE44:CE1 d=2.149 allowed=3.000 overlap=1.251
+    severe(inter) A:PHE34:O vs A:THR40:OG1 d=2.239 allowed=2.640 overlap=0.801
+    severe(inter) A:MET33:CG vs A:PHE37:CE2 d=2.652 allowed=3.000 overlap=0.748
+    severe(inter) A:TRP15:CE3 vs A:LEU30:CD2 d=2.693 allowed=3.000 overlap=0.707
+    moderate(inter) A:TRP15:CD1 vs A:ALA22:CB d=2.711 allowed=3.000 overlap=0.689
+    moderate(inter) A:THR39:OG1 vs B:ATP1:C2 d=2.534 allowed=2.820 overlap=0.686
+    moderate(inter) A:TRP15:NE1 vs A:ALA22:CB d=2.574 allowed=2.850 overlap=0.676
+    moderate(inter) A:PHE34:CE1 vs A:PHE44:CE2 d=2.783 allowed=3.000 overlap=0.617
+    mild(inter) A:THR39:O vs A:THR40:C d=2.775 allowed=2.820 overlap=0.445
+    mild(inter) A:VAL18:CG1 vs A:PHE44:CD1 d=2.986 allowed=3.000 overlap=0.414
+    mild(inter) A:PHE34:CE1 vs A:PHE44:CD2 d=2.992 allowed=3.000 overlap=0.408
+    mild(inter) A:SER4:O vs A:PRO5:C d=2.817 allowed=2.820 overlap=0.403
+  Clash hotspots:
+    A:VAL18:CG1 count=2 max_overlap=1.251
+    A:ALA22:CB count=2 max_overlap=0.689
+    A:PHE34:CE1 count=2 max_overlap=0.617
+    A:PHE44:CE1 count=1 max_overlap=1.251
+    A:THR40:OG1 count=1 max_overlap=0.801
+    A:PHE34:O count=1 max_overlap=0.801
+    A:PHE37:CE2 count=1 max_overlap=0.748
+    A:MET33:CG count=1 max_overlap=0.748
+    A:TRP15:CE3 count=1 max_overlap=0.707
+    A:LEU30:CD2 count=1 max_overlap=0.707
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 429
+n_residues: 52
+expected_bonds: 411
+checked_bonds: 444
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 18840
+clashes: 12
+mild_clashes: 4
+moderate_clashes: 4
+severe_clashes: 4
+inter_residue_clashes: 12
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.06369426751592357
+percent_atoms_in_clashes: 4.895104895104895
+clashscore_per_1000_atoms: 27.972027972027973
+inter_residue_clashscore_per_1000_atoms: 27.972027972027973
+severe_clashscore_per_1000_atoms: 9.324009324009324
+inter_residue_severe_clashscore_per_1000_atoms: 9.324009324009324
+overall_issue_score: 0.6615579690170351

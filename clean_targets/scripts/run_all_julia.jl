@@ -227,7 +227,15 @@ if should_run("21")
     end
 end
 
-# ── Category 10: Design (22-32) ── Julia PXDesign inference ──────────────────
+# ── Category 10: Glycosylated RBD (33) ────────────────────────────────────────
+if should_run("33")
+    f = joinpath(INPUTS, "33_rbd_glycosylated.json")
+    if isfile(f)
+        run_folding_target_msa(f, "protenix_base_default_v0.5.0")
+    end
+end
+
+# ── Category 11: Design (22-32) ── Julia PXDesign inference ──────────────────
 # Design targets use YAML format and the PXDesign design pipeline (run_infer),
 # NOT the Protenix folding pipeline (predict_json).
 const DESIGN_N_STEP = 200

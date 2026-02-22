@@ -1,0 +1,40 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s014_ccd_4ht__protenix_mini_default_v0.5.0/s014_ccd_4ht/seed_101/predictions/s014_ccd_4ht_sample_0.cif
+  atoms=76, residues=9
+  bonds: checked=77 expected=60 length_violations=1 (1.30%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=1 mild=0 moderate=0 severe=1 pair_rate=0.10% atom_rate=2.63%
+  inter-residue clashes: total=1 mild=0 moderate=0 severe=1 pair_rate=0.12%
+  clashscore/1000 atoms: all=13.16 inter=13.16 severe=13.16 inter_severe=13.16
+  overall_issue_score=1.830 (lower is better)
+  Top bond length issues:
+    too_short A:LYS8 CD-CE observed=1.192 expected=1.535 [1.228, 1.918] severity=0.023 source=polymer
+  Top clashes by overlap:
+    severe(inter) A:GLY3:O vs B:4HT1:O d=2.241 allowed=2.640 overlap=0.799
+  Clash hotspots:
+    B:4HT1:O count=1 max_overlap=0.799
+    A:GLY3:O count=1 max_overlap=0.799
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 76
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 77
+bond_length_violations: 1
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 958
+clashes: 1
+mild_clashes: 0
+moderate_clashes: 0
+severe_clashes: 1
+inter_residue_clashes: 1
+percent_bond_length_violations: 1.2987012987012987
+percent_missing_bonds: 0.0
+percent_clashes: 0.10438413361169102
+percent_atoms_in_clashes: 2.6315789473684212
+clashscore_per_1000_atoms: 13.157894736842104
+inter_residue_clashscore_per_1000_atoms: 13.157894736842104
+severe_clashscore_per_1000_atoms: 13.157894736842104
+inter_residue_severe_clashscore_per_1000_atoms: 13.157894736842104
+overall_issue_score: 1.8299881936245574

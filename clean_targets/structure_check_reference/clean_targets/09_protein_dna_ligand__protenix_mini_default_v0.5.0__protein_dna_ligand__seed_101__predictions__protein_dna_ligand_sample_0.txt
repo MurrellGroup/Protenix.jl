@@ -1,0 +1,86 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/09_protein_dna_ligand__protenix_mini_default_v0.5.0/protein_dna_ligand/seed_101/predictions/protein_dna_ligand_sample_0.cif
+  atoms=5222, residues=556
+  bonds: checked=5461 expected=5398 length_violations=34 (0.62%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=1255 mild=328 moderate=220 severe=707 pair_rate=0.43% atom_rate=23.75%
+  inter-residue clashes: total=1202 mild=309 moderate=204 severe=689 pair_rate=0.43%
+  clashscore/1000 atoms: all=240.33 inter=230.18 severe=135.39 inter_severe=131.94
+  overall_issue_score=4.606 (lower is better)
+  Top bond length issues:
+    too_short A:SER58 CB-OG observed=0.483 expected=1.403 [1.122, 1.754] severity=0.456 source=polymer
+    too_short A:HIS244 C-OXT observed=0.444 expected=1.250 [1.000, 1.562] severity=0.445 source=polymer
+    too_short D:DT2 P-OP1 observed=0.570 expected=1.500 [1.200, 1.875] severity=0.420 source=polymer
+    too_short A:ALA9 C-O observed=0.593 expected=1.261 [1.009, 1.576] severity=0.329 source=polymer
+    too_short D:DT2 O3'-P observed=0.730 expected=1.730 [1.297, 2.249] severity=0.328 source=declared
+    too_short A:LEU137 CG-CD1 observed=0.835 expected=1.535 [1.228, 1.918] severity=0.256 source=polymer
+    too_short C:DG4 P-OP1 observed=0.829 expected=1.500 [1.200, 1.875] severity=0.247 source=polymer
+    too_short D:DT2 P-OP2 observed=0.830 expected=1.500 [1.200, 1.875] severity=0.247 source=polymer
+    too_short C:DC1 P-O5' observed=0.912 expected=1.600 [1.280, 2.000] severity=0.230 source=polymer
+    too_short B:ARG143 CD-NE observed=0.909 expected=1.464 [1.171, 1.829] severity=0.179 source=polymer
+    too_short F:DG1 P-OP2 observed=0.985 expected=1.500 [1.200, 1.875] severity=0.143 source=polymer
+    too_short F:DA4 P-OP1 observed=1.033 expected=1.500 [1.200, 1.875] severity=0.112 source=polymer
+    too_short C:DG4 P-OP2 observed=1.071 expected=1.500 [1.200, 1.875] severity=0.086 source=polymer
+    too_short C:DC1 O3'-P observed=1.169 expected=1.730 [1.297, 2.249] severity=0.074 source=declared
+    too_short A:ARG71 CG-CD observed=1.114 expected=1.536 [1.228, 1.919] severity=0.074 source=polymer
+    too_short A:LEU137 CG-CD2 observed=1.121 expected=1.536 [1.229, 1.920] severity=0.070 source=polymer
+    too_short B:LEU152 CG-CD2 observed=1.131 expected=1.536 [1.229, 1.920] severity=0.064 source=polymer
+    too_short B:ILE16 CB-CG2 observed=1.134 expected=1.539 [1.231, 1.924] severity=0.063 source=polymer
+    too_short A:ALA9 C-N observed=1.013 expected=1.470 [1.103, 1.911] severity=0.061 source=declared
+    too_short C:DC1 P-OP2 observed=1.113 expected=1.500 [1.200, 1.875] severity=0.058 source=polymer
+  Top clashes by overlap:
+    severe(inter) A:PHE14:C vs B:LEU226:CD2 d=0.321 allowed=3.000 overlap=3.079
+    severe(inter) A:ASP151:CB vs B:LYS36:CD d=0.537 allowed=3.000 overlap=2.863
+    severe(inter) A:LYS36:CD vs B:ASP151:C d=0.629 allowed=3.000 overlap=2.771
+    severe(inter) A:LYS36:CE vs B:ASP151:CA d=0.650 allowed=3.000 overlap=2.750
+    severe(inter) A:THR41:O vs B:ASN153:ND2 d=0.397 allowed=2.670 overlap=2.673
+    severe(inter) A:PHE14:N vs B:LEU226:CG d=0.602 allowed=2.850 overlap=2.648
+    severe(inter) B:ARG95:NH2 vs B:ARG122:CD d=0.663 allowed=2.850 overlap=2.587
+    severe(inter) A:VAL222:O vs B:ILE5:CD1 d=0.707 allowed=2.820 overlap=2.513
+    severe(inter) A:ASP151:CG vs B:LYS36:CB d=0.916 allowed=3.000 overlap=2.484
+    severe(inter) A:SER38:O vs B:ASN153:OD1 d=0.642 allowed=2.640 overlap=2.398
+    severe(inter) A:ILE228:CG2 vs B:PHE17:CZ d=1.004 allowed=3.000 overlap=2.396
+    severe(inter) B:ARG95:CZ vs B:ARG122:CZ d=1.027 allowed=3.000 overlap=2.373
+    severe(inter) A:LYS36:CE vs B:ASP151:C d=1.032 allowed=3.000 overlap=2.368
+    severe(inter) A:LEU63:O vs B:LEU180:O d=0.697 allowed=2.640 overlap=2.343
+    severe(inter) A:ASP151:CG vs B:LYS36:CG d=1.074 allowed=3.000 overlap=2.326
+    severe(inter) A:ASN153:ND2 vs B:THR41:CA d=0.945 allowed=2.850 overlap=2.305
+    severe(inter) A:LEU116:CD1 vs D:DC1:OP3 d=0.929 allowed=2.820 overlap=2.291
+    severe(inter) A:PHE14:CA vs B:LEU226:CG d=1.111 allowed=3.000 overlap=2.289
+    severe(inter) A:LEU89:CD2 vs A:ARG131:CB d=1.124 allowed=3.000 overlap=2.276
+    severe(inter) A:ASN153:ND2 vs B:THR41:C d=0.974 allowed=2.850 overlap=2.276
+  Clash hotspots:
+    B:LEU226:CD1 count=13 max_overlap=2.041
+    A:LYS36:CD count=10 max_overlap=2.771
+    C:DA3:C8 count=10 max_overlap=1.973
+    A:LYS36:CB count=10 max_overlap=1.396
+    B:LEU226:CD2 count=9 max_overlap=3.079
+    A:ILE228:CG2 count=9 max_overlap=2.396
+    B:LEU226:CB count=9 max_overlap=1.964
+    A:ASN153:OD1 count=9 max_overlap=1.729
+    A:LYS36:CE count=8 max_overlap=2.750
+    B:LEU226:CG count=8 max_overlap=2.648
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 5222
+n_residues: 556
+expected_bonds: 5398
+checked_bonds: 5461
+bond_length_violations: 34
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 291011
+clashes: 1255
+mild_clashes: 328
+moderate_clashes: 220
+severe_clashes: 707
+inter_residue_clashes: 1202
+percent_bond_length_violations: 0.6225965940303974
+percent_missing_bonds: 0.0
+percent_clashes: 0.4312551759211851
+percent_atoms_in_clashes: 23.745691306013022
+clashscore_per_1000_atoms: 240.32937571811567
+inter_residue_clashscore_per_1000_atoms: 230.1800076599004
+severe_clashscore_per_1000_atoms: 135.3887399463807
+inter_residue_severe_clashscore_per_1000_atoms: 131.94178475679817
+overall_issue_score: 4.60647176556431

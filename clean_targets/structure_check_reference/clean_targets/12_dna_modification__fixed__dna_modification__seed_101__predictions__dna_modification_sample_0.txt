@@ -1,0 +1,99 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/12_dna_modification__fixed/dna_modification/seed_101/predictions/dna_modification_sample_0.cif
+  atoms=975, residues=79
+  bonds: checked=1040 expected=1037 length_violations=122 (11.73%) missing=12 (1.16%) missing_atoms=0
+  clashes: total=289 mild=40 moderate=37 severe=212 pair_rate=0.83% atom_rate=21.33%
+  inter-residue clashes: total=74 mild=24 moderate=22 severe=28 pair_rate=0.24%
+  clashscore/1000 atoms: all=296.41 inter=75.90 severe=217.44 inter_severe=28.72
+  overall_issue_score=8.821 (lower is better)
+  Top bond length issues:
+    too_short C:DT8 P-OP2 observed=0.432 expected=1.500 [1.200, 1.875] severity=0.512 source=polymer
+    too_short B:DA2 C4-C5 observed=0.444 expected=1.390 [1.112, 1.737] severity=0.480 source=polymer
+    too_short B:6OG1 P-O5' observed=0.520 expected=1.600 [1.280, 2.000] severity=0.475 source=polymer
+    too_short C:DA11 C2-N3 observed=0.457 expected=1.340 [1.072, 1.675] severity=0.459 source=polymer
+    too_short B:DG8 C6-O6 observed=0.441 expected=1.240 [0.992, 1.550] severity=0.444 source=polymer
+    too_short C:DG9 C6-O6 observed=0.534 expected=1.240 [0.992, 1.550] severity=0.369 source=polymer
+    too_short B:DA7 C2-N3 observed=0.603 expected=1.340 [1.072, 1.675] severity=0.350 source=polymer
+    too_short B:DA9 C6-N6 observed=0.638 expected=1.340 [1.072, 1.675] severity=0.324 source=polymer
+    too_short C:DG2 C6-O6 observed=0.629 expected=1.240 [0.992, 1.550] severity=0.293 source=polymer
+    too_short B:DA5 C6-N6 observed=0.680 expected=1.340 [1.072, 1.675] severity=0.292 source=polymer
+    too_short B:DA14 N7-C5 observed=0.718 expected=1.350 [1.080, 1.688] severity=0.268 source=polymer
+    too_short B:DT10 C2-N3 observed=0.715 expected=1.340 [1.072, 1.675] severity=0.267 source=polymer
+    too_short C:DT13 C2-N3 observed=0.717 expected=1.340 [1.072, 1.675] severity=0.265 source=polymer
+    too_short C:DG2 P-O5' observed=0.861 expected=1.600 [1.280, 2.000] severity=0.262 source=polymer
+    too_short C:DA5 C2-N3 observed=0.724 expected=1.340 [1.072, 1.675] severity=0.260 source=polymer
+    too_short B:DA14 C6-N6 observed=0.732 expected=1.340 [1.072, 1.675] severity=0.254 source=polymer
+    too_short C:DA4 C6-N6 observed=0.735 expected=1.340 [1.072, 1.675] severity=0.252 source=polymer
+    too_short C:DA11 C6-N6 observed=0.742 expected=1.340 [1.072, 1.675] severity=0.246 source=polymer
+    too_short C:DG2 C2-N3 observed=0.763 expected=1.340 [1.072, 1.675] severity=0.230 source=polymer
+    too_short C:DA4 C2-N3 observed=0.769 expected=1.340 [1.072, 1.675] severity=0.226 source=polymer
+  Top missing bond issues:
+    missing_bond C:DG2 C4-N9 observed=2.324 threshold=1.987 severity=0.246
+    missing_bond C:DA5 C4-N9 observed=2.252 threshold=1.987 severity=0.194
+    missing_bond B:DA2 C4-N9 observed=2.249 threshold=1.987 severity=0.192
+    missing_bond C:DA4 C4-N9 observed=2.232 threshold=1.987 severity=0.180
+    missing_bond B:DA9 C4-N9 observed=2.214 threshold=1.987 severity=0.166
+    missing_bond B:DG8 C4-N9 observed=2.185 threshold=1.987 severity=0.145
+    missing_bond B:DA5 C4-N9 observed=2.140 threshold=1.987 severity=0.112
+    missing_bond C:DA12 C4-N9 observed=2.106 threshold=1.987 severity=0.087
+    missing_bond B:DA12 C4-N9 observed=2.102 threshold=1.987 severity=0.084
+    missing_bond C:DG9 C4-N9 observed=2.057 threshold=1.987 severity=0.052
+    missing_bond B:DA7 C4-N9 observed=2.034 threshold=1.987 severity=0.035
+    missing_bond C:DA11 C4-N9 observed=2.031 threshold=1.987 severity=0.033
+  Top clashes by overlap:
+    severe(intra) B:6OG1:N9 vs B:6OG1:N1 d=0.210 allowed=2.700 overlap=2.890
+    severe(intra) B:6OG1:C6 vs B:6OG1:C8 d=0.571 allowed=3.000 overlap=2.829
+    severe(intra) C:DA4:N9 vs C:DA4:C6 d=0.665 allowed=2.850 overlap=2.585
+    severe(intra) B:DA12:N9 vs B:DA12:C6 d=0.680 allowed=2.850 overlap=2.570
+    severe(intra) B:DA2:C8 vs B:DA2:N6 d=0.687 allowed=2.850 overlap=2.563
+    severe(intra) C:DA12:N9 vs C:DA12:C6 d=0.699 allowed=2.850 overlap=2.551
+    severe(intra) B:DA5:N9 vs B:DA5:C6 d=0.716 allowed=2.850 overlap=2.534
+    severe(intra) B:DG8:N9 vs B:DG8:C6 d=0.741 allowed=2.850 overlap=2.509
+    severe(intra) B:6OG1:O6 vs B:6OG1:C8 d=0.757 allowed=2.820 overlap=2.463
+    severe(intra) C:DG9:N9 vs C:DG9:C6 d=0.797 allowed=2.850 overlap=2.453
+    severe(intra) B:6OG1:O6 vs B:6OG1:C5 d=0.784 allowed=2.820 overlap=2.436
+    severe(intra) B:DA7:N9 vs B:DA7:C6 d=0.817 allowed=2.850 overlap=2.433
+    severe(intra) B:6OG1:N3 vs B:6OG1:C2 d=0.844 allowed=2.850 overlap=2.406
+    severe(intra) C:DA5:N9 vs C:DA5:C6 d=0.856 allowed=2.850 overlap=2.394
+    severe(intra) B:DA9:N9 vs B:DA9:C6 d=0.862 allowed=2.850 overlap=2.388
+    severe(intra) C:DA5:N9 vs C:DA5:N1 d=0.734 allowed=2.700 overlap=2.366
+    severe(intra) B:6OG1:C2 vs B:6OG1:N2 d=0.888 allowed=2.850 overlap=2.362
+    severe(intra) B:6OG1:C6 vs B:6OG1:O6 d=0.858 allowed=2.820 overlap=2.362
+    severe(intra) C:DA11:N9 vs C:DA11:N1 d=0.749 allowed=2.700 overlap=2.351
+    severe(intra) B:DA5:N9 vs B:DA5:N1 d=0.749 allowed=2.700 overlap=2.351
+  Clash hotspots:
+    B:6OG1:C8 count=13 max_overlap=2.829
+    B:6OG1:C6 count=13 max_overlap=2.829
+    B:6OG1:C1' count=11 max_overlap=1.516
+    B:6OG1:N1 count=10 max_overlap=2.890
+    B:6OG1:C2 count=10 max_overlap=2.406
+    B:6OG1:N9 count=9 max_overlap=2.890
+    B:6OG1:O6 count=9 max_overlap=2.463
+    B:6OG1:C5 count=9 max_overlap=2.436
+    B:6OG1:N3 count=9 max_overlap=2.406
+    B:6OG1:C count=9 max_overlap=2.324
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 975
+n_residues: 79
+expected_bonds: 1037
+checked_bonds: 1040
+bond_length_violations: 122
+missing_bonds: 12
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 34866
+clashes: 289
+mild_clashes: 40
+moderate_clashes: 37
+severe_clashes: 212
+inter_residue_clashes: 74
+percent_bond_length_violations: 11.73076923076923
+percent_missing_bonds: 1.1571841851494695
+percent_clashes: 0.8288877416394195
+percent_atoms_in_clashes: 21.333333333333332
+clashscore_per_1000_atoms: 296.4102564102564
+inter_residue_clashscore_per_1000_atoms: 75.8974358974359
+severe_clashscore_per_1000_atoms: 217.43589743589743
+inter_residue_severe_clashscore_per_1000_atoms: 28.71794871794872
+overall_issue_score: 8.82133398620653

@@ -1,0 +1,65 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s054_ptm_kcx__protenix_mini_default_v0.5.0/s054_ptm_kcx/seed_101/predictions/s054_ptm_kcx_sample_0.cif
+  atoms=63, residues=8
+  bonds: checked=55 expected=55 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=20 mild=1 moderate=0 severe=19 pair_rate=2.75% atom_rate=20.63%
+  inter-residue clashes: total=2 mild=1 moderate=0 severe=1 pair_rate=0.32%
+  clashscore/1000 atoms: all=317.46 inter=31.75 severe=301.59 inter_severe=15.87
+  overall_issue_score=3.241 (lower is better)
+  Top clashes by overlap:
+    severe(intra) A:KCX8:CX vs A:KCX8:OQ2 d=1.222 allowed=2.820 overlap=1.998
+    severe(intra) A:KCX8:CX vs A:KCX8:OQ1 d=1.234 allowed=2.820 overlap=1.986
+    severe(intra) A:KCX8:CG vs A:KCX8:CD d=1.418 allowed=3.000 overlap=1.982
+    severe(intra) A:KCX8:CA vs A:KCX8:CB d=1.426 allowed=3.000 overlap=1.974
+    severe(intra) A:KCX8:CB vs A:KCX8:CG d=1.458 allowed=3.000 overlap=1.942
+    severe(intra) A:KCX8:CD vs A:KCX8:CE d=1.470 allowed=3.000 overlap=1.930
+    severe(intra) A:KCX8:CE vs A:KCX8:NZ d=1.328 allowed=2.850 overlap=1.922
+    severe(intra) A:KCX8:NZ vs A:KCX8:CX d=1.402 allowed=2.850 overlap=1.848
+    severe(intra) A:KCX8:CA vs A:KCX8:CG d=2.334 allowed=3.000 overlap=1.066
+    severe(intra) A:KCX8:CB vs A:KCX8:CD d=2.409 allowed=3.000 overlap=0.991
+    severe(intra) A:KCX8:CE vs A:KCX8:CX d=2.452 allowed=3.000 overlap=0.948
+    severe(intra) A:KCX8:CD vs A:KCX8:NZ d=2.312 allowed=2.850 overlap=0.938
+    severe(intra) A:KCX8:CG vs A:KCX8:CE d=2.479 allowed=3.000 overlap=0.921
+    severe(intra) A:KCX8:CB vs A:KCX8:C d=2.506 allowed=3.000 overlap=0.894
+    severe(intra) A:KCX8:NZ vs A:KCX8:OQ2 d=2.200 allowed=2.670 overlap=0.870
+    severe(inter) A:LEU7:O vs A:KCX8:O d=2.205 allowed=2.640 overlap=0.835
+    severe(intra) A:KCX8:OQ1 vs A:KCX8:OQ2 d=2.208 allowed=2.640 overlap=0.832
+    severe(intra) A:KCX8:N vs A:KCX8:CB d=2.437 allowed=2.850 overlap=0.813
+    severe(intra) A:KCX8:NZ vs A:KCX8:OQ1 d=2.259 allowed=2.670 overlap=0.811
+    mild(inter) A:LEU7:O vs A:KCX8:C d=2.705 allowed=2.820 overlap=0.515
+  Clash hotspots:
+    A:KCX8:CB count=5 max_overlap=1.974
+    A:KCX8:NZ count=5 max_overlap=1.922
+    A:KCX8:CX count=4 max_overlap=1.998
+    A:KCX8:CD count=4 max_overlap=1.982
+    A:KCX8:CG count=4 max_overlap=1.982
+    A:KCX8:CE count=4 max_overlap=1.930
+    A:KCX8:OQ2 count=3 max_overlap=1.998
+    A:KCX8:OQ1 count=3 max_overlap=1.986
+    A:KCX8:CA count=2 max_overlap=1.974
+    A:KCX8:C count=2 max_overlap=0.894
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 63
+n_residues: 8
+expected_bonds: 55
+checked_bonds: 55
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 728
+clashes: 20
+mild_clashes: 1
+moderate_clashes: 0
+severe_clashes: 19
+inter_residue_clashes: 2
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 2.7472527472527473
+percent_atoms_in_clashes: 20.634920634920636
+clashscore_per_1000_atoms: 317.46031746031747
+inter_residue_clashscore_per_1000_atoms: 31.746031746031747
+severe_clashscore_per_1000_atoms: 301.58730158730157
+inter_residue_severe_clashscore_per_1000_atoms: 15.873015873015873
+overall_issue_score: 3.2414910858995136

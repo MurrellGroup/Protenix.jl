@@ -1,0 +1,67 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/07_protein_ligand_smiles__fixed/protein_ligand_smiles/seed_101/predictions/protein_ligand_smiles_sample_0.cif
+  atoms=429, residues=52
+  bonds: checked=411 expected=411 length_violations=1 (0.24%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=27 mild=10 moderate=4 severe=13 pair_rate=0.19% atom_rate=9.79%
+  inter-residue clashes: total=22 mild=7 moderate=4 severe=11 pair_rate=0.16%
+  clashscore/1000 atoms: all=62.94 inter=51.28 severe=30.30 inter_severe=25.64
+  overall_issue_score=1.719 (lower is better)
+  Top bond length issues:
+    too_short A:HIS51 C-O observed=0.924 expected=1.260 [1.008, 1.575] severity=0.067 source=polymer
+  Top clashes by overlap:
+    severe(inter) A:TRP15:CZ3 vs A:PHE34:CZ d=2.037 allowed=3.000 overlap=1.363
+    severe(inter) A:ARG32:O vs B:UNL1:O26 d=1.759 allowed=2.640 overlap=1.281
+    severe(inter) A:TRP15:CH2 vs A:PHE34:CE2 d=2.140 allowed=3.000 overlap=1.260
+    severe(intra) B:UNL1:N1 vs B:UNL1:C14 d=2.149 allowed=2.850 overlap=1.101
+    severe(inter) A:TRP15:CZ3 vs A:PHE34:CE2 d=2.350 allowed=3.000 overlap=1.050
+    severe(inter) A:PRO45:O vs B:UNL1:N10 d=2.022 allowed=2.670 overlap=1.048
+    severe(inter) A:MET33:CA vs B:UNL1:O26 d=2.245 allowed=2.820 overlap=0.975
+    severe(inter) A:ARG32:C vs B:UNL1:O26 d=2.367 allowed=2.820 overlap=0.853
+    severe(intra) B:UNL1:C14 vs B:UNL1:O21 d=2.432 allowed=2.820 overlap=0.788
+    severe(inter) A:TRP15:CZ2 vs A:PHE44:CD1 d=2.629 allowed=3.000 overlap=0.771
+    severe(inter) A:TRP15:CH2 vs A:PHE34:CZ d=2.658 allowed=3.000 overlap=0.742
+    severe(inter) A:ALA27:CB vs A:LEU49:CD1 d=2.670 allowed=3.000 overlap=0.730
+    severe(inter) A:PHE34:CD2 vs B:UNL1:P16 d=2.774 allowed=3.100 overlap=0.726
+    moderate(inter) A:MET33:CE vs B:UNL1:O12 d=2.560 allowed=2.820 overlap=0.660
+    moderate(inter) A:ALA22:CB vs A:TYR25:CD1 d=2.749 allowed=3.000 overlap=0.651
+    moderate(inter) A:TRP15:CE3 vs A:PHE34:CZ d=2.804 allowed=3.000 overlap=0.596
+    moderate(inter) A:LYS12:CA vs B:UNL1:O31 d=2.640 allowed=2.820 overlap=0.580
+    mild(inter) A:THR39:OG1 vs B:UNL1:P24 d=2.787 allowed=2.920 overlap=0.533
+    mild(intra) A:HIS51:O vs A:HIS51:CG d=2.707 allowed=2.820 overlap=0.513
+    mild(inter) A:MET33:C vs B:UNL1:O26 d=2.722 allowed=2.820 overlap=0.498
+  Clash hotspots:
+    B:UNL1:O26 count=4 max_overlap=1.281
+    A:PHE34:CZ count=3 max_overlap=1.363
+    B:UNL1:C14 count=3 max_overlap=1.101
+    A:TRP15:CZ3 count=2 max_overlap=1.363
+    A:PHE34:CE2 count=2 max_overlap=1.260
+    A:TRP15:CH2 count=2 max_overlap=1.260
+    A:TRP15:CZ2 count=2 max_overlap=0.771
+    B:UNL1:P24 count=2 max_overlap=0.533
+    A:ARG32:O count=1 max_overlap=1.281
+    B:UNL1:N1 count=1 max_overlap=1.101
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 429
+n_residues: 52
+expected_bonds: 411
+checked_bonds: 411
+bond_length_violations: 1
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 14293
+clashes: 27
+mild_clashes: 10
+moderate_clashes: 4
+severe_clashes: 13
+inter_residue_clashes: 22
+percent_bond_length_violations: 0.24330900243309003
+percent_missing_bonds: 0.0
+percent_clashes: 0.18890365913384174
+percent_atoms_in_clashes: 9.79020979020979
+clashscore_per_1000_atoms: 62.93706293706294
+inter_residue_clashscore_per_1000_atoms: 51.282051282051285
+severe_clashscore_per_1000_atoms: 30.303030303030305
+inter_residue_severe_clashscore_per_1000_atoms: 25.641025641025642
+overall_issue_score: 1.7186347567333857

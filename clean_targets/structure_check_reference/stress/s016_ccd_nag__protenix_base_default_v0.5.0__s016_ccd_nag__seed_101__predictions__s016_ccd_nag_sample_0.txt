@@ -1,0 +1,46 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/stress_outputs/s016_ccd_nag__protenix_base_default_v0.5.0/s016_ccd_nag/seed_101/predictions/s016_ccd_nag_sample_0.cif
+  atoms=75, residues=9
+  bonds: checked=75 expected=60 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=4 mild=2 moderate=0 severe=2 pair_rate=0.26% atom_rate=9.33%
+  inter-residue clashes: total=4 mild=2 moderate=0 severe=2 pair_rate=0.28%
+  clashscore/1000 atoms: all=53.33 inter=53.33 severe=26.67 inter_severe=26.67
+  overall_issue_score=2.837 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:MET1:N vs A:LEU7:O d=1.642 allowed=2.670 overlap=1.428
+    severe(inter) A:MET1:N vs A:LEU7:C d=2.455 allowed=2.850 overlap=0.795
+    mild(inter) A:GLY3:O vs B:NAG1:C1 d=2.798 allowed=2.820 overlap=0.422
+    mild(inter) A:MET1:O vs A:ALA2:C d=2.799 allowed=2.820 overlap=0.421
+  Clash hotspots:
+    A:MET1:N count=2 max_overlap=1.428
+    A:LEU7:O count=1 max_overlap=1.428
+    A:LEU7:C count=1 max_overlap=0.795
+    B:NAG1:C1 count=1 max_overlap=0.422
+    A:GLY3:O count=1 max_overlap=0.422
+    A:MET1:O count=1 max_overlap=0.421
+    A:ALA2:C count=1 max_overlap=0.421
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 75
+n_residues: 9
+expected_bonds: 60
+checked_bonds: 75
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 1516
+clashes: 4
+mild_clashes: 2
+moderate_clashes: 0
+severe_clashes: 2
+inter_residue_clashes: 4
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.2638522427440633
+percent_atoms_in_clashes: 9.333333333333334
+clashscore_per_1000_atoms: 53.333333333333336
+inter_residue_clashscore_per_1000_atoms: 53.333333333333336
+severe_clashscore_per_1000_atoms: 26.666666666666668
+inter_residue_severe_clashscore_per_1000_atoms: 26.666666666666668
+overall_issue_score: 2.8368794326241136

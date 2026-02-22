@@ -1,0 +1,51 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/19_protein_template__protenix_mini_tmpl_v0.5.0/protein_template/seed_101/predictions/protein_template_sample_0.cif
+  atoms=398, residues=51
+  bonds: checked=411 expected=411 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=6 mild=1 moderate=3 severe=2 pair_rate=0.05% atom_rate=2.51%
+  inter-residue clashes: total=6 mild=1 moderate=3 severe=2 pair_rate=0.05%
+  clashscore/1000 atoms: all=15.08 inter=15.08 severe=5.03 inter_severe=5.03
+  overall_issue_score=0.472 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:TYR25:O vs A:ALA29:CB d=2.320 allowed=2.820 overlap=0.900
+    severe(inter) A:SER50:O vs A:HIS51:ND1 d=2.266 allowed=2.670 overlap=0.804
+    moderate(inter) A:PHE37:CB vs A:THR40:CG2 d=2.756 allowed=3.000 overlap=0.644
+    moderate(inter) A:SER50:O vs A:HIS51:CG d=2.636 allowed=2.820 overlap=0.584
+    moderate(inter) A:TRP15:NE1 vs A:PHE44:CD1 d=2.698 allowed=2.850 overlap=0.552
+    mild(inter) A:SER50:O vs A:HIS51:CE1 d=2.798 allowed=2.820 overlap=0.422
+  Clash hotspots:
+    A:SER50:O count=3 max_overlap=0.804
+    A:TYR25:O count=1 max_overlap=0.900
+    A:ALA29:CB count=1 max_overlap=0.900
+    A:HIS51:ND1 count=1 max_overlap=0.804
+    A:THR40:CG2 count=1 max_overlap=0.644
+    A:PHE37:CB count=1 max_overlap=0.644
+    A:HIS51:CG count=1 max_overlap=0.584
+    A:PHE44:CD1 count=1 max_overlap=0.552
+    A:TRP15:NE1 count=1 max_overlap=0.552
+    A:HIS51:CE1 count=1 max_overlap=0.422
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 398
+n_residues: 51
+expected_bonds: 411
+checked_bonds: 411
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 13105
+clashes: 6
+mild_clashes: 1
+moderate_clashes: 3
+severe_clashes: 2
+inter_residue_clashes: 6
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.045784051888592144
+percent_atoms_in_clashes: 2.512562814070352
+clashscore_per_1000_atoms: 15.075376884422111
+inter_residue_clashscore_per_1000_atoms: 15.075376884422111
+severe_clashscore_per_1000_atoms: 5.025125628140704
+inter_residue_severe_clashscore_per_1000_atoms: 5.025125628140704
+overall_issue_score: 0.47236655644780356

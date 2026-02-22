@@ -1,0 +1,57 @@
+Structure check report: /home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/30_design_short_binder__pxdesign/global_run_0/30_design_short_binder/seed_101/predictions/30_design_short_binder_sample_0.cif
+  atoms=1090, residues=156
+  bonds: checked=1104 expected=1104 length_violations=0 (0.00%) missing=0 (0.00%) missing_atoms=0
+  clashes: total=12 mild=5 moderate=5 severe=2 pair_rate=0.02% atom_rate=2.02%
+  inter-residue clashes: total=12 mild=5 moderate=5 severe=2 pair_rate=0.02%
+  clashscore/1000 atoms: all=11.01 inter=11.01 severe=1.83 inter_severe=1.83
+  overall_issue_score=0.228 (lower is better)
+  Top clashes by overlap:
+    severe(inter) A:ARG70:NH1 vs A:LEU72:CD2 d=2.219 allowed=2.850 overlap=1.031
+    severe(inter) A:TYR40:CD2 vs A:MET99:CE d=2.441 allowed=3.000 overlap=0.959
+    moderate(inter) A:ILE49:CD1 vs A:ARG70:CA d=2.762 allowed=3.000 overlap=0.638
+    moderate(inter) A:TYR40:CE1 vs A:ASN47:OD1 d=2.590 allowed=2.820 overlap=0.630
+    moderate(inter) A:MET43:SD vs A:TYR96:CE1 d=2.881 allowed=3.100 overlap=0.619
+    moderate(inter) A:VAL5:O vs A:LYS108:CE d=2.606 allowed=2.820 overlap=0.614
+    moderate(inter) A:CYS24:SG vs A:CYS98:CB d=2.939 allowed=3.100 overlap=0.561
+    mild(inter) A:GLU42:OE1 vs A:MET99:CE d=2.719 allowed=2.820 overlap=0.501
+    mild(inter) A:MET43:SD vs A:TYR96:CZ d=3.043 allowed=3.100 overlap=0.457
+    mild(inter) A:ILE48:CD1 vs A:TYR96:CE2 d=2.971 allowed=3.000 overlap=0.429
+    mild(inter) A:TYR65:O vs A:ARG66:C d=2.794 allowed=2.820 overlap=0.426
+    mild(inter) A:ILE48:O vs A:ILE49:CG1 d=2.794 allowed=2.820 overlap=0.426
+  Clash hotspots:
+    A:MET99:CE count=2 max_overlap=0.959
+    A:MET43:SD count=2 max_overlap=0.619
+    A:LEU72:CD2 count=1 max_overlap=1.031
+    A:ARG70:NH1 count=1 max_overlap=1.031
+    A:TYR40:CD2 count=1 max_overlap=0.959
+    A:ILE49:CD1 count=1 max_overlap=0.638
+    A:ARG70:CA count=1 max_overlap=0.638
+    A:TYR40:CE1 count=1 max_overlap=0.630
+    A:ASN47:OD1 count=1 max_overlap=0.630
+    A:TYR96:CE1 count=1 max_overlap=0.619
+
+============================================================
+RAW SCORES (for regression checking)
+============================================================
+n_atoms: 1090
+n_residues: 156
+expected_bonds: 1104
+checked_bonds: 1104
+bond_length_violations: 0
+missing_bonds: 0
+missing_atoms_for_bonds: 0
+nonbonded_pairs_evaluated: 53577
+clashes: 12
+mild_clashes: 5
+moderate_clashes: 5
+severe_clashes: 2
+inter_residue_clashes: 12
+percent_bond_length_violations: 0.0
+percent_missing_bonds: 0.0
+percent_clashes: 0.022397670642253207
+percent_atoms_in_clashes: 2.018348623853211
+clashscore_per_1000_atoms: 11.009174311926605
+inter_residue_clashscore_per_1000_atoms: 11.009174311926605
+severe_clashscore_per_1000_atoms: 1.834862385321101
+inter_residue_severe_clashscore_per_1000_atoms: 1.834862385321101
+overall_issue_score: 0.22798951248242583
