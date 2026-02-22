@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s093_edge_act",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_ACT",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,31 @@
+[
+  {
+    "name": "s084_multi_prot_glycan",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_NAG",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_BMA",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_GAL",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s008_ccd_plp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_PLP",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s076_rna_mod_7mg",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "rnaSequence": {
+          "sequence": "AUGC",
+          "count": 1,
+          "modifications": [
+            {
+              "modificationType": "CCD_7MG",
+              "basePosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s041_ptm_sep",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_SEP",
+              "ptmPosition": 4
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

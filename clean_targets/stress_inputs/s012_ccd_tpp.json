@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s012_ccd_tpp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_TPP",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

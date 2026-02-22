@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s078_multi_prot_dna_atp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "dnaSequence": {
+          "sequence": "ATGC",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_ATP",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

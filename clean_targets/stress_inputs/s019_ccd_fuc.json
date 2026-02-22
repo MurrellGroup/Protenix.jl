@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s019_ccd_fuc",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_FUC",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

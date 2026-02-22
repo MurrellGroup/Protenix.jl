@@ -1,0 +1,29 @@
+[
+  {
+    "name": "s069_cov_lys_sam",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGKTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_SAM",
+          "count": 1
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": "1",
+        "position1": "4",
+        "atom1": "NZ",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "C"
+      }
+    ]
+  }
+]

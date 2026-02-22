@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s050_ptm_dal",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "AAGSTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_DAL",
+              "ptmPosition": 1
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

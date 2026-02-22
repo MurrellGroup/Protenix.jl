@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s091_edge_large_lig",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_RIF",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

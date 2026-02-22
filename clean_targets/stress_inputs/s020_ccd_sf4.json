@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s020_ccd_sf4",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_SF4",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,31 @@
+[
+  {
+    "name": "s082_multi_prot_lig_ion",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_HEM",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "ZN",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "FE",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s028_smi_aspirin",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CC(=O)Oc1ccccc1C(=O)O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

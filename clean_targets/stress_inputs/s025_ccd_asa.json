@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s025_ccd_asa",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_ASA",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

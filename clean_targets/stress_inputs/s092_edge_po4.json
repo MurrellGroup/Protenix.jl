@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s092_edge_po4",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_PO4",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

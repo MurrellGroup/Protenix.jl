@@ -1,0 +1,27 @@
+[
+  {
+    "name": "s089_edge_multi_ptm",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MSATMYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_SEP",
+              "ptmPosition": 2
+            },
+            {
+              "ptmType": "CCD_TPO",
+              "ptmPosition": 4
+            },
+            {
+              "ptmType": "CCD_MSE",
+              "ptmPosition": 5
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

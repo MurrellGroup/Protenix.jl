@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s016_ccd_nag",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_NAG",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

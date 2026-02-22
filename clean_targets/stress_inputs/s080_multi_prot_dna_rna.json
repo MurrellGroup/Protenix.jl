@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s080_multi_prot_dna_rna",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "dnaSequence": {
+          "sequence": "ATGC",
+          "count": 1
+        }
+      },
+      {
+        "rnaSequence": {
+          "sequence": "AUGC",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

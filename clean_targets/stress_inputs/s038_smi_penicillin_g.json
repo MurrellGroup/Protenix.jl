@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s038_smi_penicillin_g",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CC1(C)S[C@@H]2[C@H](NC(=O)Cc3ccccc3)C(=O)N2[C@@H]1C(=O)O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

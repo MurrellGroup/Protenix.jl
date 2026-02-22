@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s045_ptm_cso",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MACGTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_CSO",
+              "ptmPosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

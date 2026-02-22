@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s048_ptm_aly",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_ALY",
+              "ptmPosition": 8
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

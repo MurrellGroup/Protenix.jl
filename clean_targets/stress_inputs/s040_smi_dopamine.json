@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s040_smi_dopamine",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "NCCc1ccc(O)c(O)c1",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

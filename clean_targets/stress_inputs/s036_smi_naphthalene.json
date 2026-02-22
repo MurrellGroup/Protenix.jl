@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s036_smi_naphthalene",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "c1ccc2ccccc2c1",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

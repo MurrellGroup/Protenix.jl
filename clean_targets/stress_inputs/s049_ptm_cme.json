@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s049_ptm_cme",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MACGTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_CME",
+              "ptmPosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

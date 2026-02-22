@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s022_ccd_gol",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_GOL",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

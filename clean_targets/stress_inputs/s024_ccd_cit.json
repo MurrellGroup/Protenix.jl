@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s024_ccd_cit",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_CIT",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

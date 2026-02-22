@@ -1,0 +1,37 @@
+[
+  {
+    "name": "s064_cov_cys_fes",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MCCGTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_FES",
+          "count": 1
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": "1",
+        "position1": "2",
+        "atom1": "SG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "FE1"
+      },
+      {
+        "entity1": "1",
+        "position1": "3",
+        "atom1": "SG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "FE2"
+      }
+    ]
+  }
+]

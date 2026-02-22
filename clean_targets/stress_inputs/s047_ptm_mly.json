@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s047_ptm_mly",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_MLY",
+              "ptmPosition": 8
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

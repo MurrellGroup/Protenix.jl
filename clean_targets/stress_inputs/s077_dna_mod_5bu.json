@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s077_dna_mod_5bu",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "dnaSequence": {
+          "sequence": "ATGC",
+          "count": 1,
+          "modifications": [
+            {
+              "modificationType": "CCD_5BU",
+              "basePosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

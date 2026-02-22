@@ -1,0 +1,37 @@
+[
+  {
+    "name": "s090_edge_all_ions",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "CA",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "MG",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "ZN",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "FE",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

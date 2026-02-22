@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s021_ccd_fes",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_FES",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

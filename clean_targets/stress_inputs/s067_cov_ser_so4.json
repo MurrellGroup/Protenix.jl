@@ -1,0 +1,29 @@
+[
+  {
+    "name": "s067_cov_ser_so4",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MASGKYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_SO4",
+          "count": 1
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": "1",
+        "position1": "3",
+        "atom1": "OG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "S"
+      }
+    ]
+  }
+]

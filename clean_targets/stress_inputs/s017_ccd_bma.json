@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s017_ccd_bma",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_BMA",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

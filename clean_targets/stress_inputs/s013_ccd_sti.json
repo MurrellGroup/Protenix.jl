@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s013_ccd_sti",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_STI",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

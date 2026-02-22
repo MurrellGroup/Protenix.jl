@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s009_ccd_coa",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_COA",
+          "count": 1
+        }
+      }
+    ]
+  }
+]
