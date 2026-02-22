@@ -19,6 +19,9 @@ const CCDRefEntry = NamedTuple{
 const _CCD_REF_CACHE = Dict{String, CCDRefEntry}()
 const _CCD_STD_REF_CACHE_LOADED = Ref(false)
 
+# Bond cache: CCD code → Vector of (atom_name_1, atom_name_2) pairs (non-hydrogen only)
+const _CCD_BOND_CACHE = Dict{String, Vector{Tuple{String, String}}}()
+
 function _ordered_restype_names()
     max_id = maximum(values(STD_RESIDUES_WITH_GAP))
     return [STD_RESIDUES_WITH_GAP_ID_TO_NAME[i] for i in 0:max_id]
@@ -101,7 +104,7 @@ function _atom_to_tokatom_index(tokens::TokenArray, n_atom::Int)
     return out
 end
 
-function _frame_for_token(tok::Token, centre_atom::AtomRecord)
+function _frame_for_polymer_token(tok::Token, centre_atom::AtomRecord)
     if centre_atom.mol_type == "protein"
         required = ("N", "CA", "C")
     elseif centre_atom.mol_type == "dna" || centre_atom.mol_type == "rna"
@@ -117,6 +120,72 @@ function _frame_for_token(tok::Token, centre_atom::AtomRecord)
         push!(idxs, tok.atom_indices[pos])
     end
     return 1, idxs
+end
+
+"""
+Compute ligand/non-standard frame for a token using the 3 nearest atoms
+in the same ref_space_uid group (by reference coordinates).
+Matches Python Protenix's Featurizer.get_lig_frame().
+"""
+function _frame_for_lig_token(
+    tok::Token,
+    centre_atom_global_idx::Int,
+    group_atom_indices::Vector{Int},
+    ref_pos::Matrix{Float32},
+    ref_mask::Vector{Int},
+)
+    length(group_atom_indices) < 3 && return 0, [-1, centre_atom_global_idx - 1, -1]
+
+    # Find 3 nearest atoms to centre atom by reference coordinate distance
+    b_idx = centre_atom_global_idx
+    bx, by, bz = ref_pos[b_idx, 1], ref_pos[b_idx, 2], ref_pos[b_idx, 3]
+    dists = [(
+        (ref_pos[ai, 1] - bx)^2 + (ref_pos[ai, 2] - by)^2 + (ref_pos[ai, 3] - bz)^2,
+        ai,
+    ) for ai in group_atom_indices]
+    sort!(dists; by=first)
+
+    # dists[1] should be the centre atom itself (dist=0), dists[2] and dists[3] are neighbors
+    length(dists) < 3 && return 0, [-1, b_idx - 1, -1]
+    a_idx = dists[2][2]
+    c_idx = dists[3][2]
+    frame_atom_index = [a_idx - 1, b_idx - 1, c_idx - 1]  # 0-based
+
+    # Check ref_mask validity
+    all(ref_mask[idx + 1] != 0 for idx in frame_atom_index) || return 0, frame_atom_index
+
+    # Colinearity check
+    v1 = ref_pos[b_idx, :] .- ref_pos[a_idx, :]
+    v2 = ref_pos[c_idx, :] .- ref_pos[a_idx, :]
+    cross_prod = [
+        v1[2] * v2[3] - v1[3] * v2[2],
+        v1[3] * v2[1] - v1[1] * v2[3],
+        v1[1] * v2[2] - v1[2] * v2[1],
+    ]
+    cross_norm = sqrt(sum(x^2 for x in cross_prod))
+    cross_norm < 1e-5 && return 0, frame_atom_index
+
+    return 1, frame_atom_index
+end
+
+"""
+Compute ref_space_uid: each unique (chain_id, res_id) pair gets a sequential integer,
+matching Python Protenix's AddAtomArrayAnnot.add_ref_space_uid.
+All atoms sharing the same (chain_id, res_id) get the same uid.
+"""
+function _compute_ref_space_uid(atoms::Vector{AtomRecord})
+    uid = Vector{Int}(undef, length(atoms))
+    mapping = Dict{Tuple{String, Int}, Int}()
+    next_id = 0
+    for (i, a) in enumerate(atoms)
+        key = (a.chain_id, a.res_id)
+        if !haskey(mapping, key)
+            mapping[key] = next_id
+            next_id += 1
+        end
+        uid[i] = mapping[key]
+    end
+    return uid
 end
 
 function _condition_and_hotspot_features(centre_atoms::Vector{AtomRecord}, hotspots::Dict{String, Vector{Int}})
@@ -510,6 +579,94 @@ function _scan_ccd_for_codes!(needed_codes::Set{String}, ccd_path::AbstractStrin
     end
 end
 
+function _scan_ccd_for_bonds!(needed_codes::Set{String}, ccd_path::AbstractString)
+    isempty(needed_codes) && return
+    isfile(ccd_path) || return
+
+    current_code = ""
+    active = false
+    pending = nothing
+
+    open(ccd_path, "r") do io
+        while true
+            line = if pending === nothing
+                eof(io) ? nothing : readline(io)
+            else
+                x = pending
+                pending = nothing
+                x
+            end
+            line === nothing && break
+            s = strip(line)
+            isempty(s) && continue
+
+            if startswith(s, "data_")
+                current_code = uppercase(String(s[6:end]))
+                active = current_code in needed_codes
+                continue
+            end
+            active || continue
+
+            if s == "loop_"
+                headers = String[]
+                while !eof(io)
+                    h = strip(readline(io))
+                    startswith(h, "_") || (pending = h; break)
+                    push!(headers, h)
+                end
+                isempty(headers) && continue
+                all(startswith(h, "_chem_comp_bond.") for h in headers) || continue
+
+                findidx(name) = findfirst(==(name), headers)
+                idx_a1 = findidx("_chem_comp_bond.atom_id_1")
+                idx_a2 = findidx("_chem_comp_bond.atom_id_2")
+                if idx_a1 === nothing || idx_a2 === nothing
+                    continue
+                end
+                idx_a1 = idx_a1::Int
+                idx_a2 = idx_a2::Int
+
+                bonds = Tuple{String, String}[]
+                while true
+                    row_line = if pending === nothing
+                        eof(io) ? nothing : readline(io)
+                    else
+                        x = pending
+                        pending = nothing
+                        x
+                    end
+                    row_line === nothing && break
+                    rs = strip(row_line)
+                    isempty(rs) && continue
+                    if rs == "#" || rs == "loop_" || startswith(rs, "_") || startswith(rs, "data_")
+                        pending = row_line
+                        break
+                    end
+                    cols = _split_cif_row(row_line)
+                    length(cols) < length(headers) && continue
+                    a1 = String(cols[idx_a1])
+                    a2 = String(cols[idx_a2])
+                    push!(bonds, (a1, a2))
+                end
+                _CCD_BOND_CACHE[current_code] = bonds
+                delete!(needed_codes, current_code)
+                isempty(needed_codes) && return
+            end
+        end
+    end
+end
+
+function _ensure_ccd_bond_entries!(codes::Set{String})
+    missing = Set{String}()
+    for c in codes
+        haskey(_CCD_BOND_CACHE, c) || push!(missing, c)
+    end
+    isempty(missing) && return
+    ccd_path = _default_ccd_components_path()
+    isempty(ccd_path) && return
+    _scan_ccd_for_bonds!(missing, ccd_path)
+end
+
 function _ensure_ccd_ref_entries!(codes::Set{String})
     _load_ccd_std_ref_cache!()
     missing = Set{String}()
@@ -560,10 +717,88 @@ function _distogram_rep_atom_mask(atoms::Vector{AtomRecord}, tokens::TokenArray)
     return mask
 end
 
+function _compute_token_bonds(
+    atoms::Vector{AtomRecord},
+    atom_to_token_idx::Vector{Int},
+    ref_space_uid::Vector{Int},
+    n_token::Int,
+)
+    n = length(atoms)
+    token_bonds = zeros(Int, n_token, n_token)
+
+    # Classify each atom
+    polymer_types = Set(["protein", "dna", "rna"])
+    is_polymer = [a.mol_type in polymer_types for a in atoms]
+    is_std = [is_polymer[i] && haskey(STD_RESIDUES_PROTENIX, atoms[i].res_name) for i in 1:n]
+    is_unstd_polymer = [is_polymer[i] && !is_std[i] for i in 1:n]
+
+    # Load CCD bond data for all unique residue codes
+    codes_needing_bonds = Set{String}(uppercase(a.res_name) for a in atoms)
+    _ensure_ccd_bond_entries!(codes_needing_bonds)
+
+    # Build per-residue atom name → global atom index mapping
+    # Key: (chain_id, res_id, atom_name) → global atom index
+    atom_lookup = Dict{Tuple{String, Int, String}, Int}()
+    for (i, a) in enumerate(atoms)
+        atom_lookup[(a.chain_id, a.res_id, a.atom_name)] = i
+    end
+
+    # Iterate over each residue group and add CCD bonds
+    # Group atoms by (chain_id, res_id, res_name)
+    residue_groups = Dict{Tuple{String, Int}, Vector{Int}}()
+    for (i, a) in enumerate(atoms)
+        key = (a.chain_id, a.res_id)
+        if !haskey(residue_groups, key)
+            residue_groups[key] = Int[]
+        end
+        push!(residue_groups[key], i)
+    end
+
+    for (_, atom_indices) in residue_groups
+        isempty(atom_indices) && continue
+        a0 = atoms[atom_indices[1]]
+        code = uppercase(a0.res_name)
+        ccd_bonds = get(_CCD_BOND_CACHE, code, nothing)
+        ccd_bonds === nothing && continue
+
+        # Build local atom_name → global index for this residue
+        local_lookup = Dict{String, Int}()
+        for gi in atom_indices
+            local_lookup[atoms[gi].atom_name] = gi
+        end
+
+        for (a1_name, a2_name) in ccd_bonds
+            gi = get(local_lookup, a1_name, 0)
+            gj = get(local_lookup, a2_name, 0)
+            (gi == 0 || gj == 0) && continue
+
+            # Apply Python's filtering logic:
+            # Skip std-std polymer bonds
+            is_std[gi] && is_std[gj] && continue
+            # Skip std-unstd polymer bonds
+            (is_std[gi] && is_unstd_polymer[gj]) && continue
+            (is_std[gj] && is_unstd_polymer[gi]) && continue
+            # Skip inter-unstd polymer bonds (different ref_space_uid)
+            if is_unstd_polymer[gi] && is_unstd_polymer[gj]
+                ref_space_uid[gi] != ref_space_uid[gj] && continue
+            end
+
+            ti = atom_to_token_idx[gi] + 1  # 0-based → 1-based
+            tj = atom_to_token_idx[gj] + 1  # 0-based → 1-based
+            (ti < 1 || tj < 1 || ti > n_token || tj > n_token) && continue
+            token_bonds[ti, tj] = 1
+            token_bonds[tj, ti] = 1
+        end
+    end
+
+    return token_bonds
+end
+
 function _basic_atom_features(
     atoms::Vector{AtomRecord},
     tokens::TokenArray,
     atom_to_token_idx::Vector{Int},
+    ref_space_uid::Vector{Int},
     n_token::Int,
     rng::AbstractRNG,
     ref_pos_augment::Bool,
@@ -571,10 +806,11 @@ function _basic_atom_features(
     n = length(atoms)
     ref_pos, ref_charge, ref_mask = _ccd_reference_features(
         atoms,
-        atom_to_token_idx,
+        ref_space_uid,
         rng;
         ref_pos_augment = ref_pos_augment,
     )
+    token_bonds = _compute_token_bonds(atoms, atom_to_token_idx, ref_space_uid, n_token)
     return Dict(
         "is_protein" => [a.mol_type == "protein" for a in atoms],
         "is_ligand" => [a.mol_type == "ligand" for a in atoms],
@@ -586,7 +822,7 @@ function _basic_atom_features(
         "ref_mask" => ref_mask,
         "ref_charge" => ref_charge,
         "atom_to_tokatom_idx" => _atom_to_tokatom_index(tokens, n),
-        "token_bonds" => zeros(Int, n_token, n_token),
+        "token_bonds" => token_bonds,
     )
 end
 
@@ -655,12 +891,48 @@ function _build_feature_dict(
     design_token_mask = .!condition_token_mask
     conditional_templ, conditional_templ_mask = _compute_conditional_template(atoms, tokens, condition_token_mask)
 
+    ref_space_uid = _compute_ref_space_uid(atoms)
+
+    # Compute basic atom features first (needed for ligand frame computation)
+    basic_feats = _basic_atom_features(atoms, tokens, atom_to_token_idx, ref_space_uid, n_token, rng, ref_pos_augment)
+    # ref_pos from basic_feats is already augmented, but for frame computation we use it
+    # (Python also uses ref_pos after CCD lookup for frame computation)
+    ref_pos_for_frames = basic_feats["ref_pos"]  # (N_atom, 3)
+    ref_mask_for_frames = basic_feats["ref_mask"]  # (N_atom,)
+
+    # Build ref_space_uid -> atom indices mapping for ligand frame computation
+    uid_to_atom_indices = Dict{Int, Vector{Int}}()
+    for (i, a) in enumerate(atoms)
+        if a.mol_type == "ligand" || !(a.res_name in keys(STD_RESIDUES_PROTENIX))
+            uid = ref_space_uid[i]
+            if !haskey(uid_to_atom_indices, uid)
+                uid_to_atom_indices[uid] = Int[]
+            end
+            push!(uid_to_atom_indices[uid], i)
+        end
+    end
+
     has_frame = zeros(Int, n_token)
     frame_atom_index = fill(-1, n_token, 3)
     for (i, tok) in enumerate(tokens)
-        ok, frame = _frame_for_token(tok, centre_atoms[i])
-        has_frame[i] = ok
-        frame_atom_index[i, :] = ifelse.(frame .>= 0, frame .- 1, frame)
+        ca = centre_atoms[i]
+        if ca.mol_type != "ligand" && ca.res_name in keys(STD_RESIDUES_PROTENIX) && length(tok.atom_indices) > 1
+            # Standard polymer token: use N/CA/C or C1'/C3'/C4'
+            ok, frame = _frame_for_polymer_token(tok, ca)
+            has_frame[i] = ok
+            frame_atom_index[i, :] = ifelse.(frame .>= 0, frame .- 1, frame)
+        else
+            # Ligand/non-standard: use KDTree-like nearest-neighbor frame
+            centre_global_idx = tok.centre_atom_index
+            uid = ref_space_uid[centre_global_idx]
+            group_indices = get(uid_to_atom_indices, uid, Int[])
+            ok, frame = _frame_for_lig_token(
+                tok, centre_global_idx, group_indices,
+                ref_pos_for_frames, ref_mask_for_frames,
+            )
+            has_frame[i] = ok
+            frame_atom_index[i, :] = frame
+        end
     end
 
     feat = Dict{String, Any}(
@@ -690,10 +962,10 @@ function _build_feature_dict(
         "plddt" => zeros(Float32, n_token),
         "ref_element" => _ref_element_onehot(atoms),
         "ref_atom_name_chars" => _ref_atom_name_chars_onehot(atoms),
-        "ref_space_uid" => copy(atom_to_token_idx),
+        "ref_space_uid" => ref_space_uid,
     )
 
-    merge!(feat, _basic_atom_features(atoms, tokens, atom_to_token_idx, n_token, rng, ref_pos_augment))
+    merge!(feat, basic_feats)
     dims = Dict("N_token" => n_token, "N_atom" => n_atom, "N_msa" => n_msa)
     return feat, dims
 end
