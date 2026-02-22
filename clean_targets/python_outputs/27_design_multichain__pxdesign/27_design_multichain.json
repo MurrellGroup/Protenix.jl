@@ -1,0 +1,1 @@
+[{"name": "27_design_multichain", "condition": {"structure_file": "../structures/5o45.cif", "filter": {"chain_id": ["A", "B"], "crop": {"A": "1-100"}}, "msa": {}}, "hotspot": {"A": [10, 11, 45, 46], "B": [20, 30]}, "generation": [{"type": "protein", "length": 100, "count": 1}]}]

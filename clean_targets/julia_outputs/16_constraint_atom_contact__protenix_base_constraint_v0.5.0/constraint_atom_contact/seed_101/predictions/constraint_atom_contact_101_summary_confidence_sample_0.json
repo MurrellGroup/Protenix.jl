@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"constraint_atom_contact","seed":101,"sample_idx":0,"plddt_logits_shape":[50,626],"pae_logits_shape":[64,110,110],"pde_logits_shape":[64,110,110],"resolved_logits_shape":[2,626],"plddt_logits_maxprob_mean":0.33759799890006686,"resolved_logits_maxprob_mean":0.9836173719622318}

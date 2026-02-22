@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"ligand_file_sdf","seed":101,"sample_idx":0,"plddt_logits_shape":[50,431],"pae_logits_shape":[64,84,84],"pde_logits_shape":[64,84,84],"resolved_logits_shape":[2,431],"plddt_logits_maxprob_mean":0.06912162303797623,"resolved_logits_maxprob_mean":0.9949924542405935}

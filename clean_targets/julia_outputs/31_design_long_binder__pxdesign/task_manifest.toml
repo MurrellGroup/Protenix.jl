@@ -1,0 +1,5 @@
+[[tasks]]
+name = "31_design_long_binder"
+num_chains = 1
+structure_file = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif"
+generation_count = 1

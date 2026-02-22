@@ -1,0 +1,1 @@
+[{"name":"27_design_multichain","hotspot":{"B":[20,30],"A":[10,11,45,46]},"generation":[{"length":100,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-100"},"chain_id":["B","A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif","msa":{}}}]

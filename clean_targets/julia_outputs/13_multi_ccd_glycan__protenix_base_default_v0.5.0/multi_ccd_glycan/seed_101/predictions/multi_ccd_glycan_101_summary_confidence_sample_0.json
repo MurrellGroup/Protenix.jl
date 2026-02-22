@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"multi_ccd_glycan","seed":101,"sample_idx":0,"plddt_logits_shape":[50,437],"pae_logits_shape":[64,90,90],"pde_logits_shape":[64,90,90],"resolved_logits_shape":[2,437],"plddt_logits_maxprob_mean":0.06705787655840482,"resolved_logits_maxprob_mean":0.9830980936123782}

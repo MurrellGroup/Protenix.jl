@@ -1,0 +1,59 @@
+dump_dir = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/23_design_pdl1_hotspots__pxdesign"
+num_workers = 16
+gpu = true
+strict_weight_load = true
+use_deepspeed_evo_attention = false
+use_msa = true
+dtype = "bf16"
+download_cache = false
+use_fast_ln = true
+load_checkpoint_dir = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../release_data/checkpoint"
+seeds = [101]
+safetensors_weights_path = ""
+model_name = "pxdesign_v0.1.0"
+include_protenix_checkpoints = false
+raw_weights_dir = ""
+input_json_path = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../clean_targets/julia_outputs/23_design_pdl1_hotspots__pxdesign/23_design_pdl1_hotspots.json"
+
+[data]
+ccd_components_file = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../release_data/ccd_cache/components.v20240608.cif"
+ccd_components_rdkit_mol_file = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../release_data/ccd_cache/components.v20240608.cif.rdkit_mol.pkl"
+pdb_cluster_file = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/scripts/../../release_data/ccd_cache/clusters-by-entity-40.txt"
+
+[inference_noise_scheduler]
+sigma_data = 16.0
+s_min = 0.0004
+s_max = 160.0
+rho = 7.0
+
+[infer_setting]
+sample_diffusion_chunk_size = 1
+
+[sample_diffusion]
+noise_scale_lambda = 1.003
+N_step = 200
+gamma_min = 0.01
+gamma0 = 1.0
+N_sample = 1
+
+    [sample_diffusion.eta_schedule]
+    max = 2.5
+    min = 1.0
+    type = "piecewise_65"
+
+[model_scaffold]
+c_atom = 128
+c_token = 64
+atom_encoder_blocks = 3
+c_s = 64
+c_z = 32
+use_design_condition_embedder = true
+c_s_inputs = 128
+atom_encoder_heads = 4
+n_heads = 4
+c_atompair = 16
+n_blocks = 2
+auto_dims_from_weights = true
+atom_decoder_heads = 4
+enabled = true
+atom_decoder_blocks = 3

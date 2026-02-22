@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"protein_ion","seed":101,"sample_idx":0,"plddt_logits_shape":[50,401],"pae_logits_shape":[64,54,54],"pde_logits_shape":[64,54,54],"resolved_logits_shape":[2,401],"plddt_logits_maxprob_mean":0.06124940967430189,"resolved_logits_maxprob_mean":0.9679926244978073}

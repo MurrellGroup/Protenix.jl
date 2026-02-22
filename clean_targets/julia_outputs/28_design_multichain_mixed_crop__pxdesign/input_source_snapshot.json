@@ -1,0 +1,1 @@
+[{"name":"28_design_multichain_mixed_crop","hotspot":{"A":[10,45]},"generation":[{"length":100,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-50,80-100"},"chain_id":["B","A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif","msa":{}}}]
