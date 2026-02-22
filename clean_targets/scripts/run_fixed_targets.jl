@@ -3,9 +3,7 @@
 # Run previously-broken targets with all fixes applied.
 # Output goes to a CLEAN directory with no old artifacts.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/clean_targets/scripts/run_fixed_targets.jl
+# Usage: julia --project=<env> clean_targets/scripts/run_fixed_targets.jl
 
 using CUDA, cuDNN
 using Flux

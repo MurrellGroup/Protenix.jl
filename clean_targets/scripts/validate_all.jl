@@ -2,9 +2,7 @@
 #
 # Bond check + comparison for all clean_targets outputs.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/PXDesign.jl
-#   julia --project=. clean_targets/scripts/validate_all.jl [target_number]
+# Usage: julia --project=<env> clean_targets/scripts/validate_all.jl [target_number]
 #
 # Validates:
 #   1. Bond geometry (backbone + sidechain) for all CIF files

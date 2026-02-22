@@ -2,9 +2,7 @@
 #
 # Design model (scaffold inference) on GPU with random weights.
 #
-# Run from ka_run_env:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/scripts/design_gpu_only.jl
+# Usage: julia --project=<env> scripts/design_gpu_only.jl
 #
 using CUDA, cuDNN  # Must load GPU backends before Flux
 using Flux

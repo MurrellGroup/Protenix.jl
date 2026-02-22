@@ -5,7 +5,7 @@
       "sequence": "MGSSHHHHHHSSGLVPRGSHMSGKIQHKAVVPAPSRIPLTLSEIEDLRRKGFNQTEIAELYGVTRQAVSWHKKTYGGRLTTRQIVQQNWPWDTRKPHDKSKAFQRLRDHGEYMRVGSFRTMSEDKKKRLLSWWKMLRDNDLVLEFDPSIEPYEGMAGGGFRYVPRDISDDDLLIRVNEHTQLTAEGELLWSWPDDIEELLSEP",
       "count": 1,
       "msa": {
-        "precomputed_msa_dir": "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/msa/7r6r_chain1",
+        "precomputed_msa_dir": "../msa/7r6r_chain1",
         "pairing_db": "uniref100"
       }
     }}

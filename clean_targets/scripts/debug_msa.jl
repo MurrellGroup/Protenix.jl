@@ -1,7 +1,6 @@
 #!/usr/bin/env julia
 # Debug MSA feature building for target 17.
-# Usage: cd /home/claudey/FixingKAFA/ka_run_env
-#        julia --project=. ../PXDesign.jl/clean_targets/scripts/debug_msa.jl
+# Usage: julia --project=<env> clean_targets/scripts/debug_msa.jl
 
 using PXDesign
 using Statistics

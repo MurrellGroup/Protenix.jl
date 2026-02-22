@@ -6,15 +6,15 @@ This directory contains the definitive validation suite for achieving full featu
 
 ```bash
 # Run all targets through Python Protenix (generates reference outputs)
-cd /home/claudey/FixingKAFA/PXDesign.jl
+cd path/to/PXDesign.jl
 bash clean_targets/scripts/run_all_python.sh
 
 # Run a single target
 bash clean_targets/scripts/run_all_python.sh 01
 
 # Run all targets through Julia PXDesign
-cd /home/claudey/FixingKAFA/ka_run_env
-julia --project=. ../PXDesign.jl/clean_targets/scripts/run_all_julia.jl
+cd path/to/your-julia-env
+julia --project=. path/to/PXDesign.jl/clean_targets/scripts/run_all_julia.jl
 
 # Validate all outputs (bond geometry + comparison)
 julia --project=. ../PXDesign.jl/clean_targets/scripts/validate_all.jl

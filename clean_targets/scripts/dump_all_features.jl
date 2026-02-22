@@ -2,9 +2,7 @@
 #
 # Dump features for key targets into a clean directory.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/clean_targets/scripts/dump_all_features.jl
+# Usage: julia --project=<env> clean_targets/scripts/dump_all_features.jl
 
 using MoleculeFlow
 using PXDesign

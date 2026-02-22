@@ -2,9 +2,7 @@
 #
 # End-to-end GPU demo: folding and design models with random weights.
 #
-# Run from ka_run_env:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/scripts/e2e_gpu.jl
+# Usage: julia --project=<env> scripts/e2e_gpu.jl
 #
 using CUDA, cuDNN  # Must load GPU backends before Flux
 using Flux

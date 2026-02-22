@@ -2,6 +2,6 @@
   "name": "ligand_file_sdf",
   "sequences": [
     {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
-    {"ligand": {"ligand": "FILE_/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/ligands/compounds-3d-R.sdf", "count": 1}}
+    {"ligand": {"ligand": "FILE_../ligands/compounds-3d-R.sdf", "count": 1}}
   ]
 }]

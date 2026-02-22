@@ -370,6 +370,17 @@ function resolve_model_spec(model_name::AbstractString)
     error("Unsupported model_name '$key'. Supported models: $supported")
 end
 
+"""
+    recommended_params(model_name; use_default_params=true, cycle=nothing, step=nothing,
+                       sample=nothing, use_msa=nothing) → NamedTuple
+
+Return recommended inference parameters for `model_name`. When `use_default_params=true`,
+the model's registered defaults are used and individual overrides are ignored. Set
+`use_default_params=false` to selectively override `cycle`, `step`, `sample`, or `use_msa`.
+
+Returns a NamedTuple with fields: `model_name`, `family`, `cycle`, `step`, `sample`,
+`use_msa`, `needs_esm_embedding`.
+"""
 function recommended_params(
     model_name::AbstractString;
     use_default_params::Bool = true,
@@ -400,7 +411,23 @@ function recommended_params(
 end
 
 """
-Return sorted model metadata for discoverability in CLIs/UIs.
+    list_supported_models() → Vector{NamedTuple}
+
+Return sorted metadata for all registered Protenix model variants.
+
+Each entry is a NamedTuple with fields: `model_name`, `family`, `default_cycle`,
+`default_step`, `default_sample`, `default_use_msa`, `needs_esm_embedding`.
+
+# Example
+
+```julia
+julia> list_supported_models()
+7-element Vector{NamedTuple}:
+ (model_name = "protenix_base_constraint_v0.5.0", family = :base, ...)
+ (model_name = "protenix_base_default_v0.5.0", family = :base, ...)
+ (model_name = "protenix_mini_default_v0.5.0", family = :mini, ...)
+ ...
+```
 """
 function list_supported_models()
     names = sort!(collect(keys(MODEL_SPECS)))
@@ -2952,6 +2979,25 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
     return records
 end
 
+"""
+    predict_json(input; out_dir="./output", model_name="protenix_base_default_v0.5.0",
+                 seeds=[101], gpu=false, cycle=nothing, step=nothing, sample=nothing,
+                 use_msa=nothing, strict=true) → Vector{PredictJSONRecord}
+
+Run structure prediction on one or more JSON input files. `input` can be a path to a
+single JSON file or a directory containing JSON files. Each task × seed combination
+produces a separate prediction.
+
+Returns a vector of `PredictJSONRecord` named tuples, each containing:
+`(input_json, task_name, seed, prediction_dir, cif_paths)`.
+
+# Example
+
+```julia
+records = predict_json("inputs/complex.json"; model_name="protenix_base_default_v0.5.0",
+                       out_dir="./output", seeds=[101, 102], gpu=true)
+```
+"""
 function predict_json(
     input::AbstractString;
     out_dir::AbstractString = "./output",
@@ -3054,6 +3100,25 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
     return records
 end
 
+"""
+    predict_sequence(sequence; out_dir="./output", model_name="protenix_base_default_v0.5.0",
+                     seeds=[101], gpu=false, task_name="protenix_sequence", chain_id="A",
+                     esm_token_embedding=nothing, cycle=nothing, step=nothing, sample=nothing,
+                     use_msa=nothing, strict=true) → Vector{PredictSequenceRecord}
+
+Run structure prediction on a single protein sequence string. Each seed produces a
+separate prediction.
+
+Returns a vector of `PredictSequenceRecord` named tuples, each containing:
+`(task_name, seed, prediction_dir, cif_paths)`.
+
+# Example
+
+```julia
+records = predict_sequence("ACDEFGHIKLMNPQRSTVWY";
+                           model_name="protenix_mini_default_v0.5.0", gpu=true)
+```
+"""
 function predict_sequence(
     sequence::AbstractString;
     out_dir::AbstractString = "./output",
@@ -3093,6 +3158,24 @@ function predict_sequence(
     return predict_sequence(sequence, seq_opts)
 end
 
+"""
+    convert_structure_to_infer_json(input; out_dir="./output", altloc="first",
+                                   assembly_id=nothing) → Vector{String}
+
+Convert PDB or mmCIF structure files into Protenix inference JSON format. `input` can be
+a single file path or a directory of structure files (`.pdb`, `.cif`, `.mmcif`).
+
+When `assembly_id` is provided for mmCIF files, the corresponding bioassembly is expanded
+with per-chain copy counts.
+
+Returns paths to the written JSON files.
+
+# Example
+
+```julia
+paths = convert_structure_to_infer_json("structures/5o45.cif"; out_dir="./json_inputs")
+```
+"""
 function convert_structure_to_infer_json(
     input::AbstractString;
     out_dir::AbstractString = "./output",
@@ -3153,6 +3236,26 @@ function convert_structure_to_infer_json(
     return out_paths
 end
 
+"""
+    add_precomputed_msa_to_json(input_json; out_dir="./output", precomputed_msa_dir,
+                                pairing_db="uniref100") → Vector{String}
+
+Attach a precomputed MSA directory to an existing inference JSON file. Adds
+`msa.precomputed_msa_dir` and `msa.pairing_db` fields to each `proteinChain` entity
+in every task.
+
+The MSA directory should contain `non_pairing.a3m` (and `pairing.a3m` for multi-chain).
+The original JSON task-container shape (object/array/tasks-wrapper) is preserved in output.
+
+Returns paths to the written output JSON files.
+
+# Example
+
+```julia
+paths = add_precomputed_msa_to_json("input.json";
+            precomputed_msa_dir="msa/7r6r_chain1", out_dir="./with_msa")
+```
+"""
 function add_precomputed_msa_to_json(
     input_json::AbstractString;
     out_dir::AbstractString = "./output",
@@ -3230,9 +3333,20 @@ function Base.show(io::IO, h::ProtenixHandle)
 end
 
 """
-    load_protenix(model_name="protenix_base_default_v0.5.0"; gpu=false, strict=true)
+    load_protenix(model_name="protenix_base_default_v0.5.0"; gpu=false, strict=true) → ProtenixHandle
 
-Load a Protenix model and return a reusable [`ProtenixHandle`](@ref).
+Load a Protenix model and return a reusable [`ProtenixHandle`](@ref). Weights are
+downloaded from HuggingFace (`MurrellLab/PXDesign.jl`) on first use and cached locally.
+Set `PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=true` for offline mode after prefetching.
+
+# Arguments
+- `model_name::AbstractString`: one of the supported model names (see `list_supported_models()`)
+- `gpu::Bool`: move model parameters to GPU after loading
+- `strict::Bool`: enforce strict safetensors key coverage (recommended)
+
+# Returns
+A `ProtenixHandle` containing the loaded model, family, params, and GPU state.
+Pass it to `fold()` for repeated predictions without reloading weights.
 
 # Examples
 

@@ -2,11 +2,9 @@
 #
 # Compare Python vs Julia feature tensors for parity.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/clean_targets/scripts/compare_features.jl \
-#       ../PXDesign.jl/clean_targets/feature_dumps/python/protein_ligand_ccd_features.pt \
-#       ../PXDesign.jl/clean_targets/feature_dumps/julia/protein_ligand_ccd_features.jld2
+# Usage: julia --project=<env> clean_targets/scripts/compare_features.jl \
+#       clean_targets/feature_dumps/python/<name>_features.pt \
+#       clean_targets/feature_dumps/julia/<name>_features.jld2
 
 using JLD2
 using PyCall

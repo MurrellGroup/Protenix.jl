@@ -4,8 +4,8 @@ set -euo pipefail
 # Run all clean_targets through Python Protenix/PXDesign on GPU.
 # Usage: bash clean_targets/scripts/run_python_gpu.sh [target_number]
 
-ROOT="/home/claudey/FixingKAFA/PXDesign.jl"
-PYTHON="/home/claudey/venvs/python_esmfold/bin/python3"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+PYTHON="${PXDESIGN_PYTHON_VENV:?Set PXDESIGN_PYTHON_VENV}/bin/python3"
 export PYTHONPATH="$ROOT/.external/Protenix:${PYTHONPATH:-}"
 
 INPUTS="$ROOT/clean_targets/inputs"

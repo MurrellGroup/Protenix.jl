@@ -2,9 +2,7 @@
 #
 # End-to-end demo: folding and design models on GPU with random weights.
 #
-# Run from ka_run_env:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/scripts/e2e_demo.jl
+# Usage: julia --project=<env> scripts/e2e_demo.jl
 #
 ENV["JULIA_DEBUG"] = ""  # suppress debug noise
 using CUDA, cuDNN

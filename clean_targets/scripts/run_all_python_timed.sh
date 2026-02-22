@@ -5,11 +5,11 @@ set -euo pipefail
 # Records per-target wall-clock times for comparison with Julia.
 #
 # Usage:
-#   cd /home/claudey/FixingKAFA/PXDesign.jl
+#   cd path/to/PXDesign.jl
 #   bash clean_targets/scripts/run_all_python_timed.sh [target_number]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-VENV="/home/claudey/venvs/python_esmfold"
+VENV="${PXDESIGN_PYTHON_VENV:?Set PXDESIGN_PYTHON_VENV to your Python venv path}"
 export PATH="$VENV/bin:$PATH"
 export PYTHONPATH="$ROOT/.external/Protenix:${PYTHONPATH:-}"
 export PROTENIX_DATA_ROOT_DIR="$ROOT/release_data/ccd_cache"

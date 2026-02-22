@@ -2,9 +2,7 @@
 #
 # Stress test: run 100 diverse inputs through both protenix_mini and protenix_base.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   /home/claudey/.julia/juliaup/julia-1.11.8+0.aarch64.linux.gnu/bin/julia --project=. ../PXDesign.jl/clean_targets/scripts/run_stress_test.jl
+# Usage: julia --project=<env> clean_targets/scripts/run_stress_test.jl
 
 using CUDA, cuDNN
 using Flux

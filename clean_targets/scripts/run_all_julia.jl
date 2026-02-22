@@ -2,9 +2,7 @@
 #
 # Run all clean_targets through Julia PXDesign.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/clean_targets/scripts/run_all_julia.jl [target_number]
+# Usage: julia --project=<env> clean_targets/scripts/run_all_julia.jl [target_number]
 #
 # If a target number is given (e.g. "01"), only that target is run.
 # Otherwise, all targets that Julia currently supports are attempted.

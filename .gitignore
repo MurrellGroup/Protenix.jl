@@ -16,3 +16,5 @@ clean_targets/python_outputs/
 clean_targets/stress_outputs/
 clean_targets/stress_cif_results/
 esm_embeddings/
+clean_targets/*_run_log.txt
+clean_targets/*.log

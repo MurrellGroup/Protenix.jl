@@ -4,11 +4,9 @@
 # WITHOUT running the model forward pass. Produces JLD2 files with
 # all featurization tensors for parity comparison against Python.
 #
-# Usage:
-#   cd /home/claudey/FixingKAFA/ka_run_env
-#   julia --project=. ../PXDesign.jl/clean_targets/scripts/dump_julia_features.jl \
-#       ../PXDesign.jl/clean_targets/inputs/06_protein_ligand_ccd.json \
-#       ../PXDesign.jl/clean_targets/feature_dumps/julia
+# Usage: julia --project=<env> clean_targets/scripts/dump_julia_features.jl \
+#       clean_targets/inputs/06_protein_ligand_ccd.json \
+#       clean_targets/feature_dumps/julia
 
 using MoleculeFlow  # triggers PXDesignMoleculeFlowExt for SMILES ligand bonds + 3D coords
 using PXDesign
