@@ -6,6 +6,7 @@ using Flux: @layer
 
 import ..Embedders: ConditionTemplateEmbedder, condition_template_embedding
 import ..AtomAttentionModule: AtomAttentionEncoder
+import ..FeatureViews: as_atom_attention_input
 
 export DesignAtomAttentionEncoder, InputFeatureEmbedderDesign, DesignConditionEmbedder
 
@@ -91,7 +92,8 @@ function (embedder::InputFeatureEmbedderDesign)(input_feature_dict::AbstractDict
     add_feat = fill!(similar(restype, Float32, 4, n_token), 0f0)
     add_feat[1, :] .= 1f0
 
-    a_token, _, _, _ = embedder.atom_attention_encoder(input_feature_dict)  # (c_token, N_token)
+    atom_input = as_atom_attention_input(input_feature_dict)
+    a_token, _, _, _ = embedder.atom_attention_encoder(atom_input)  # (c_token, N_token)
     size(a_token, 2) == n_token || error("Atom/token embedding count mismatch: $(size(a_token, 2)) vs $n_token")
 
     # Concatenate along dim 1 (features): (c_token + 46, N_token)

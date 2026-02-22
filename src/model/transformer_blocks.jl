@@ -120,6 +120,7 @@ end
 
 function _window_keys(a::AbstractArray{Float32}, n_queries::Int, n_keys::Int)
     # a: (c, N) — extract overlapping key windows: (c, n_keys, n_trunks)
+    # GPU-native: pad on device, then slice views into output
     c = size(a, 1)
     N = size(a, 2)
     n_trunks = cld(N, n_queries)
@@ -127,21 +128,17 @@ function _window_keys(a::AbstractArray{Float32}, n_queries::Int, n_keys::Int)
     total_padded = (n_trunks - 1) * n_queries + n_keys
     right_pad = total_padded - N - left
 
-    a_cpu = Array(a)
-    a_padded = cat(
-        zeros(Float32, c, left),
-        a_cpu,
-        zeros(Float32, c, max(0, right_pad));
-        dims = 2,
-    )
+    # Pad on device (stays on GPU if a is CuArray)
+    left_pad = fill!(similar(a, Float32, c, left), 0f0)
+    right_pad_arr = fill!(similar(a, Float32, c, max(0, right_pad)), 0f0)
+    a_padded = cat(left_pad, a, right_pad_arr; dims = 2)
 
-    out = zeros(Float32, c, n_keys, n_trunks)
+    out = similar(a, Float32, c, n_keys, n_trunks)
     for b in 1:n_trunks
         start = (b - 1) * n_queries + 1
-        out[:, :, b] = a_padded[:, start:(start + n_keys - 1)]
+        out[:, :, b] .= @view a_padded[:, start:(start + n_keys - 1)]
     end
-
-    return copyto!(similar(a, Float32, size(out)...), out)
+    return out
 end
 
 function _create_window_mask(n_atom::Int, n_queries::Int, n_keys::Int)
@@ -164,6 +161,7 @@ end
 function _window_pair_bias(z_bias::AbstractArray{Float32}, n_queries::Int, n_keys::Int)
     # z_bias: (n_heads, N_q, N_k) or (n_heads, N_q, N_k, B)
     # Output: (n_heads, n_queries, n_keys, n_trunks) or (n_heads, n_queries, n_keys, n_trunks * B)
+    # GPU-native: pad and slice on device
     n_heads = size(z_bias, 1)
     N = size(z_bias, 2)
     has_batch = ndims(z_bias) == 4
@@ -175,44 +173,41 @@ function _window_pair_bias(z_bias::AbstractArray{Float32}, n_queries::Int, n_key
     total_padded_k = (n_trunks - 1) * n_queries + n_keys
     right_pad_k = total_padded_k - N - left
 
+    function _pad_and_window_3d(z3d)
+        # z3d: (n_heads, N, N) on device
+        if padded_q > N
+            z3d = cat(z3d, fill!(similar(z3d, Float32, n_heads, padded_q - N, size(z3d, 3)), 0f0); dims = 2)
+        end
+        z3d = cat(
+            fill!(similar(z3d, Float32, n_heads, size(z3d, 2), left), 0f0),
+            z3d,
+            fill!(similar(z3d, Float32, n_heads, size(z3d, 2), max(0, right_pad_k)), 0f0);
+            dims = 3,
+        )
+        return z3d
+    end
+
     if has_batch
-        out = zeros(Float32, n_heads, n_queries, n_keys, n_trunks * B)
+        out = similar(z_bias, Float32, n_heads, n_queries, n_keys, n_trunks * B)
+        fill!(out, 0f0)
         for bi in 1:B
-            z_cpu = Array(z_bias[:, :, :, bi])
-            if padded_q > N
-                z_cpu = cat(z_cpu, zeros(Float32, n_heads, padded_q - N, size(z_cpu, 3)); dims = 2)
-            end
-            z_cpu = cat(
-                zeros(Float32, n_heads, size(z_cpu, 2), left),
-                z_cpu,
-                zeros(Float32, n_heads, size(z_cpu, 2), max(0, right_pad_k));
-                dims = 3,
-            )
+            zs = _pad_and_window_3d(z_bias[:, :, :, bi])
             for t in 1:n_trunks
                 q_start = (t - 1) * n_queries + 1
                 k_start = (t - 1) * n_queries + 1
-                out[:, :, :, (bi - 1) * n_trunks + t] = z_cpu[:, q_start:(q_start + n_queries - 1), k_start:(k_start + n_keys - 1)]
+                out[:, :, :, (bi - 1) * n_trunks + t] .= @view zs[:, q_start:(q_start + n_queries - 1), k_start:(k_start + n_keys - 1)]
             end
         end
-        return copyto!(similar(z_bias, Float32, size(out)...), out)
+        return out
     else
-        z_cpu = Array(z_bias)
-        if padded_q > N
-            z_cpu = cat(z_cpu, zeros(Float32, n_heads, padded_q - N, size(z_cpu, 3)); dims = 2)
-        end
-        z_cpu = cat(
-            zeros(Float32, n_heads, size(z_cpu, 2), left),
-            z_cpu,
-            zeros(Float32, n_heads, size(z_cpu, 2), max(0, right_pad_k));
-            dims = 3,
-        )
-        out = zeros(Float32, n_heads, n_queries, n_keys, n_trunks)
+        zs = _pad_and_window_3d(z_bias)
+        out = similar(z_bias, Float32, n_heads, n_queries, n_keys, n_trunks)
         for t in 1:n_trunks
             q_start = (t - 1) * n_queries + 1
             k_start = (t - 1) * n_queries + 1
-            out[:, :, :, t] = z_cpu[:, q_start:(q_start + n_queries - 1), k_start:(k_start + n_keys - 1)]
+            out[:, :, :, t] .= @view zs[:, q_start:(q_start + n_queries - 1), k_start:(k_start + n_keys - 1)]
         end
-        return copyto!(similar(z_bias, Float32, size(out)...), out)
+        return out
     end
 end
 

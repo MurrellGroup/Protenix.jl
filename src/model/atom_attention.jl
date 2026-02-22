@@ -22,7 +22,7 @@ function _matrix_f32(x, name::String)
         return permutedims(m)  # (256, N_atom)
     end
     x isa AbstractMatrix || error("$name must be a matrix, got $(typeof(x))")
-    return permutedims(Float32.(x))  # (features, N) — features-first
+    return Float32.(x)  # caller provides features-first: (features, N)
 end
 
 function _vector_i(x, name::String, n::Int)

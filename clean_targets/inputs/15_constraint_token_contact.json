@@ -1,0 +1,16 @@
+[{
+  "name": "constraint_token_contact",
+  "sequences": [
+    {"proteinChain": {"sequence": "YMLDLQPETTDLYCGGGGSGGGGSGGGGSIQRTPKIQVYSRHPAENGKSNFLNCYVSGFHPSDIEVDLLKNGERIEKVEH", "count": 1}},
+    {"proteinChain": {"sequence": "EVKLVESGGGLVQPGGSLRLSCAASGSIFSINTMGWYRQTPGKQRDLVAD", "count": 1}}
+  ],
+  "constraint": {
+    "contact": [
+      {
+        "residue1": ["1", 1, 72],
+        "residue2": ["2", 1, 45],
+        "max_distance": 15
+      }
+    ]
+  }
+}]

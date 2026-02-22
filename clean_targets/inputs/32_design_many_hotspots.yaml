@@ -1,0 +1,12 @@
+# Target 32: Many Hotspots
+# Dense hotspot specification (many residues emphasized)
+# Tests: heavy hotspot masking, model behavior with strong guidance
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-116"]
+      hotspots: [10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 99, 107]
+
+binder_length: 80

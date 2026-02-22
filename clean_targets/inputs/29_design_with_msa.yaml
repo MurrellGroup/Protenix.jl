@@ -1,0 +1,14 @@
+# Target 29: With MSA
+# Target with precomputed MSA for target chain
+# Tests: MSA loading in design context, MSA-informed conditioning
+# Required for extended/preview mode evaluation
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-116"]
+      hotspots: [40, 99, 107]
+      msa: "../msa/PDL1_chain_A"
+
+binder_length: 80

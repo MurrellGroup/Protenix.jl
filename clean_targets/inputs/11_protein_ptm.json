@@ -1,0 +1,13 @@
+[{
+  "name": "protein_ptm",
+  "sequences": [
+    {"proteinChain": {
+      "sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH",
+      "count": 1,
+      "modifications": [
+        {"ptmType": "CCD_HY3", "ptmPosition": 1},
+        {"ptmType": "CCD_P1L", "ptmPosition": 5}
+      ]
+    }}
+  ]
+}]

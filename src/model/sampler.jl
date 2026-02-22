@@ -109,6 +109,34 @@ function _center_random_augmentation!(x::Array{T,3}, rng::AbstractRNG; s_trans::
     return x
 end
 
+# Device-native center + random augmentation (no CPU round-trip for GPU arrays).
+# x_l shape: (3, N_atom, N_sample).
+# Uses broadcast ops that stay on whatever device x_l lives on.
+function _center_random_augmentation_device!(x_l::AbstractArray{T,3}, rng::AbstractRNG; s_trans::T = one(T)) where {T}
+    n_atom = size(x_l, 2)
+    n_sample = size(x_l, 3)
+    inv_n = T(1 / n_atom)
+
+    # Center: subtract mean along atom dim (broadcast stays on device)
+    mean_xyz = sum(x_l; dims=2) .* inv_n  # (3, 1, N_sample) on device
+    x_l .-= mean_xyz
+
+    # Random rotation + translation per sample
+    for s in 1:n_sample
+        rot_cpu = _random_rotation_matrix(rng, T)        # 3×3 CPU matrix
+        tx = s_trans * randn(rng, T)
+        ty = s_trans * randn(rng, T)
+        tz = s_trans * randn(rng, T)
+
+        # Copy tiny rotation matrix to same device as x_l, do matmul + broadcast
+        rot_dev = _to_device(rot_cpu, x_l)               # 3×3 transfer (no-op on CPU)
+        trans_dev = _to_device(T[tx, ty, tz], x_l)       # 3-element transfer (no-op on CPU)
+        xs = @view x_l[:, :, s]                           # (3, N_atom) view on device
+        xs .= rot_dev * xs .+ trans_dev                   # matmul + broadcast on device
+    end
+    return x_l
+end
+
 # Copy cpu_array to the same device as x_ref (no-op for CPU Arrays).
 function _to_device(cpu_array::Array, x_ref::Array)
     return cpu_array
@@ -145,11 +173,11 @@ function sample_diffusion(
 
         total = length(noise_schedule)
         for (step_t, (tau_last, tau)) in enumerate(zip(noise_schedule[1:end-1], noise_schedule[2:end]))
-            # Center + augmentation on CPU (scalar loops), then copy back
-            x_l_cpu = Array(x_l)
-            _center_random_augmentation!(x_l_cpu, rng)
-            if !(x_l isa Array)
-                copyto!(x_l, x_l_cpu)
+            # Center + augmentation — device-native (no CPU round-trip for GPU)
+            if x_l isa Array
+                _center_random_augmentation!(x_l, rng)
+            else
+                _center_random_augmentation_device!(x_l, rng)
             end
 
             c_tau_last = T(tau_last)
@@ -159,8 +187,11 @@ function sample_diffusion(
             t_hat = c_tau_last * (gamma + one(T))
             delta_noise = sqrt(max(zero(T), t_hat^2 - c_tau_last^2))
 
-            step_noise_cpu = T(noise_scale_lambda) * delta_noise .* randn(rng, T, size(x_l))
-            step_noise = device_ref === nothing ? step_noise_cpu : _to_device(step_noise_cpu, x_l)
+            # Generate noise directly on device with randn!
+            noise_scale = T(noise_scale_lambda) * delta_noise
+            step_noise = similar(x_l)
+            randn!(step_noise)
+            step_noise .*= noise_scale
             x_noisy = x_l .+ step_noise
             x_denoised = denoise_net(x_noisy, t_hat; kwargs...)
             size(x_denoised) == size(x_noisy) || error("denoise_net must return same shape as input.")

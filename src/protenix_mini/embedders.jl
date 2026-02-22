@@ -39,44 +39,45 @@ function InputFeatureEmbedder(
         n_heads = 4,
         rng = rng,
     )
-    linear_esm = esm_enable ? LinearNoBias(c_token + 65, esm_embedding_dim; rng = rng) : nothing
+    # LinearNoBias(in, out): projects esm_embedding_dim → c_token + 65
+    linear_esm = esm_enable ? LinearNoBias(esm_embedding_dim, c_token + 65; rng = rng) : nothing
     return InputFeatureEmbedder(c_atom, c_atompair, c_token, enc, esm_enable, linear_esm)
 end
 
 """
 Implements Protenix `InputFeatureEmbedder` forward.
-Returns `s_inputs` with shape `[N_token, c_token + 32 + 32 + 1]`.
+Features-first: returns `s_inputs` with shape `(c_token + 65, N_token)`.
 """
 function (m::InputFeatureEmbedder)(
     feat::ProtenixFeatures;
     chunk_size::Union{Nothing, Int} = nothing,
 )
+    # AtomAttentionEncoder returns features-first (c_token, N_token)
     a_ff, _, _, _ = m.atom_attention_encoder(atom_attention_input(feat))
-    # Model.AtomAttentionEncoder returns features-first (c_token, N_token);
-    # ProtenixMini uses features-last (N_token, c_token).
-    a = permutedims(a_ff)
-    n_tok = size(a, 1)
+    n_tok = size(a_ff, 2)
 
+    # Features are features-first: restype (32, N_tok), profile (32, N_tok), deletion_mean (N_tok,)
     restype = feat.restype
     profile = feat.profile
     deletion_mean = feat.deletion_mean
 
-    size(restype, 1) == n_tok || error("restype token dim mismatch")
-    size(restype, 2) == 32 || error("restype feature dim must be 32")
-    size(profile, 1) == n_tok || error("profile token dim mismatch")
-    size(profile, 2) == 32 || error("profile feature dim must be 32")
+    size(restype, 2) == n_tok || error("restype token dim mismatch")
+    size(restype, 1) == 32 || error("restype feature dim must be 32")
+    size(profile, 2) == n_tok || error("profile token dim mismatch")
+    size(profile, 1) == 32 || error("profile feature dim must be 32")
     length(deletion_mean) == n_tok || error("deletion_mean token dim mismatch")
 
-    s_inputs = hcat(a, restype, profile, reshape(deletion_mean, n_tok, 1))
+    # Concatenate along dim=1 (features-first)
+    s_inputs = vcat(a_ff, restype, profile, reshape(deletion_mean, 1, n_tok))
 
     if m.esm_enable
         feat.esm_token_embedding === nothing && error("Missing esm_token_embedding")
         m.linear_esm === nothing && error("linear_esm missing")
-        esm_emb = m.linear_esm(feat.esm_token_embedding)
+        esm_emb = m.linear_esm(feat.esm_token_embedding)  # (c_token+65, N_tok)
         s_inputs .+= esm_emb
     end
 
-    return s_inputs
+    return s_inputs  # (c_s_inputs, N_tok)
 end
 
 function (m::InputFeatureEmbedder)(

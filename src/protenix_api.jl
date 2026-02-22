@@ -120,7 +120,7 @@ const PredictSequenceRecord = NamedTuple{
 function ProtenixSequenceOptions(;
     common::ProtenixPredictOptions = ProtenixPredictOptions(),
     task_name::AbstractString = "protenix_sequence",
-    chain_id::AbstractString = "A0",
+    chain_id::AbstractString = "A",
     esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     emb = esm_token_embedding === nothing ? nothing : Float32.(esm_token_embedding)
@@ -309,6 +309,9 @@ const _HHBLITS_TO_PROTENIX = let
     for i in eachindex(_HHBLITS_ID_TO_AA)
         aa = _HHBLITS_ID_TO_AA[i]
         if aa == '-'
+            # MSA gap is index 31 in the 32-class one-hot space.
+            # Python msa_utils.py: HHBLITS_INDEX_TO_OUR_INDEX maps '-' → 31
+            # (0-19 = amino acids, 20 = UNK, 21-30 = unused, 31 = gap)
             out[i] = 31
         else
             aa3 = get(PROT_STD_RESIDUES_ONE_TO_THREE, string(aa), "UNK")
@@ -450,7 +453,7 @@ function _chain_letters(n::Int)
 end
 
 function _chain_id_from_index(i::Int)
-    return _chain_letters(i) * "0"
+    return _chain_letters(i)
 end
 
 function _as_string_dict(x)
@@ -765,6 +768,7 @@ function _build_polymer_atoms_from_codes(
             for a in comp_atoms
                 atom_name = String(a.atom_name)
                 atom_name == "OXT" && mol_type == "protein" && res_id < n_res && continue
+                atom_name == "OP3" && (mol_type == "dna" || mol_type == "rna") && res_id > 1 && continue
                 element = isempty(a.element) ? _infer_element_from_atom_name(atom_name) : String(a.element)
                 xyz = a.has_coord ? (Float32(a.x + xoff), Float32(a.y), Float32(a.z)) : _pseudo_atom_xyz(res_id, atom_name)
                 centre = _polymer_centre_atom(mol_type, atom_name)
@@ -1809,6 +1813,7 @@ function _inject_task_covalent_token_bonds!(
     bonds_any isa AbstractVector || error("task.covalent_bonds must be an array when provided.")
     isempty(bonds_any) && return feat
 
+    cif_bonds = NamedTuple{(:chain1,:res_name1,:res_id1,:atom_name1,:chain2,:res_name2,:res_id2,:atom_name2), Tuple{String,String,Int,String,String,String,Int,String}}[]
     n_tok = size(feat["restype"], 1)
     token_bonds = haskey(feat, "token_bonds") ? Int.(feat["token_bonds"]) : zeros(Int, n_tok, n_tok)
     atom_to_token_idx = Int.(feat["atom_to_token_idx"])
@@ -1870,10 +1875,20 @@ function _inject_task_covalent_token_bonds!(
             (1 <= t1 <= n_tok && 1 <= t2 <= n_tok) || error("$ctx resolved token index out of range.")
             token_bonds[t1, t2] = 1
             token_bonds[t2, t1] = 1
+            # Store cross-chain bond records for CIF output
+            ra1 = atoms[a1]
+            ra2 = atoms[a2]
+            if ra1.chain_id != ra2.chain_id
+                push!(cif_bonds, (
+                    chain1 = ra1.chain_id, res_name1 = ra1.res_name, res_id1 = ra1.res_id, atom_name1 = ra1.atom_name,
+                    chain2 = ra2.chain_id, res_name2 = ra2.res_name, res_id2 = ra2.res_id, atom_name2 = ra2.atom_name,
+                ))
+            end
         end
     end
 
     feat["token_bonds"] = token_bonds
+    feat["_cif_cross_chain_bonds"] = cif_bonds
     return feat
 end
 
@@ -2727,13 +2742,14 @@ function _softmax(v::AbstractVector{<:Real})
 end
 
 function _confidence_proxy(logits::AbstractArray{<:Real, 2})
-    size(logits, 1) > 0 || return 0.0
+    # Features-first: logits (bins, N_item). Softmax over dim=1 (bins), average over dim=2 (items).
+    size(logits, 2) > 0 || return 0.0
     acc = 0.0
-    for i in 1:size(logits, 1)
-        p = _softmax(@view logits[i, :])
+    for i in 1:size(logits, 2)
+        p = _softmax(@view logits[:, i])
         acc += maximum(p)
     end
-    return acc / size(logits, 1)
+    return acc / size(logits, 2)
 end
 
 function _write_confidence_summaries(
@@ -2742,12 +2758,13 @@ function _write_confidence_summaries(
     seed::Int,
     pred,
 )
-    n_sample = size(pred.coordinate, 1)
+    # Features-first: coordinate (3, N_atom, N_sample), plddt (b, N_atom, N_sample), etc.
+    n_sample = size(pred.coordinate, 3)
     for sample_idx in 1:n_sample
-        plddt_i = Array{Float32, 2}(pred.plddt[sample_idx, :, :])
-        pae_i = Array{Float32, 3}(pred.pae[sample_idx, :, :, :])
-        pde_i = Array{Float32, 3}(pred.pde[sample_idx, :, :, :])
-        resolved_i = Array{Float32, 2}(pred.resolved[sample_idx, :, :])
+        plddt_i = Array{Float32, 2}(pred.plddt[:, :, sample_idx])
+        pae_i = Array{Float32, 3}(pred.pae[:, :, :, sample_idx])
+        pde_i = Array{Float32, 3}(pred.pde[:, :, :, sample_idx])
+        resolved_i = Array{Float32, 2}(pred.resolved[:, :, sample_idx])
 
         summary = (
             model_output = "julia_protenix",
@@ -2876,7 +2893,8 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                 end
 
                 task_dump_dir = joinpath(opts.out_dir, task_name, "seed_$(seed)")
-                pred_dir = dump_prediction_bundle(task_dump_dir, task_name, bundle["atoms"], pred.coordinate)
+                cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+                pred_dir = dump_prediction_bundle(task_dump_dir, task_name, bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
                 _write_confidence_summaries(pred_dir, task_name, seed, pred)
                 cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
 
@@ -2980,7 +2998,8 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
         end
 
         task_dump_dir = joinpath(opts.common.out_dir, opts.task_name, "seed_$(seed)")
-        pred_dir = dump_prediction_bundle(task_dump_dir, opts.task_name, bundle["atoms"], pred.coordinate)
+        cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+        pred_dir = dump_prediction_bundle(task_dump_dir, opts.task_name, bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
         _write_confidence_summaries(pred_dir, opts.task_name, seed, pred)
         cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
 
@@ -3004,7 +3023,7 @@ function predict_sequence(
     model_name::String = "protenix_base_default_v0.5.0",
     weights_path::AbstractString = "",
     task_name::String = "protenix_sequence",
-    chain_id::String = "A0",
+    chain_id::String = "A",
     seeds::Vector{Int} = [101],
     use_default_params::Bool = true,
     cycle::Union{Nothing, Int} = nothing,
@@ -3190,37 +3209,37 @@ const _flux_gpu = gpu
 
 # pLDDT: 50 bins from 0 to 1, score in 0-100 range
 # pAE: 64 bins from 0 to 32 Angstroms
+# Features-first: bins are in dim=1, spatial dims follow.
 function _logits_to_score(logits::AbstractArray{<:Real}, min_bin::Real, max_bin::Real, no_bins::Int)
     bin_width = (max_bin - min_bin) / no_bins
     bin_centers = Float32[min_bin + bin_width * (i - 0.5f0) for i in 1:no_bins]
-    # logits has shape (..., no_bins). Apply softmax along last dim and dot with bin_centers.
-    ndim = ndims(logits)
-    # Flatten all but last dim
-    outer = prod(size(logits)[1:end-1])
-    reshaped = reshape(Float64.(logits), outer, no_bins)
+    # logits has shape (no_bins, ...). Apply softmax along dim=1 and dot with bin_centers.
+    # Flatten all but first dim
+    outer = prod(size(logits)[2:end])
+    reshaped = reshape(Float64.(logits), no_bins, outer)
     scores = Vector{Float32}(undef, outer)
     bc = Float64.(bin_centers)
     for i in 1:outer
-        row = @view reshaped[i, :]
-        m = maximum(row)
-        ex = exp.(row .- m)
+        col = @view reshaped[:, i]
+        m = maximum(col)
+        ex = exp.(col .- m)
         s = sum(ex)
         prob = ex ./ s
         scores[i] = Float32(sum(prob .* bc))
     end
-    return reshape(scores, size(logits)[1:end-1]...)
+    return reshape(scores, size(logits)[2:end]...)
 end
 
 function _logits_to_plddt(logits::AbstractArray{<:Real})
-    # pLDDT: bins from 0 to 1, scale to 0-100
-    no_bins = size(logits, ndims(logits))
+    # Features-first: bins in dim=1. pLDDT: bins from 0 to 1, scale to 0-100
+    no_bins = size(logits, 1)
     scores = _logits_to_score(logits, 0f0, 1f0, no_bins)
     return scores .* 100f0
 end
 
 function _logits_to_pae(logits::AbstractArray{<:Real})
-    # PAE: bins from 0 to 32 Angstroms
-    no_bins = size(logits, ndims(logits))
+    # Features-first: bins in dim=1. PAE: bins from 0 to 32 Angstroms
+    no_bins = size(logits, 1)
     return _logits_to_score(logits, 0f0, 32f0, no_bins)
 end
 
@@ -3240,7 +3259,7 @@ end
 
 """
     fold(handle, sequence; seed=101, step=nothing, sample=nothing, cycle=nothing,
-         out_dir=nothing, task_name="protenix_sequence", chain_id="A0",
+         out_dir=nothing, task_name="protenix_sequence", chain_id="A",
          esm_token_embedding=nothing)
 
 Fold a protein sequence using a loaded model handle. Returns a `NamedTuple` with
@@ -3265,7 +3284,7 @@ function fold(
     cycle::Union{Nothing, Integer} = nothing,
     out_dir::Union{Nothing, AbstractString} = nothing,
     task_name::AbstractString = "protenix_sequence",
-    chain_id::AbstractString = "A0",
+    chain_id::AbstractString = "A",
     esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     seq = uppercase(strip(String(sequence)))
@@ -3319,7 +3338,8 @@ function fold(
     end
 
     task_dump_dir = joinpath(actual_out_dir, String(task_name), "seed_$(seed)")
-    pred_dir = dump_prediction_bundle(task_dump_dir, String(task_name), bundle["atoms"], pred.coordinate)
+    cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+    pred_dir = dump_prediction_bundle(task_dump_dir, String(task_name), bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
     _write_confidence_summaries(pred_dir, String(task_name), Int(seed), pred)
 
     cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))

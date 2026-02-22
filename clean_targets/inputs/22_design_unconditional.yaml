@@ -1,0 +1,6 @@
+# Target 22: Unconditional Generation
+# No target structure — pure de novo protein generation
+# Simplest design test case
+# Tests: unconditional diffusion, scaffold generation without conditioning
+
+binder_length: 60

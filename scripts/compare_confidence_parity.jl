@@ -89,10 +89,20 @@ function main()
     path = get(ENV, "CONF_DIAG", "/tmp/py_conf_diag.json")
     raw = PXDesign.JSONLite.parse_json(read(path, String))
 
-    s_inputs = _to_array_f32(raw["s_inputs"])
-    s_trunk = _to_array_f32(raw["s_trunk"])
-    z_trunk = _to_array_f32(raw["z_trunk"])
-    x_pred_coords = _to_array_f32(raw["x_pred_coords"])
+    # Python reference data is features-last; permute to features-first for Julia
+    s_inputs_py = _to_array_f32(raw["s_inputs"])             # (N_tok, c_s_inputs)
+    s_trunk_py = _to_array_f32(raw["s_trunk"])               # (N_tok, c_s)
+    z_trunk_py = _to_array_f32(raw["z_trunk"])               # (N_tok, N_tok, c_z)
+    x_pred_coords_py = _to_array_f32(raw["x_pred_coords"])   # (N_sample, N_atom, 3) or (N_atom, 3)
+
+    s_inputs = permutedims(s_inputs_py)                      # (c_s_inputs, N_tok)
+    s_trunk = permutedims(s_trunk_py)                        # (c_s, N_tok)
+    z_trunk = permutedims(z_trunk_py, (3, 1, 2))            # (c_z, N_tok, N_tok)
+    x_pred_coords = if ndims(x_pred_coords_py) == 3
+        permutedims(x_pred_coords_py, (3, 2, 1))            # (3, N_atom, N_sample)
+    else
+        permutedims(x_pred_coords_py)                        # (3, N_atom)
+    end
 
     feat = Dict{String,Any}(
         "atom_to_token_idx" => vec(_to_array_i(raw["atom_to_token_idx"])),
@@ -116,18 +126,19 @@ function main()
 
     plddt_jl, pae_jl, pde_jl, resolved_jl = m.confidence_head(
         input_feature_dict = feat,
-        s_inputs = s_inputs,
-        s_trunk = s_trunk,
-        z_trunk = z_trunk,
+        s_inputs = s_inputs,             # (c_s_inputs, N_tok) features-first
+        s_trunk = s_trunk,               # (c_s, N_tok) features-first
+        z_trunk = z_trunk,               # (c_z, N_tok, N_tok) features-first
         pair_mask = nothing,
-        x_pred_coords = x_pred_coords,
+        x_pred_coords = x_pred_coords,   # (3, N_atom, N_sample) features-first
         use_embedding = true,
     )
 
-    _report("confidence.plddt", plddt_py, plddt_jl)
-    _report("confidence.pae", pae_py, pae_jl)
-    _report("confidence.pde", pde_py, pde_jl)
-    _report("confidence.resolved", resolved_py, resolved_jl)
+    # Compare with Python reference (permute Julia outputs to Python convention)
+    _report("confidence.plddt", plddt_py, permutedims(plddt_jl, (2, 3, 1)))
+    _report("confidence.pae", pae_py, permutedims(pae_jl, (2, 3, 4, 1)))
+    _report("confidence.pde", pde_py, permutedims(pde_jl, (2, 3, 4, 1)))
+    _report("confidence.resolved", resolved_py, permutedims(resolved_jl, (2, 3, 1)))
 end
 
 main()

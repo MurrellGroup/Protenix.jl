@@ -1,0 +1,11 @@
+# Target 30: Short Binder
+# Very short binder (40 residues) — tests small scaffold generation
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-116"]
+      hotspots: [40, 99, 107]
+
+binder_length: 40

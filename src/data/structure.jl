@@ -474,6 +474,54 @@ function _apply_filters(
     return out
 end
 
+function _parse_sdf_atoms(path::AbstractString)
+    atoms = AtomRecord[]
+    lines = readlines(path)
+    length(lines) >= 4 || error("SDF file too short: $path")
+
+    # Line 4 is the counts line: aaabbblll...
+    counts_line = lines[4]
+    n_atoms = parse(Int, strip(counts_line[1:3]))
+
+    atom_counter = 0
+    for i in 5:(4 + n_atoms)
+        i > length(lines) && break
+        line = lines[i]
+        length(line) < 34 && continue
+
+        x = parse(Float32, strip(line[1:10]))
+        y = parse(Float32, strip(line[11:20]))
+        z = parse(Float32, strip(line[21:30]))
+        element = uppercase(strip(line[31:33]))
+        isempty(element) && continue
+
+        # Skip hydrogen atoms for ligand representation (matches CCD behavior)
+        element == "H" && continue
+
+        atom_counter += 1
+        atom_name = element * string(atom_counter)
+
+        push!(
+            atoms,
+            AtomRecord(
+                atom_name,
+                "LIG",
+                "ligand",
+                element,
+                "A",
+                1,
+                true,
+                x,
+                y,
+                z,
+                true,
+            ),
+        )
+    end
+
+    return atoms
+end
+
 function load_structure_atoms(
     structure_file::AbstractString;
     selected_chains::Vector{String} = String[],
@@ -487,6 +535,8 @@ function load_structure_atoms(
         _parse_pdb_atoms(path)
     elseif ext == ".cif" || ext == ".mmcif"
         _parse_mmcif_atoms(path)
+    elseif ext == ".sdf" || ext == ".mol"
+        _parse_sdf_atoms(path)
     else
         error("Unsupported structure file extension '$ext' for $path")
     end

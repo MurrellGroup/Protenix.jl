@@ -64,7 +64,7 @@ function _load_linear_nobias!(
 end
 
 function _load_linear!(
-    lin::Linear,
+    lin,
     weights::AbstractDict{<:AbstractString, <:Any},
     w_key::String;
     b_key::Union{Nothing, String} = nothing,
@@ -87,12 +87,13 @@ function _load_layernorm!(
     prefix::String;
     strict::Bool = true,
 )
-    hasproperty(ln, :weight) || error("LayerNorm-like object missing `weight` field for prefix $prefix")
-    hasproperty(ln, :bias) || error("LayerNorm-like object missing `bias` field for prefix $prefix")
+    # LayerNormFirst uses `w`/`b` fields; check for either convention.
+    w_field = hasproperty(ln, :w) ? :w : hasproperty(ln, :weight) ? :weight : error("LayerNorm-like object missing weight field for prefix $prefix")
+    b_field = hasproperty(ln, :b) ? :b : hasproperty(ln, :bias) ? :bias : error("LayerNorm-like object missing bias field for prefix $prefix")
     w = _key(weights, "$prefix.weight"; strict = strict)
-    w !== nothing && _load_vector!(getfield(ln, :weight), w, "$prefix.weight")
+    w !== nothing && _load_vector!(getfield(ln, w_field), w, "$prefix.weight")
     b = _key(weights, "$prefix.bias"; strict = false)
-    b !== nothing && _load_vector!(getfield(ln, :bias), b, "$prefix.bias")
+    b !== nothing && _load_vector!(getfield(ln, b_field), b, "$prefix.bias")
     return ln
 end
 

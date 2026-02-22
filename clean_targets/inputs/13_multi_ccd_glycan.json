@@ -1,0 +1,7 @@
+[{
+  "name": "multi_ccd_glycan",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"ligand": {"ligand": "CCD_NAG_BMA_BGC", "count": 1}}
+  ]
+}]

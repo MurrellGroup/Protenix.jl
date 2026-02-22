@@ -1,0 +1,17 @@
+[{
+  "name": "protein_ligand_covalent",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGECGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"ligand": {"ligand": "CCD_ATP", "count": 1}}
+  ],
+  "covalent_bonds": [
+    {
+      "entity1": "1",
+      "position1": "25",
+      "atom1": "SG",
+      "entity2": "2",
+      "position2": "1",
+      "atom2": "PA"
+    }
+  ]
+}]

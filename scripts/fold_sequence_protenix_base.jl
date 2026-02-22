@@ -1,12 +1,13 @@
 #!/usr/bin/env julia
 
 using Random
+using Flux: gpu
 using PXDesign
 
 function _usage()
     println(
         "Usage: julia --project=. scripts/fold_sequence_protenix_base.jl " *
-        "<sequence> [out_dir] [n_step] [n_sample] [seed]",
+        "<sequence> [out_dir] [n_step] [n_sample] [seed] [gpu]",
     )
 end
 
@@ -20,12 +21,14 @@ function main(args::Vector{String})
     n_step = length(args) >= 3 ? parse(Int, args[3]) : 200
     n_sample = length(args) >= 4 ? parse(Int, args[4]) : 1
     seed = length(args) >= 5 ? parse(Int, args[5]) : 0
+    use_gpu = length(args) >= 6 ? parse(Bool, args[6]) : false
 
     model_name = "protenix_base_default_v0.5.0"
     weights_ref = PXDesign.default_weights_path(model_name)
     weights = PXDesign.Model.load_safetensors_weights(weights_ref)
     model = PXDesign.ProtenixBase.build_protenix_base_model(weights)
     PXDesign.ProtenixBase.load_protenix_base_model!(model, weights; strict = true)
+    use_gpu && (model = gpu(model))
 
     rng = MersenneTwister(seed)
     folded = PXDesign.ProtenixBase.fold_sequence(

@@ -162,14 +162,18 @@ z_trunk_ff = permutedims(trunk.z, (3, 1, 2))        # (N, N, c) -> (c, N, N)
 |-------|-----------|-------|-------|-----|-----|
 | jl_mini_200_gpu | 54 | 410 | 13.2 | 47 | 7 |
 | jl_constraint_200_gpu | 56 | 410 | 13.7 | 51 | 5 |
+| py_base_200 | 56 | 410 | 13.7 | 51 | 5 |
 | jl_base_200_gpu | 65 | 410 | 15.9 | 51 | 14 |
+| py_tiny_200 | 88 | 410 | 21.5 | 52 | 36 |
 | jl_ism_200_gpu | 94 | 410 | 22.9 | 53 | 41 |
+| py_mini_200 | 102 | 410 | 24.9 | 54 | 48 |
 | jl_esm_200_gpu | 128 | 410 | 31.2 | 63 | 65 |
 | jl_tmpl_200_gpu | 139 | 410 | 33.9 | 73 | 66 |
-| py_tiny_200 | 242 | 410 | 59.0 | 125 | 117 |
-| py_mini_200 | 278 | 410 | 67.8 | 128 | 150 |
 
-Julia outputs have better bond geometry than Python reference (different seeds/RNG states).
+Julia and Python outputs show comparable bond geometry (different seeds/RNG states).
+Note: Initial bond check had a CIF column parsing bug — Python Protenix CIFs place `occupancy`
+as the last column (col 20) while Julia CIFs put it at col 15, shifting coordinate columns.
+Fixed parser reads `_atom_site.*` header dynamically.
 
 ### Python Reference Confidence Scores (seed=101, 200 steps)
 
@@ -182,7 +186,6 @@ Julia outputs have better bond geometry than Python reference (different seeds/R
 ### Not Yet Done
 
 - [ ] ProtenixMini modules (Step 10) — still features-last, not yet converted to Onion layers
-- [ ] Fold scripts (`scripts/fold_sequence_*.jl`) updated for GPU support
 - [ ] Per-model parity compare scripts updated for features-first
 - [ ] Timing benchmark: GPU `features_first` vs CPU `main`
 - [ ] Small molecule support (BoltzGen pattern)

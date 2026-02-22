@@ -129,12 +129,11 @@ function main()
     resolved_py = _to_array_f32(raw["resolved"])
     n_cycle = Int(round(Float64(raw["n_cycle"])))
 
-    weights_dir = get(
-        ENV,
-        "PBASE_CONSTRAINT_WEIGHTS_DIR",
-        _default_weights_dir("weights_safetensors_protenix_base_constraint_v0.5.0"),
-    )
-    w = PXDesign.Model.load_safetensors_weights(weights_dir)
+    weights_ref = get(ENV, "PBASE_CONSTRAINT_WEIGHTS_DIR", nothing)
+    if weights_ref === nothing
+        weights_ref = PXDesign.default_weights_path("protenix_base_constraint_v0.5.0")
+    end
+    w = PXDesign.Model.load_safetensors_weights(weights_ref)
     sub_cfg = PXDesign.ProtenixAPI._infer_constraint_substructure_config(w, "constraint_embedder")
     m = PXDesign.ProtenixBase.build_protenix_base_model(
         w;
@@ -150,34 +149,41 @@ function main()
     typed_feat = PXDesign.ProtenixMini.as_protenix_features(feat)
     trunk = PXDesign.ProtenixMini.get_pairformer_output(m, typed_feat; n_cycle = n_cycle)
 
+    # Constraint embedder sub-components now expect features-first (C, N, N)
     cemb = m.constraint_embedder
     cemb === nothing && error("Expected constraint embedder on constraint model")
-    z_pocket_jl = cemb.pocket_z_embedder(feat["constraint_feature"]["pocket"])
-    z_contact_jl = cemb.contact_z_embedder(feat["constraint_feature"]["contact"])
-    z_contact_atom_jl = cemb.contact_atom_z_embedder(feat["constraint_feature"]["contact_atom"])
-    z_substructure_jl = cemb.substructure_z_embedder(feat["constraint_feature"]["substructure"])
+    cf = typed_feat.constraint_feature
+    z_pocket_jl = cemb.pocket_z_embedder(cf.pocket)
+    z_contact_jl = cemb.contact_z_embedder(cf.contact)
+    z_contact_atom_jl = cemb.contact_atom_z_embedder(cf.contact_atom)
+    z_substructure_jl = cemb.substructure_z_embedder(cf.substructure)
 
-    s_init_jl = m.linear_no_bias_sinit(trunk.s_inputs)
-    n_tok = size(s_init_jl, 1)
-    z1_jl = m.linear_no_bias_zinit1(s_init_jl)
-    z2_jl = m.linear_no_bias_zinit2(s_init_jl)
-    z_init_lin_jl = reshape(z1_jl, n_tok, 1, size(z1_jl, 2)) .+ reshape(z2_jl, 1, n_tok, size(z2_jl, 2))
-    z_relpos_jl = m.relative_position_encoding(PXDesign.ProtenixMini.relpos_input(typed_feat))
+    # All ProtenixMini outputs are features-first now
+    s_init_jl = m.linear_no_bias_sinit(trunk.s_inputs)   # (c_s, N_tok)
+    c_s = size(s_init_jl, 1)
+    n_tok = size(s_init_jl, 2)
+    z1_jl = m.linear_no_bias_zinit1(s_init_jl)           # (c_z, N_tok)
+    z2_jl = m.linear_no_bias_zinit2(s_init_jl)           # (c_z, N_tok)
+    c_z = size(z1_jl, 1)
+    z_init_lin_jl = reshape(z1_jl, c_z, n_tok, 1) .+ reshape(z2_jl, c_z, 1, n_tok)  # (c_z, N, N)
+    z_relpos_jl = m.relative_position_encoding(PXDesign.ProtenixMini.relpos_input(typed_feat))  # (c_z, N, N)
     token_bonds = typed_feat.token_bonds
-    z_token_bond_jl = m.linear_no_bias_token_bond(reshape(token_bonds, n_tok, n_tok, 1))
+    z_token_bond_jl = m.linear_no_bias_token_bond(reshape(token_bonds, 1, n_tok, n_tok))  # (c_z, N, N)
     z_constraint_jl = m.constraint_embedder === nothing ? zeros(Float32, size(z_init_lin_jl)) : m.constraint_embedder(typed_feat.constraint_feature)
     z_init_jl = z_init_lin_jl .+ z_relpos_jl .+ z_token_bond_jl .+ z_constraint_jl
 
     relpos = PXDesign.ProtenixMini.relpos_input(typed_feat)
     atom_input = PXDesign.ProtenixMini.atom_attention_input(typed_feat)
     atom_to_token_idx = typed_feat.atom_to_token_idx
-    x_denoised_jl = m.diffusion_module(
-        x_noisy,
+    # Everything features-first; convert Python reference input
+    x_noisy_ff = permutedims(x_noisy, (3, 2, 1))          # Python (N_sample, N_atom, 3) → (3, N_atom, N_sample)
+    x_denoised_ff = m.diffusion_module(
+        x_noisy_ff,
         t_hat;
         relpos_input = relpos,
-        s_inputs = trunk.s_inputs,
-        s_trunk = trunk.s,
-        z_trunk = trunk.z,
+        s_inputs = trunk.s_inputs,       # (c_s_inputs, N_tok) features-first
+        s_trunk = trunk.s,               # (c_s, N_tok) features-first
+        z_trunk = trunk.z,               # (c_z, N_tok, N_tok) features-first
         atom_to_token_idx = atom_to_token_idx,
         input_feature_dict = atom_input,
     )
@@ -188,29 +194,30 @@ function main()
         s_trunk = trunk.s,
         z_trunk = trunk.z,
         pair_mask = nothing,
-        x_pred_coords = x_denoised_jl,
+        x_pred_coords = x_denoised_ff,   # (3, N_atom, N_sample) features-first
         use_embedding = true,
     )
 
-    _report("trunk.s_inputs", s_inputs_py, trunk.s_inputs)
-    _report("trunk.z_pocket", z_pocket_py, z_pocket_jl)
-    _report("trunk.z_contact", z_contact_py, z_contact_jl)
-    _report("trunk.z_contact_atom", z_contact_atom_py, z_contact_atom_jl)
-    _report("trunk.z_substructure", z_substructure_py, z_substructure_jl)
-    _report("trunk.z_constraint", z_constraint_py, z_constraint_jl)
-    _report("trunk.s_init", s_init_py, s_init_jl)
-    _report("trunk.z_init_lin", z_init_lin_py, z_init_lin_jl)
-    _report("trunk.z_relpos", z_relpos_py, z_relpos_jl)
-    _report("trunk.z_token_bond", z_token_bond_py, z_token_bond_jl)
-    _report("trunk.z_init", z_init_py, z_init_jl)
-    _report("trunk.s", s_trunk_py, trunk.s)
-    _report("trunk.z", z_trunk_py, trunk.z)
-    _report("diffusion.x_denoised", x_denoised_py, x_denoised_jl)
-    _report("distogram.logits", distogram_py, distogram_jl)
-    _report("confidence.plddt", plddt_py, plddt_jl)
-    _report("confidence.pae", pae_py, pae_jl)
-    _report("confidence.pde", pde_py, pde_jl)
-    _report("confidence.resolved", resolved_py, resolved_jl)
+    # Compare with Python reference (permute Julia features-first → Python features-last)
+    _report("trunk.s_inputs", s_inputs_py, permutedims(trunk.s_inputs))
+    _report("trunk.z_pocket", z_pocket_py, permutedims(z_pocket_jl, (2, 3, 1)))
+    _report("trunk.z_contact", z_contact_py, permutedims(z_contact_jl, (2, 3, 1)))
+    _report("trunk.z_contact_atom", z_contact_atom_py, permutedims(z_contact_atom_jl, (2, 3, 1)))
+    _report("trunk.z_substructure", z_substructure_py, permutedims(z_substructure_jl, (2, 3, 1)))
+    _report("trunk.z_constraint", z_constraint_py, permutedims(z_constraint_jl, (2, 3, 1)))
+    _report("trunk.s_init", s_init_py, permutedims(s_init_jl))
+    _report("trunk.z_init_lin", z_init_lin_py, permutedims(z_init_lin_jl, (2, 3, 1)))
+    _report("trunk.z_relpos", z_relpos_py, permutedims(z_relpos_jl, (2, 3, 1)))
+    _report("trunk.z_token_bond", z_token_bond_py, permutedims(z_token_bond_jl, (2, 3, 1)))
+    _report("trunk.z_init", z_init_py, permutedims(z_init_jl, (2, 3, 1)))
+    _report("trunk.s", s_trunk_py, permutedims(trunk.s))
+    _report("trunk.z", z_trunk_py, permutedims(trunk.z, (2, 3, 1)))
+    _report("diffusion.x_denoised", x_denoised_py, permutedims(x_denoised_ff, (3, 2, 1)))
+    _report("distogram.logits", distogram_py, permutedims(distogram_jl, (2, 3, 1)))
+    _report("confidence.plddt", plddt_py, permutedims(plddt_jl, (2, 3, 1)))
+    _report("confidence.pae", pae_py, permutedims(pae_jl, (2, 3, 4, 1)))
+    _report("confidence.pde", pde_py, permutedims(pde_jl, (2, 3, 4, 1)))
+    _report("confidence.resolved", resolved_py, permutedims(resolved_jl, (2, 3, 1)))
 end
 
 main()

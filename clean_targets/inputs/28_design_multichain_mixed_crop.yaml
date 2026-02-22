@@ -1,0 +1,13 @@
+# Target 28: Multi-Chain Target, Mixed Crop
+# Multi-chain target: one chain cropped, one chain full, different hotspots
+# Tests: per-chain crop/hotspot independence
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-50", "80-100"]
+      hotspots: [10, 45]
+    B: "all"
+
+binder_length: 100

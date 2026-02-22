@@ -584,15 +584,13 @@ function run_infer(cfg::Dict{String, Any}; dry_run::Bool = false, io::IO = stdou
                 continue
             end
 
-            coordinates_ff = _run_diffusion_coordinates(feature_bundle, cfg, seed)
-            # sample_diffusion returns features-first (3, N_atom, N_sample);
-            # dump_prediction_bundle expects (N_sample, N_atom, 3).
-            coordinates = permutedims(coordinates_ff, (3, 2, 1))
+            coordinates = _run_diffusion_coordinates(feature_bundle, cfg, seed)
+            # coordinates is features-first (3, N_atom, N_sample)
             dump_prediction_bundle(task_dump_dir, task_name, feature_bundle["atoms"], coordinates)
             pred_dir = joinpath(task_dump_dir, "predictions")
             println(
                 io,
-                "[infer] wrote $(size(coordinates, 1)) sample(s) to $pred_dir",
+                "[infer] wrote $(size(coordinates, 3)) sample(s) to $pred_dir",
             )
         end
     end

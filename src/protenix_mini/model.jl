@@ -141,12 +141,12 @@ function ProtenixMiniModel(
         dm,
         DistogramHead(c_z; no_bins = 64, rng = rng),
         ConfidenceHead(c_s, c_z, c_s_inputs; n_blocks = 4, max_atoms_per_token = confidence_max_atoms_per_token, rng = rng),
-        LinearNoBias(c_s, c_s_inputs; rng = rng),
-        LinearNoBias(c_z, c_s; rng = rng),
-        LinearNoBias(c_z, c_s; rng = rng),
-        LinearNoBias(c_z, 1; rng = rng),
-        LinearNoBias(c_z, c_z; rng = rng),
-        LinearNoBias(c_s, c_s; rng = rng),
+        LinearNoBias(c_s_inputs, c_s; rng = rng),   # c_s_inputs → c_s
+        LinearNoBias(c_s, c_z; rng = rng),           # c_s → c_z
+        LinearNoBias(c_s, c_z; rng = rng),           # c_s → c_z
+        LinearNoBias(1, c_z; rng = rng),             # 1 → c_z
+        LinearNoBias(c_z, c_z; rng = rng),           # c_z → c_z
+        LinearNoBias(c_s, c_s; rng = rng),           # c_s → c_s
         LayerNorm(c_z),
         LayerNorm(c_s),
         48,
@@ -170,6 +170,13 @@ function _pair_mask(feat::ProtenixFeatures)
     return fill!(similar(feat.restype, Float32, n, n), 1f0)
 end
 
+"""
+Features-first pairformer trunk.
+Returns (s_inputs, s, z) all in features-first layout:
+  s_inputs: (c_s_inputs, N_tok)
+  s:        (c_s, N_tok)
+  z:        (c_z, N_tok, N_tok)
+"""
 function get_pairformer_output(
     model::ProtenixMiniModel,
     feat::ProtenixFeatures;
@@ -178,21 +185,24 @@ function get_pairformer_output(
 )
     n_cycle > 0 || error("n_cycle must be positive")
 
+    # InputFeatureEmbedder returns features-first (c_s_inputs, N_tok)
     s_inputs = model.input_embedder(feat)
-    n_tok = size(s_inputs, 1)
+    n_tok = size(s_inputs, 2)
 
-    s_init = model.linear_no_bias_sinit(s_inputs)
-    z1 = model.linear_no_bias_zinit1(s_init)
-    z2 = model.linear_no_bias_zinit2(s_init)
-    z_init = reshape(z1, n_tok, 1, size(z1, 2)) .+ reshape(z2, 1, n_tok, size(z2, 2))
+    s_init = model.linear_no_bias_sinit(s_inputs)  # (c_s, N_tok)
+    z1 = model.linear_no_bias_zinit1(s_init)       # (c_z, N_tok)
+    z2 = model.linear_no_bias_zinit2(s_init)       # (c_z, N_tok)
+    # Outer sum: (c_z, N, 1) + (c_z, 1, N) → (c_z, N, N)
+    c_z = size(z1, 1)
+    z_init = reshape(z1, c_z, n_tok, 1) .+ reshape(z2, c_z, 1, n_tok)
 
-    # Model.RelativePositionEncoding returns features-first (c_z, N, N);
-    # ProtenixMini uses features-last (N, N, c_z).
-    z_init .+= permutedims(model.relative_position_encoding(relpos_input(feat)), (2, 3, 1))
+    # RelativePositionEncoding returns features-first (c_z, N, N) — no permutedims needed
+    z_init .+= model.relative_position_encoding(relpos_input(feat))
 
-    token_bonds = feat.token_bonds
+    token_bonds = feat.token_bonds  # (N_tok, N_tok)
     size(token_bonds) == (n_tok, n_tok) || error("token_bonds shape mismatch")
-    z_init .+= model.linear_no_bias_token_bond(reshape(token_bonds, n_tok, n_tok, 1))
+    # Reshape to (1, N_tok, N_tok) for linear on dim=1: 1 → c_z
+    z_init .+= model.linear_no_bias_token_bond(reshape(token_bonds, 1, n_tok, n_tok))
 
     if model.constraint_embedder !== nothing && feat.constraint_feature !== nothing
         z_constraint = model.constraint_embedder(feat.constraint_feature)
@@ -234,7 +244,7 @@ end
 
 """
 Run full Protenix-mini inference loop (infer-only).
-Expected input features are Protenix-style tensors already prepared in Julia.
+All tensors are features-first throughout — no permutedims bridges.
 """
 function run_inference(
     model::ProtenixMiniModel,
@@ -260,10 +270,7 @@ function run_inference(
     noise_schedule = model.scheduler(n_step)
 
     denoise = (x_noisy, t_hat; kwargs...) -> model.diffusion_module(x_noisy, t_hat; kwargs...)
-    # Convert ProtenixMini features-last → Model features-first for DiffusionModule
-    s_inputs_ff = permutedims(trunk.s_inputs)           # (N, c) → (c, N)
-    s_trunk_ff = permutedims(trunk.s)                    # (N, c) → (c, N)
-    z_trunk_ff = permutedims(trunk.z, (3, 1, 2))        # (N, N, c) → (c, N, N)
+    # Everything is features-first — pass directly to DiffusionModule
     coords = sample_diffusion(
         denoise;
         noise_schedule = noise_schedule,
@@ -276,15 +283,13 @@ function run_inference(
         rng = rng,
         device_ref = dev_ref,
         relpos_input = relpos,
-        s_inputs = s_inputs_ff,
-        s_trunk = s_trunk_ff,
-        z_trunk = z_trunk_ff,
+        s_inputs = trunk.s_inputs,       # (c_s_inputs, N_tok) features-first
+        s_trunk = trunk.s,               # (c_s, N_tok) features-first
+        z_trunk = trunk.z,               # (c_z, N_tok, N_tok) features-first
         atom_to_token_idx = atom_to_token_idx,
         input_feature_dict = atom_input,
     )
-    # sample_diffusion returns features-first (3, N_atom, N_sample);
-    # convert to features-last (N_sample, N_atom, 3) for ProtenixMini heads
-    coords = permutedims(coords, (3, 2, 1))
+    # coords is (3, N_atom, N_sample) features-first
 
     distogram_logits = model.distogram_head(trunk.z)
     pair_mask = _pair_mask(feat)
@@ -294,19 +299,19 @@ function run_inference(
         s_trunk = trunk.s,
         z_trunk = trunk.z,
         pair_mask = pair_mask,
-        x_pred_coords = coords,
+        x_pred_coords = coords,  # (3, N_atom, N_sample) features-first
     )
 
     return (
-        coordinate = coords,
-        s_inputs = trunk.s_inputs,
-        s_trunk = trunk.s,
-        z_trunk = trunk.z,
-        distogram_logits = distogram_logits,
-        plddt = plddt,
-        pae = pae,
-        pde = pde,
-        resolved = resolved,
+        coordinate = coords,             # (3, N_atom, N_sample) features-first
+        s_inputs = trunk.s_inputs,       # (c_s_inputs, N_tok) features-first
+        s_trunk = trunk.s,               # (c_s, N_tok) features-first
+        z_trunk = trunk.z,               # (c_z, N_tok, N_tok) features-first
+        distogram_logits = distogram_logits,  # (no_bins, N, N) features-first
+        plddt = plddt,                   # (b_plddt, N_atom, N_sample)
+        pae = pae,                       # (b_pae, N, N, N_sample)
+        pde = pde,                       # (b_pde, N, N, N_sample)
+        resolved = resolved,             # (b_resolved, N_atom, N_sample)
     )
 end
 

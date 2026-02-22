@@ -3,6 +3,7 @@ module Constraint
 using Random
 using ConcreteStructs
 using Flux: @layer
+import Onion: flash_attention_forward
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm
 
@@ -18,17 +19,21 @@ _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Flo
 
 abstract type AbstractSubstructureEmbedder end
 
+# ─── SubstructureLinearEmbedder ───────────────────────────────────────────────
+
 @concrete struct SubstructureLinearEmbedder <: AbstractSubstructureEmbedder
     proj
 end
 @layer SubstructureLinearEmbedder
 
 SubstructureLinearEmbedder(n_classes::Int, c_pair_dim::Int; rng::AbstractRNG = Random.default_rng()) =
-    SubstructureLinearEmbedder(LinearNoBias(c_pair_dim, n_classes; rng = rng))
+    SubstructureLinearEmbedder(LinearNoBias(n_classes, c_pair_dim; rng = rng))
 
 function (m::SubstructureLinearEmbedder)(x::AbstractArray{<:Real})
     return m.proj(x)
 end
+
+# ─── SubstructureMLPEmbedder ─────────────────────────────────────────────────
 
 @concrete struct SubstructureMLPEmbedder <: AbstractSubstructureEmbedder
     layers
@@ -43,12 +48,12 @@ function SubstructureMLPEmbedder(
     rng::AbstractRNG = Random.default_rng(),
 )
     hidden_dim > 0 || error("hidden_dim must be positive")
-    linears = LinearNoBias[]
-    push!(linears, LinearNoBias(hidden_dim, n_classes; rng = rng))
+    linears = Linear[]
+    push!(linears, LinearNoBias(n_classes, hidden_dim; rng = rng))      # n_classes → hidden
     for _ in 1:max(n_layers - 2, 0)
-        push!(linears, LinearNoBias(hidden_dim, hidden_dim; rng = rng))
+        push!(linears, LinearNoBias(hidden_dim, hidden_dim; rng = rng)) # hidden → hidden
     end
-    push!(linears, LinearNoBias(c_pair_dim, hidden_dim; rng = rng))
+    push!(linears, LinearNoBias(hidden_dim, c_pair_dim; rng = rng))     # hidden → c_pair
     return SubstructureMLPEmbedder(linears)
 end
 
@@ -61,11 +66,8 @@ function (m::SubstructureMLPEmbedder)(x::AbstractArray{<:Real})
     return h
 end
 
-function _row_softmax(scores::AbstractMatrix{<:Real})
-    m = maximum(scores; dims=2)
-    ex = exp.(scores .- m)
-    return ex ./ sum(ex; dims=2)
-end
+# ─── SubstructureSelfAttention ───────────────────────────────────────────────
+# Features-first: input (hidden, seq_len, bsz)
 
 @concrete struct SubstructureSelfAttention
     in_proj_weight # [3H, H]
@@ -85,41 +87,47 @@ function SubstructureSelfAttention(
     hidden_dim % n_heads == 0 || error("hidden_dim must be divisible by n_heads")
     in_proj_weight = 0.02f0 .* randn(rng, Float32, hidden_dim * 3, hidden_dim)
     in_proj_bias = zeros(Float32, hidden_dim * 3)
-    out_proj = Linear(hidden_dim, hidden_dim; bias = true, rng = rng)
+    out_proj = Linear(hidden_dim, hidden_dim; bias = true)
     return SubstructureSelfAttention(in_proj_weight, in_proj_bias, out_proj, n_heads)
 end
 
 function (m::SubstructureSelfAttention)(x::AbstractArray{<:Real,3})
+    # x: (hidden, seq_len, bsz) features-first
     h = _as_f32_array(x)
-    bsz, seq_len, hidden = size(h)
+    hidden, seq_len, bsz = size(h)
     size(m.in_proj_weight) == (hidden * 3, hidden) || error("SubstructureSelfAttention in_proj_weight shape mismatch")
     length(m.in_proj_bias) == hidden * 3 || error("SubstructureSelfAttention in_proj_bias shape mismatch")
 
-    flat = reshape(h, :, hidden)
-    qkv = flat * transpose(m.in_proj_weight)
-    qkv .+= reshape(m.in_proj_bias, 1, :)
-    qkv = reshape(qkv, bsz, seq_len, hidden * 3)
+    # Project: in_proj_weight * flat → (3*hidden, batch_flat)
+    flat = reshape(h, hidden, :)  # (hidden, seq_len*bsz)
+    qkv = m.in_proj_weight * flat  # (3*hidden, seq_len*bsz)
+    qkv .+= reshape(m.in_proj_bias, :, 1)
+    qkv = reshape(qkv, hidden * 3, seq_len, bsz)
 
-    q = @view qkv[:, :, 1:hidden]
-    k = @view qkv[:, :, hidden + 1:2*hidden]
-    v = @view qkv[:, :, 2*hidden + 1:3*hidden]
+    # Copy slices (needed for contiguous reshape)
+    q = qkv[1:hidden, :, :]
+    k = qkv[hidden + 1:2*hidden, :, :]
+    v = qkv[2*hidden + 1:3*hidden, :, :]
 
-    n_heads = m.n_heads
-    head_dim = fld(hidden, n_heads)
-    merged = similar(h, Float32, bsz, seq_len, hidden)
-    scale = inv(sqrt(Float32(head_dim)))
-    @inbounds for b in 1:bsz, hidx in 1:n_heads
-        head_start = (hidx - 1) * head_dim + 1
-        head_stop = hidx * head_dim
-        qmat = @view q[b, :, head_start:head_stop]
-        kmat = @view k[b, :, head_start:head_stop]
-        vmat = @view v[b, :, head_start:head_stop]
-        scores = _row_softmax((qmat * transpose(kmat)) .* scale)
-        @view(merged[b, :, head_start:head_stop]) .= scores * vmat
-    end
+    H = m.n_heads
+    d = fld(hidden, H)
 
-    return m.out_proj(merged)
+    # Reshape (d*H, seq, bsz) → (d, seq, H, bsz) for flash attention
+    q4 = permutedims(reshape(q, d, H, seq_len, bsz), (1, 3, 2, 4))  # (d, seq, H, bsz)
+    k4 = permutedims(reshape(k, d, H, seq_len, bsz), (1, 3, 2, 4))
+    v4 = permutedims(reshape(v, d, H, seq_len, bsz), (1, 3, 2, 4))
+
+    # Flash attention: no bias, handles scale internally
+    ctx4 = flash_attention_forward(q4, k4, v4)  # (d, seq, H, bsz)
+
+    # Reshape back: (d, seq, H, bsz) → (d, H, seq, bsz) → (hidden, seq, bsz)
+    merged = reshape(permutedims(ctx4, (1, 3, 2, 4)), hidden, seq_len, bsz)
+
+    return m.out_proj(merged)  # (hidden, seq_len, bsz)
 end
+
+# ─── SubstructureTransformerLayer ────────────────────────────────────────────
+# Features-first: input (hidden, seq_len, bsz)
 
 @concrete struct SubstructureTransformerLayer
     self_attn
@@ -137,8 +145,8 @@ function SubstructureTransformerLayer(
 )
     return SubstructureTransformerLayer(
         SubstructureSelfAttention(hidden_dim; n_heads = n_heads, rng = rng),
-        Linear(hidden_dim * 4, hidden_dim; bias = true, rng = rng),
-        Linear(hidden_dim, hidden_dim * 4; bias = true, rng = rng),
+        Linear(hidden_dim, hidden_dim * 4; bias = true),   # hidden → 4*hidden
+        Linear(hidden_dim * 4, hidden_dim; bias = true),   # 4*hidden → hidden
         LayerNorm(hidden_dim),
         LayerNorm(hidden_dim),
     )
@@ -150,6 +158,9 @@ function (m::SubstructureTransformerLayer)(x::AbstractArray{<:Real,3})
     b = m.norm2(a .+ m.linear2(max.(m.linear1(a), 0f0)))
     return b
 end
+
+# ─── SubstructureTransformerEmbedder ─────────────────────────────────────────
+# Features-first: input (C, N_tok, N_tok)
 
 @concrete struct SubstructureTransformerEmbedder <: AbstractSubstructureEmbedder
     input_proj
@@ -167,39 +178,44 @@ function SubstructureTransformerEmbedder(
     rng::AbstractRNG = Random.default_rng(),
 )
     n_layers > 0 || error("n_layers must be positive")
-    input_proj = LinearNoBias(hidden_dim, n_classes; rng = rng)
+    input_proj = LinearNoBias(n_classes, hidden_dim; rng = rng)   # n_classes → hidden
     layers = [SubstructureTransformerLayer(hidden_dim; n_heads = n_heads, rng = rng) for _ in 1:n_layers]
-    output_proj = LinearNoBias(c_pair_dim, hidden_dim; rng = rng)
+    output_proj = LinearNoBias(hidden_dim, c_pair_dim; rng = rng)  # hidden → c_pair
     return SubstructureTransformerEmbedder(input_proj, layers, output_proj)
 end
 
 function (m::SubstructureTransformerEmbedder)(x::AbstractArray{<:Real})
     n = ndims(x)
     n >= 3 || error("SubstructureTransformerEmbedder expects rank >= 3")
-    n_tok1 = size(x, n - 2)
-    n_tok2 = size(x, n - 1)
+    # Features-first: dim=1 is features/channels
+    in_dim = size(x, 1)
+    n_tok1 = size(x, 2)
+    n_tok2 = size(x, 3)
     n_tok1 == n_tok2 || error("SubstructureTransformerEmbedder expects square token axes")
-    in_dim = size(x, n)
     size(m.input_proj.weight, 2) == in_dim || error(
         "substructure channel mismatch: expected $(size(m.input_proj.weight, 2)), got $in_dim",
     )
 
-    lead_dims = n > 3 ? Tuple(size(x)[1:(n - 3)]) : ()
-    batch = n > 3 ? prod(lead_dims) : 1
-    x4 = reshape(_as_f32_array(x), batch, n_tok1, n_tok2, in_dim)
-    x4 = m.input_proj(x4)
-    h = reshape(x4, batch, n_tok1 * n_tok2, size(x4, 4))
+    trail_dims = n > 3 ? Tuple(size(x)[4:n]) : ()
+    batch = n > 3 ? prod(trail_dims) : 1
+
+    # (C, N1, N2, batch) → project features → (hidden, N1, N2, batch)
+    x4 = reshape(_as_f32_array(x), in_dim, n_tok1, n_tok2, batch)
+    x4 = m.input_proj(x4)  # (hidden, N1, N2, batch)
+    h = reshape(x4, size(x4, 1), n_tok1 * n_tok2, batch)  # (hidden, N1*N2, batch)
 
     for layer in m.layers
         h = layer(h)
     end
-    y = m.output_proj(h)
-    y4 = reshape(y, batch, n_tok1, n_tok2, size(y, 3))
-    if isempty(lead_dims)
-        return reshape(y4, n_tok1, n_tok2, size(y4, 4))
+    y = m.output_proj(h)  # (c_pair, N1*N2, batch)
+    y4 = reshape(y, size(y, 1), n_tok1, n_tok2, batch)
+    if isempty(trail_dims)
+        return reshape(y4, size(y, 1), n_tok1, n_tok2)
     end
-    return reshape(y4, (lead_dims..., n_tok1, n_tok2, size(y4, 4)))
+    return reshape(y4, (size(y, 1), n_tok1, n_tok2, trail_dims...))
 end
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
 
 _substructure_channels(m::SubstructureLinearEmbedder) = size(m.proj.weight, 2)
 _substructure_channels(m::SubstructureMLPEmbedder) = size(first(m.layers).weight, 2)
@@ -207,7 +223,7 @@ _substructure_channels(m::SubstructureTransformerEmbedder) = size(m.input_proj.w
 
 function _constraint_arr3(x, key::String)
     x isa AbstractArray || error("constraint_feature.$key must be array-like")
-    ndims(x) == 3 || error("constraint_feature.$key must be rank-3 [N_token,N_token,C]")
+    ndims(x) == 3 || error("constraint_feature.$key must be rank-3 (C, N, N) features-first")
     return _as_f32_array(x)
 end
 
@@ -222,12 +238,15 @@ function _constraint_get(constraint_feature, key::String)
     error("constraint_feature must expose fields by key (Dict/NamedTuple/struct).")
 end
 
+"""
+Convert substructure index matrix to features-first one-hot: (n_classes, n1, n2).
+"""
 function _substructure_from_index(sub_raw::AbstractMatrix{<:Integer}, n_classes::Int)
     n1, n2 = size(sub_raw)
     cls = clamp.(Int.(sub_raw) .+ 1, 1, n_classes)
-    out = zeros(Float32, n1, n2, n_classes)
+    out = zeros(Float32, n_classes, n1, n2)  # features-first
     @inbounds for i in 1:n1, j in 1:n2
-        out[i, j, cls[i, j]] = 1f0
+        out[cls[i, j], i, j] = 1f0
     end
     return out
 end
@@ -237,9 +256,11 @@ function _prepare_substructure_feature(sub_raw, n_classes::Int)
         return _substructure_from_index(Int.(sub_raw), n_classes)
     end
     sub = _constraint_arr3(sub_raw, "substructure")
-    size(sub, 3) == n_classes || error("constraint_feature.substructure channel mismatch")
+    size(sub, 1) == n_classes || error("constraint_feature.substructure channel mismatch: expected $n_classes, got $(size(sub, 1))")
     return sub
 end
+
+# ─── ConstraintEmbedder ─────────────────────────────────────────────────────
 
 @concrete struct ConstraintEmbedder
     pocket_z_embedder
@@ -266,9 +287,9 @@ function ConstraintEmbedder(
     initialize_method::Symbol = :zero,
     rng::AbstractRNG = Random.default_rng(),
 )
-    p = pocket_enable ? LinearNoBias(c_constraint_z, pocket_c_z_input; rng = rng) : nothing
-    c = contact_enable ? LinearNoBias(c_constraint_z, contact_c_z_input; rng = rng) : nothing
-    ca = contact_atom_enable ? LinearNoBias(c_constraint_z, contact_atom_c_z_input; rng = rng) : nothing
+    p = pocket_enable ? LinearNoBias(pocket_c_z_input, c_constraint_z; rng = rng) : nothing
+    c = contact_enable ? LinearNoBias(contact_c_z_input, c_constraint_z; rng = rng) : nothing
+    ca = contact_atom_enable ? LinearNoBias(contact_atom_c_z_input, c_constraint_z; rng = rng) : nothing
 
     s = nothing
     if substructure_enable
@@ -333,7 +354,8 @@ function (cemb::ConstraintEmbedder)(constraint_feature)
         pocket_raw = _constraint_get(constraint_feature, "pocket")
         pocket_raw === nothing || begin
             pocket = _constraint_arr3(pocket_raw, "pocket")
-            size(pocket, 3) == size(cemb.pocket_z_embedder.weight, 2) ||
+            # Features-first: dim=1 is input channels, weight dim=2 is input size
+            size(pocket, 1) == size(cemb.pocket_z_embedder.weight, 2) ||
                 error("constraint_feature.pocket channel mismatch")
             zp = cemb.pocket_z_embedder(pocket)
             z_constraint = z_constraint === nothing ? zp : z_constraint .+ zp
@@ -344,7 +366,7 @@ function (cemb::ConstraintEmbedder)(constraint_feature)
         contact_raw = _constraint_get(constraint_feature, "contact")
         contact_raw === nothing || begin
             contact = _constraint_arr3(contact_raw, "contact")
-            size(contact, 3) == size(cemb.contact_z_embedder.weight, 2) ||
+            size(contact, 1) == size(cemb.contact_z_embedder.weight, 2) ||
                 error("constraint_feature.contact channel mismatch")
             zc = cemb.contact_z_embedder(contact)
             z_constraint = z_constraint === nothing ? zc : z_constraint .+ zc
@@ -355,7 +377,7 @@ function (cemb::ConstraintEmbedder)(constraint_feature)
         contact_atom_raw = _constraint_get(constraint_feature, "contact_atom")
         contact_atom_raw === nothing || begin
             contact_atom = _constraint_arr3(contact_atom_raw, "contact_atom")
-            size(contact_atom, 3) == size(cemb.contact_atom_z_embedder.weight, 2) ||
+            size(contact_atom, 1) == size(cemb.contact_atom_z_embedder.weight, 2) ||
                 error("constraint_feature.contact_atom channel mismatch")
             zca = cemb.contact_atom_z_embedder(contact_atom)
             z_constraint = z_constraint === nothing ? zca : z_constraint .+ zca

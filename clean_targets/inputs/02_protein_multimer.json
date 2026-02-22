@@ -1,0 +1,7 @@
+[{
+  "name": "protein_heterodimer",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"proteinChain": {"sequence": "MVHLTPEEKSAVTALWGKVNVDEVGGEALGRLLVVYPWTQRFFESFGDLST", "count": 1}}
+  ]
+}]

@@ -1,0 +1,14 @@
+# Target 27: Multi-Chain Target
+# Multiple target chains, hotspots on different chains
+# Tests: multi-chain condition assembly, cross-chain hotspot handling
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-100"]
+      hotspots: [10, 11, 45, 46]
+    B:
+      hotspots: [20, 30]
+
+binder_length: 100

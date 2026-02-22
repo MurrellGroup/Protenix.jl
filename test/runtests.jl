@@ -560,7 +560,7 @@ end
         n_sample = 1,
         rng = MersenneTwister(5555),
     )
-    @test size(pred_mixed.coordinate) == (1, length(bundle_mixed["atoms"]), 3)
+    @test size(pred_mixed.coordinate) == (3, length(bundle_mixed["atoms"]), 1)
     @test all(isfinite, pred_mixed.coordinate)
 
     mktempdir() do d
@@ -1141,7 +1141,7 @@ end
         n_sample = 1,
         rng = MersenneTwister(11),
     )
-    @test size(folded_mini.prediction.coordinate) == (1, length(folded_mini.atoms), 3)
+    @test size(folded_mini.prediction.coordinate) == (3, length(folded_mini.atoms), 1)
     @test all(isfinite, folded_mini.prediction.coordinate)
 
     mktempdir() do d
@@ -1167,7 +1167,7 @@ end
         n_sample = 1,
         rng = MersenneTwister(22),
     )
-    @test size(folded_base.prediction.coordinate) == (1, length(folded_base.atoms), 3)
+    @test size(folded_base.prediction.coordinate) == (3, length(folded_base.atoms), 1)
     @test all(isfinite, folded_base.prediction.coordinate)
 
     mktempdir() do d
@@ -1253,7 +1253,7 @@ end
         n_sample = 1,
         rng = MersenneTwister(333),
     )
-    @test size(pred.coordinate) == (1, length(bundle["atoms"]), 3)
+    @test size(pred.coordinate) == (3, length(bundle["atoms"]), 1)
     @test all(isfinite, pred.coordinate)
 
     mktempdir() do d
@@ -1334,14 +1334,14 @@ end
     end
 
     cf = Dict(
-        "pocket" => ones(Float32, 3, 3, 1),
-        "contact" => zeros(Float32, 3, 3, 2),
-        "contact_atom" => zeros(Float32, 3, 3, 2),
-        "substructure" => zeros(Float32, 3, 3, 4),
+        "pocket" => ones(Float32, 1, 3, 3),          # (C=1, N, N) features-first
+        "contact" => zeros(Float32, 2, 3, 3),         # (C=2, N, N) features-first
+        "contact_atom" => zeros(Float32, 2, 3, 3),    # (C=2, N, N) features-first
+        "substructure" => zeros(Float32, 4, 3, 3),    # (C=4, N, N) features-first
     )
     z = ce(cf)
     @test z !== nothing
-    @test size(z) == (3, 3, 8)
+    @test size(z) == (8, 3, 3)  # (c_z, N, N) features-first
     @test all(z .≈ 1f0)
 
     ce_mlp = PXDesign.ProtenixMini.ConstraintEmbedder(
@@ -1353,9 +1353,9 @@ end
         initialize_method = :zero,
         rng = MersenneTwister(2),
     )
-    z_mlp = ce_mlp(Dict("substructure" => zeros(Float32, 3, 3, 4)))
+    z_mlp = ce_mlp(Dict("substructure" => zeros(Float32, 4, 3, 3)))  # (C=4, N, N) features-first
     @test z_mlp !== nothing
-    @test size(z_mlp) == (3, 3, 8)
+    @test size(z_mlp) == (8, 3, 3)  # (c_z, N, N) features-first
 
     ce_tr = PXDesign.ProtenixMini.ConstraintEmbedder(
         8;
@@ -1367,9 +1367,9 @@ end
         initialize_method = :zero,
         rng = MersenneTwister(3),
     )
-    z_tr = ce_tr(Dict("substructure" => zeros(Float32, 3, 3, 4)))
+    z_tr = ce_tr(Dict("substructure" => zeros(Float32, 4, 3, 3)))  # (C=4, N, N) features-first
     @test z_tr !== nothing
-    @test size(z_tr) == (3, 3, 8)
+    @test size(z_tr) == (8, 3, 3)  # (c_z, N, N) features-first
 
     bundle = PXDesign.ProtenixMini.build_sequence_feature_bundle("ACDE"; task_name = "constraint_typed")
     feat = copy(bundle["input_feature_dict"])
@@ -1384,7 +1384,7 @@ end
     @test typed.constraint_feature !== nothing
     z_typed = ce(typed.constraint_feature)
     @test z_typed !== nothing
-    @test size(z_typed) == (n_tok, n_tok, 8)
+    @test size(z_typed) == (8, n_tok, n_tok)  # (c_z, N, N) features-first
 end
 
 @testset "Cache zero-byte checkpoint refresh" begin
@@ -2067,27 +2067,40 @@ end
 end
 
 @testset "Atom attention modules" begin
+    # Features-first dict for direct encoder/decoder calls
     feat = Dict{String, Any}(
+        "ref_pos" => Float32[
+            0 1 0 1
+            0 0 1 1
+            0 0 0 0
+        ],  # (3, 4) features-first
+        "ref_charge" => zeros(Float32, 4),
+        "ref_mask" => ones(Float32, 4),
+        "ref_element" => hcat(
+            [vcat(1f0, zeros(Float32, 127)) for _ in 1:4]...,
+        ),  # (128, 4) features-first
+        "ref_atom_name_chars" => hcat(
+            [vcat(1f0, zeros(Float32, 255)) for _ in 1:4]...,
+        ),  # (256, 4) features-first
+        "ref_space_uid" => Int[0, 0, 1, 1],
+        "atom_to_token_idx" => Int[0, 0, 1, 1],
+    )
+    # Features-last dict for as_atom_attention_input adapter test
+    feat_fl = Dict{String, Any}(
         "ref_pos" => Float32[
             0 0 0
             1 0 0
             0 1 0
             1 1 0
-        ],
+        ],  # (4, 3) features-last from Python
         "ref_charge" => zeros(Float32, 4),
         "ref_mask" => ones(Float32, 4),
         "ref_element" => vcat(
-            reshape(vcat(1f0, zeros(Float32, 127)), 1, :),
-            reshape(vcat(1f0, zeros(Float32, 127)), 1, :),
-            reshape(vcat(1f0, zeros(Float32, 127)), 1, :),
-            reshape(vcat(1f0, zeros(Float32, 127)), 1, :),
-        ),
+            [reshape(vcat(1f0, zeros(Float32, 127)), 1, :) for _ in 1:4]...,
+        ),  # (4, 128) features-last
         "ref_atom_name_chars" => vcat(
-            reshape(vcat(1f0, zeros(Float32, 255)), 1, :),
-            reshape(vcat(1f0, zeros(Float32, 255)), 1, :),
-            reshape(vcat(1f0, zeros(Float32, 255)), 1, :),
-            reshape(vcat(1f0, zeros(Float32, 255)), 1, :),
-        ),
+            [reshape(vcat(1f0, zeros(Float32, 255)), 1, :) for _ in 1:4]...,
+        ),  # (4, 256) features-last
         "ref_space_uid" => Int[0, 0, 1, 1],
         "atom_to_token_idx" => Int[0, 0, 1, 1],
     )
@@ -2110,7 +2123,7 @@ end
     @test size(c0) == (16, 4)
     @test size(p0) == (4, 2, 4, 2)
     @test all(isfinite, a0)
-    atom_input = PXDesign.Model.as_atom_attention_input(feat)
+    atom_input = PXDesign.Model.as_atom_attention_input(feat_fl)
     a0_nt, q0_nt, c0_nt, p0_nt = enc0(atom_input)
     @test size(a0_nt) == (8, 2)
     @test size(q0_nt) == (16, 4)
