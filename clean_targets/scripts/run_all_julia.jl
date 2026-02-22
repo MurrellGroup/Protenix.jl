@@ -12,6 +12,7 @@
 using CUDA, cuDNN
 using Flux
 using Random
+using MoleculeFlow  # triggers PXDesignMoleculeFlowExt for SMILES ligand bonds + 3D coords
 using PXDesign
 
 # No allowscalar — scalar GPU indexing is forbidden

@@ -7,6 +7,7 @@ using Flux: gpu, cpu
 import ..Device: feats_to_device, feats_to_cpu, device_ref
 import ..Data: AtomRecord, build_feature_bundle_from_atoms, load_structure_atoms
 import ..Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS, STD_RESIDUES_PROTENIX
+import ..Data.Features
 import ..JSONLite: parse_json, write_json
 import ..Model: load_safetensors_weights
 import ..Output: dump_prediction_bundle
@@ -863,6 +864,10 @@ function _normalize_ligand_atom_map(atom_map_any, context::String)
     return out
 end
 
+# Stub: overridden by PXDesignMoleculeFlowExt when MoleculeFlow is loaded.
+# Returns (atoms::Vector{AtomRecord}, bonds::Vector{Tuple{String,String}})
+function _smiles_to_atoms_and_bonds end
+
 function _smiles_atom_name(element::String, i::Int)
     elem = uppercase(strip(element))
     stem = isempty(elem) ? "X" : elem
@@ -907,6 +912,22 @@ function _build_ligand_atoms_from_smiles(smiles::AbstractString; chain_id::Strin
     s = strip(String(smiles))
     isempty(s) && error("SMILES ligand string cannot be empty")
 
+    # Use MoleculeFlow extension for real 3D conformers + bonds when available
+    if hasmethod(_smiles_to_atoms_and_bonds, Tuple{String, String})
+        mf_atoms, mf_bonds = _smiles_to_atoms_and_bonds(String(s), chain_id)
+        isempty(mf_atoms) && error("MoleculeFlow returned no atoms for SMILES: $smiles")
+        # Inject bonds into CCD cache so _compute_token_bonds picks them up
+        if !isempty(mf_bonds)
+            Features._CCD_BOND_CACHE["UNL"] = mf_bonds
+        end
+        atom_map = Dict{Int, String}()
+        for k in 1:length(mf_atoms)
+            atom_map[k] = mf_atoms[k].atom_name
+        end
+        return mf_atoms, atom_map
+    end
+
+    # Fallback: parse SMILES manually (no bonds, spiral placeholder coords)
     elems = String[]
     atom_map = Dict{Int, String}()
     i = firstindex(s)
@@ -999,14 +1020,17 @@ function _build_ligand_atoms_from_file(
     end
     isfile(path) || error("Ligand FILE_ path does not exist: $path")
 
-    loaded = load_structure_atoms(path)
+    loaded, sdf_bonds = load_structure_atoms(path)
     atoms = AtomRecord[]
     atom_map = Dict{Int, String}()
+    # Build old→new atom name mapping for SDF bonds
+    old_to_new_name = Dict{String, String}()
     atom_counter = 0
     for a in loaded
         atom_counter += 1
         atom_name = uppercase(strip(a.atom_name))
         atom_map[atom_counter] = atom_name
+        old_to_new_name[a.atom_name] = atom_name
         push!(
             atoms,
             AtomRecord(
@@ -1025,6 +1049,19 @@ function _build_ligand_atoms_from_file(
         )
     end
     isempty(atoms) && error("No atoms parsed from FILE_ ligand: $path")
+
+    # Inject SDF bonds into the CCD bond cache so _compute_token_bonds picks them up
+    if !isempty(sdf_bonds)
+        res_name = atoms[1].res_name
+        mapped_bonds = Tuple{String, String}[]
+        for (a1, a2) in sdf_bonds
+            n1 = get(old_to_new_name, a1, "")
+            n2 = get(old_to_new_name, a2, "")
+            (!isempty(n1) && !isempty(n2)) && push!(mapped_bonds, (n1, n2))
+        end
+        Features._CCD_BOND_CACHE[uppercase(res_name)] = mapped_bonds
+    end
+
     return atoms, atom_map
 end
 
@@ -3069,7 +3106,7 @@ function convert_structure_to_infer_json(
     out_paths = String[]
 
     for p in paths
-        atoms = load_structure_atoms(p)
+        atoms, _ = load_structure_atoms(p)
         ext = lowercase(splitext(p)[2])
         chains = _protein_chain_sequences(atoms)
         isempty(chains) && error("No protein chains parsed from structure: $p")

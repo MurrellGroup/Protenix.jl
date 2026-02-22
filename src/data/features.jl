@@ -5,7 +5,7 @@ using Random
 import ...Schema: InputTask, MSAChainOptions
 import ...Schema: GenerationSpec
 import ...JSONLite: parse_json
-import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELEMS, STD_RESIDUES_PROTENIX
+import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELEMS, STD_RESIDUES_PROTENIX, RES_ATOMS_DICT
 import ..Tokenizer: AtomRecord, Token, TokenArray, centre_atom_indices, tokenize_atoms
 import ..Design: canonical_resname_for_atom, restype_onehot_encoded
 import ..Structure: load_structure_atoms
@@ -93,11 +93,17 @@ function _atom_to_token_index(tokens::TokenArray, n_atom::Int)
     return out
 end
 
-function _atom_to_tokatom_index(tokens::TokenArray, n_atom::Int)
+function _atom_to_tokatom_index(tokens::TokenArray, atoms::Vector{AtomRecord}, n_atom::Int)
     out = fill(-1, n_atom)
     for tok in tokens
         for (tok_atom_idx, atom_idx) in enumerate(tok.atom_indices)
-            out[atom_idx] = tok_atom_idx - 1
+            a = atoms[atom_idx]
+            pos_map = get(RES_ATOMS_DICT, a.res_name, nothing)
+            if a.mol_type == "ligand" || pos_map === nothing
+                out[atom_idx] = 0
+            else
+                out[atom_idx] = pos_map[a.atom_name]
+            end
         end
     end
     any(==( -1), out) && error("Atom-to-tokatom mapping is incomplete.")
@@ -154,16 +160,19 @@ function _frame_for_lig_token(
     # Check ref_mask validity
     all(ref_mask[idx + 1] != 0 for idx in frame_atom_index) || return 0, frame_atom_index
 
-    # Colinearity check
+    # Colinearity check — matches Python Protenix's get_lig_frame + angle_3p
+    # vec1 = b - a, vec2 = c - b (same vectors as Python featurizer.py:221-222)
     v1 = ref_pos[b_idx, :] .- ref_pos[a_idx, :]
-    v2 = ref_pos[c_idx, :] .- ref_pos[a_idx, :]
-    cross_prod = [
-        v1[2] * v2[3] - v1[3] * v2[2],
-        v1[3] * v2[1] - v1[1] * v2[3],
-        v1[1] * v2[2] - v1[2] * v2[1],
-    ]
-    cross_norm = sqrt(sum(x^2 for x in cross_prod))
-    cross_norm < 1e-5 && return 0, frame_atom_index
+    v2 = ref_pos[c_idx, :] .- ref_pos[b_idx, :]
+    n1 = sqrt(v1[1]^2 + v1[2]^2 + v1[3]^2)
+    n2 = sqrt(v2[1]^2 + v2[2]^2 + v2[3]^2)
+    # Zero-norm check (matches Python np.isclose(norm, 0))
+    (n1 < 1e-6 || n2 < 1e-6) && return 0, frame_atom_index
+    # Angle-based colinearity (matches Python angle_3p with 1e-4 epsilon)
+    dp = v1[1] * v2[1] + v1[2] * v2[2] + v1[3] * v2[3]
+    cos_theta = clamp(dp / (n1 * n2 + 1f-4), -1f0, 1f0)
+    theta_deg = acosd(cos_theta)
+    (theta_deg <= 25f0 || theta_deg >= 155f0) && return 0, frame_atom_index
 
     return 1, frame_atom_index
 end
@@ -223,7 +232,16 @@ function _distogram_rep_atom_indices(atoms::Vector{AtomRecord}, tokens::TokenArr
                 atom_idx = tok.atom_indices[pos_fallback]
             end
         elseif first_atom.mol_type == "dna" || first_atom.mol_type == "rna"
-            pos = findfirst(==("C1'"), tok.atom_names)
+            # Purines (DA, DG, A, G) → C4; Pyrimidines (DC, DT, C, U) → C2; Unknown (DN, N) → C1'
+            rn = first_atom.res_name
+            if rn in ("DA", "DG", "A", "G")
+                rep_name = "C4"
+            elseif rn in ("DC", "DT", "C", "U")
+                rep_name = "C2"
+            else
+                rep_name = "C1'"
+            end
+            pos = findfirst(==(rep_name), tok.atom_names)
             if pos !== nothing
                 atom_idx = tok.atom_indices[pos]
             end
@@ -821,7 +839,7 @@ function _basic_atom_features(
         "ref_pos" => ref_pos,
         "ref_mask" => ref_mask,
         "ref_charge" => ref_charge,
-        "atom_to_tokatom_idx" => _atom_to_tokatom_index(tokens, n),
+        "atom_to_tokatom_idx" => _atom_to_tokatom_index(tokens, atoms, n),
         "token_bonds" => token_bonds,
     )
 end
@@ -983,11 +1001,12 @@ function build_basic_feature_bundle(
     target_atoms = if isempty(strip(task.structure_file))
         AtomRecord[]
     else
-        load_structure_atoms(
+        a, _ = load_structure_atoms(
             task.structure_file;
             selected_chains = task.chain_ids,
             crop = task.crop,
         )
+        a
     end
     binder_chain_idx = length(task.chain_ids) + 1
     binder_chain = string(_chain_letters(binder_chain_idx), "0")

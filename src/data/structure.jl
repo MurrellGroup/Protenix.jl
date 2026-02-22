@@ -482,9 +482,16 @@ function _parse_sdf_atoms(path::AbstractString)
     # Line 4 is the counts line: aaabbblll...
     counts_line = lines[4]
     n_atoms = parse(Int, strip(counts_line[1:3]))
+    n_bonds = length(counts_line) >= 6 ? parse(Int, strip(counts_line[4:6])) : 0
 
+    # Track which SDF atom indices are hydrogen (to skip in bonds too)
+    sdf_elements = String[]  # element per SDF atom index (1-based)
+    # Map from SDF atom index → non-H atom counter (0 if hydrogen)
+    sdf_to_heavy = Dict{Int, Int}()
     atom_counter = 0
+
     for i in 5:(4 + n_atoms)
+        sdf_idx = i - 4
         i > length(lines) && break
         line = lines[i]
         length(line) < 34 && continue
@@ -495,10 +502,16 @@ function _parse_sdf_atoms(path::AbstractString)
         element = uppercase(strip(line[31:33]))
         isempty(element) && continue
 
+        push!(sdf_elements, element)
+
         # Skip hydrogen atoms for ligand representation (matches CCD behavior)
-        element == "H" && continue
+        if element == "H"
+            sdf_to_heavy[sdf_idx] = 0
+            continue
+        end
 
         atom_counter += 1
+        sdf_to_heavy[sdf_idx] = atom_counter
         atom_name = element * string(atom_counter)
 
         push!(
@@ -519,7 +532,24 @@ function _parse_sdf_atoms(path::AbstractString)
         )
     end
 
-    return atoms
+    # Parse bond block and store bonds between non-hydrogen atoms
+    bonds = Tuple{String, String}[]
+    bond_start = 4 + n_atoms + 1
+    for i in bond_start:(bond_start + n_bonds - 1)
+        i > length(lines) && break
+        line = lines[i]
+        startswith(strip(line), "M") && break  # M  END
+        length(line) < 6 && continue
+        a1_sdf = parse(Int, strip(line[1:3]))
+        a2_sdf = parse(Int, strip(line[4:6]))
+        h1 = get(sdf_to_heavy, a1_sdf, 0)
+        h2 = get(sdf_to_heavy, a2_sdf, 0)
+        (h1 == 0 || h2 == 0) && continue  # skip bonds involving hydrogen
+        # Use atom names for consistency with CCD bond format
+        push!(bonds, (atoms[h1].atom_name, atoms[h2].atom_name))
+    end
+
+    return atoms, bonds
 end
 
 function load_structure_atoms(
@@ -531,12 +561,15 @@ function load_structure_atoms(
     isfile(path) || error("Structure file not found: $path")
 
     ext = lowercase(splitext(path)[2])
+    sdf_bonds = Tuple{String, String}[]
     atoms = if ext == ".pdb"
         _parse_pdb_atoms(path)
     elseif ext == ".cif" || ext == ".mmcif"
         _parse_mmcif_atoms(path)
     elseif ext == ".sdf" || ext == ".mol"
-        _parse_sdf_atoms(path)
+        a, b = _parse_sdf_atoms(path)
+        sdf_bonds = b
+        a
     else
         error("Unsupported structure file extension '$ext' for $path")
     end
@@ -546,7 +579,7 @@ function load_structure_atoms(
     isempty(filtered) && error("No atoms left after applying chain/crop filters for $path")
     normalized = _normalize_loaded_atoms(filtered)
     isempty(normalized) && error("No atoms left after structure normalization for $path")
-    return normalized
+    return normalized, sdf_bonds
 end
 
 end
