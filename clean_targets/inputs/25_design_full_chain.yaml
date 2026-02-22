@@ -1,0 +1,11 @@
+# Target 25: Full Chain (No Crop)
+# Condition on full target chain without cropping
+# Tests: full-length target handling (larger input)
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      hotspots: [40, 99, 107]
+
+binder_length: 80

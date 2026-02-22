@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s032_smi_ethanol",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCO",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

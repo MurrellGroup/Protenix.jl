@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s046_ptm_hyp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGPTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_HYP",
+              "ptmPosition": 4
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

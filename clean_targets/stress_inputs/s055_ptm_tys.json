@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s055_ptm_tys",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGATYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_TYS",
+              "ptmPosition": 6
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

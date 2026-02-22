@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s018_ccd_gal",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_GAL",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

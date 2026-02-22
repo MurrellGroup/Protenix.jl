@@ -28,7 +28,7 @@ using .DesignConditionEmbedderModule:
     InputFeatureEmbedderDesign,
     DesignConditionEmbedder
 using .FeatureViews: as_relpos_input, as_template_input, as_atom_attention_input
-using .Primitives: LinearNoBias, LayerNormNoOffset, AdaptiveLayerNorm, Transition, silu
+using .Primitives: LinearNoBias, LayerNormFirst, BGLinear, AdaptiveLayerNorm, Transition, silu
 using .DiffusionConditioningModule: DiffusionConditioning, prepare_pair_cache
 using .TransformerBlocks:
     ConditionedTransitionBlock,
@@ -65,7 +65,7 @@ export ConditionTemplateEmbedder, RelativePositionEncoding
 export condition_template_embedding, relative_position_features, fourier_embedding
 export DesignAtomAttentionEncoder, InputFeatureEmbedderDesign, DesignConditionEmbedder
 export as_relpos_input, as_template_input, as_atom_attention_input
-export LinearNoBias, LayerNormNoOffset, AdaptiveLayerNorm, Transition, silu
+export LinearNoBias, LayerNormFirst, BGLinear, AdaptiveLayerNorm, Transition, silu
 export DiffusionConditioning, prepare_pair_cache
 export ConditionedTransitionBlock
 export AttentionPairBias, DiffusionTransformerBlock, DiffusionTransformer

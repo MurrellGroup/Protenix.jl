@@ -1,0 +1,13 @@
+[
+  {
+    "name": "s098_edge_dna_only",
+    "sequences": [
+      {
+        "dnaSequence": {
+          "sequence": "ATGCATGC",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

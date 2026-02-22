@@ -1,0 +1,11 @@
+# Target 24: Conditional, No Hotspots
+# Target structure but NO hotspot residues specified
+# Tests: conditioning without interface emphasis — model must infer binding site
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-116"]
+
+binder_length: 80

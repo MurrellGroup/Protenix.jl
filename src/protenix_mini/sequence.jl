@@ -48,7 +48,7 @@ end
 """
 Build an all-heavy-atom protein chain from a one-letter amino-acid sequence.
 """
-function build_sequence_atoms(sequence::AbstractString; chain_id::String = "A0")
+function build_sequence_atoms(sequence::AbstractString; chain_id::String = "A")
     seq = uppercase(strip(sequence))
     isempty(seq) && error("sequence must be non-empty")
 
@@ -93,7 +93,7 @@ Build a Protenix-mini compatible feature bundle directly from a sequence.
 """
 function build_sequence_feature_bundle(
     sequence::AbstractString;
-    chain_id::String = "A0",
+    chain_id::String = "A",
     task_name::String = "protenix_mini_sequence",
     rng::AbstractRNG = Random.default_rng(),
 )
@@ -127,7 +127,7 @@ Run infer-only Protenix-mini folding from a one-letter sequence.
 function fold_sequence(
     model::ProtenixMiniModel,
     sequence::AbstractString;
-    chain_id::String = "A0",
+    chain_id::String = "A",
     n_cycle::Int = model.n_cycle,
     n_step::Int = model.sample_n_step,
     n_sample::Int = model.sample_n_sample,

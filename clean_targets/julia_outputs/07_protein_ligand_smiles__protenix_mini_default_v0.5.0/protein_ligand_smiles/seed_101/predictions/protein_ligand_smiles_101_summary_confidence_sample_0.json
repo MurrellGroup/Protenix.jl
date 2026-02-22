@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"protein_ligand_smiles","seed":101,"sample_idx":0,"plddt_logits_shape":[50,429],"pae_logits_shape":[64,82,82],"pde_logits_shape":[64,82,82],"resolved_logits_shape":[2,429],"plddt_logits_maxprob_mean":0.06850980266510058,"resolved_logits_maxprob_mean":0.9490278498648165}

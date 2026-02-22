@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s006_ccd_hem",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_HEM",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,1 @@
+[{"name":"24_design_no_hotspots","hotspot":{},"generation":[{"length":80,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-116"},"chain_id":["A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif","msa":{}}}]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s051_ptm_nle",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MALGSTYK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_NLE",
+              "ptmPosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

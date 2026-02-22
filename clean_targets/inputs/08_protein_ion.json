@@ -1,0 +1,8 @@
+[{
+  "name": "protein_ion",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"ion": {"ion": "MG", "count": 2}},
+    {"ion": {"ion": "ZN", "count": 1}}
+  ]
+}]

@@ -1,0 +1,17 @@
+[{
+  "name": "constraint_atom_contact",
+  "sequences": [
+    {"proteinChain": {"sequence": "MSSPLKNALVTAMLAGGALSSPTKQHVGIPVNASPEVGPGKYSFKQVRNPNYKFNGPLSVKKTYLKYGVPIPAWLEDAV", "count": 1}},
+    {"ligand": {"ligand": "CCD_ATP", "count": 1}}
+  ],
+  "constraint": {
+    "contact": [
+      {
+        "atom1": ["1", 1, 50, "CA"],
+        "atom2": ["2", 1, 1, "PA"],
+        "max_distance": 8,
+        "min_distance": 3
+      }
+    ]
+  }
+}]

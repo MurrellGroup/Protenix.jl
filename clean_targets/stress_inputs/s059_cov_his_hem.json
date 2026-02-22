@@ -1,0 +1,29 @@
+[
+  {
+    "name": "s059_cov_his_hem",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MACHGYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_HEM",
+          "count": 1
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": "1",
+        "position1": "4",
+        "atom1": "NE2",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "FE"
+      }
+    ]
+  }
+]

@@ -1,0 +1,1 @@
+[{"name": "23_design_pdl1_hotspots", "condition": {"structure_file": "../structures/5o45.cif", "filter": {"chain_id": ["A"], "crop": {"A": "1-116"}}, "msa": {}}, "hotspot": {"A": [40, 99, 107]}, "generation": [{"type": "protein", "length": 80, "count": 1}]}]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s096_edge_smi_sulfonamide",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "NS(=O)(=O)c1ccc(Cl)cc1",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

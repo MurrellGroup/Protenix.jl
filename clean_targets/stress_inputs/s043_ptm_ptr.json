@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s043_ptm_ptr",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGATYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_PTR",
+              "ptmPosition": 6
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

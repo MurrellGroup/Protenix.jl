@@ -1,0 +1,14 @@
+[{
+  "name": "constraint_pocket",
+  "sequences": [
+    {"proteinChain": {"sequence": "YMLDLQPETTDLYCGGGGSGGGGSGGGGSIQRTPKIQVYSRHPAENGKSNFLNCYVSGFHPSDIEVDLLKNGERIEKVEH", "count": 1}},
+    {"proteinChain": {"sequence": "EVKLVESGGGLVQPGGSLRLSCAASGSIFSINTMGWYRQTPGKQRDLVAD", "count": 1}}
+  ],
+  "constraint": {
+    "pocket": {
+      "binder_chain": ["2", 1],
+      "contact_residues": [["1", 1, 69]],
+      "max_distance": 8
+    }
+  }
+}]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s086_edge_single_aa",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "M",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_GOL",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

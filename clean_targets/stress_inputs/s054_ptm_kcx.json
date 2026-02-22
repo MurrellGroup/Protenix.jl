@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s054_ptm_kcx",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_KCX",
+              "ptmPosition": 8
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

@@ -2,9 +2,12 @@ module ProtenixAPI
 
 using Random
 using Statistics
+using Flux: gpu, cpu
 
+import ..Device: feats_to_device, feats_to_cpu, device_ref
 import ..Data: AtomRecord, build_feature_bundle_from_atoms, load_structure_atoms
 import ..Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS, STD_RESIDUES_PROTENIX
+import ..Data.Features
 import ..JSONLite: parse_json, write_json
 import ..Model: load_safetensors_weights
 import ..Output: dump_prediction_bundle
@@ -18,6 +21,7 @@ export ProtenixModelSpec,
     ProtenixSequenceOptions,
     PredictJSONRecord,
     PredictSequenceRecord,
+    ProtenixHandle,
     MODEL_SPECS,
     resolve_model_spec,
     recommended_params,
@@ -26,7 +30,10 @@ export ProtenixModelSpec,
     predict_json,
     predict_sequence,
     convert_structure_to_infer_json,
-    add_precomputed_msa_to_json
+    add_precomputed_msa_to_json,
+    load_protenix,
+    fold,
+    confidence_metrics
 
 struct ProtenixModelSpec
     model_name::String
@@ -54,6 +61,7 @@ struct ProtenixPredictOptions
     sample::Union{Nothing, Int}
     use_msa::Union{Nothing, Bool}
     strict::Bool
+    gpu::Bool
 end
 
 function ProtenixPredictOptions(;
@@ -67,6 +75,7 @@ function ProtenixPredictOptions(;
     sample::Union{Nothing, Integer} = nothing,
     use_msa::Union{Nothing, Bool} = nothing,
     strict::Bool = true,
+    gpu::Bool = false,
 )
     s = Int.(collect(seeds))
     isempty(s) && error("seeds must be non-empty")
@@ -85,6 +94,7 @@ function ProtenixPredictOptions(;
         sample === nothing ? nothing : Int(sample),
         use_msa,
         strict,
+        gpu,
     )
 end
 
@@ -111,7 +121,7 @@ const PredictSequenceRecord = NamedTuple{
 function ProtenixSequenceOptions(;
     common::ProtenixPredictOptions = ProtenixPredictOptions(),
     task_name::AbstractString = "protenix_sequence",
-    chain_id::AbstractString = "A0",
+    chain_id::AbstractString = "A",
     esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     emb = esm_token_embedding === nothing ? nothing : Float32.(esm_token_embedding)
@@ -300,6 +310,9 @@ const _HHBLITS_TO_PROTENIX = let
     for i in eachindex(_HHBLITS_ID_TO_AA)
         aa = _HHBLITS_ID_TO_AA[i]
         if aa == '-'
+            # MSA gap is index 31 in the 32-class one-hot space.
+            # Python msa_utils.py: HHBLITS_INDEX_TO_OUR_INDEX maps '-' → 31
+            # (0-19 = amino acids, 20 = UNK, 21-30 = unused, 31 = gap)
             out[i] = 31
         else
             aa3 = get(PROT_STD_RESIDUES_ONE_TO_THREE, string(aa), "UNK")
@@ -441,7 +454,7 @@ function _chain_letters(n::Int)
 end
 
 function _chain_id_from_index(i::Int)
-    return _chain_letters(i) * "0"
+    return _chain_letters(i)
 end
 
 function _as_string_dict(x)
@@ -756,6 +769,7 @@ function _build_polymer_atoms_from_codes(
             for a in comp_atoms
                 atom_name = String(a.atom_name)
                 atom_name == "OXT" && mol_type == "protein" && res_id < n_res && continue
+                atom_name == "OP3" && (mol_type == "dna" || mol_type == "rna") && res_id > 1 && continue
                 element = isempty(a.element) ? _infer_element_from_atom_name(atom_name) : String(a.element)
                 xyz = a.has_coord ? (Float32(a.x + xoff), Float32(a.y), Float32(a.z)) : _pseudo_atom_xyz(res_id, atom_name)
                 centre = _polymer_centre_atom(mol_type, atom_name)
@@ -820,12 +834,22 @@ function _build_ligand_atoms_from_codes(ccd_codes::AbstractVector{<:AbstractStri
             continue
         end
 
-        element = length(code) <= 2 ? code : _infer_element_from_atom_name(code)
-        atom_name = length(code) <= 4 ? code : "C1"
-        push!(
-            atoms,
-            AtomRecord(atom_name, code, "ligand", uppercase(element), chain_id, res_id, true, xoff, 0f0, 0f0, is_resolved),
-        )
+        # For short codes (1-2 chars), treat the code as a single-atom ion/element.
+        # For longer codes (e.g. ATP, FAD), CCD component data is required.
+        if length(code) <= 2
+            element = uppercase(code)
+            atom_name = code
+            push!(
+                atoms,
+                AtomRecord(atom_name, code, "ligand", element, chain_id, res_id, true, xoff, 0f0, 0f0, is_resolved),
+            )
+        else
+            error(
+                "CCD component data not found for ligand code '$(code)'. " *
+                "Ensure the CCD components file is available (set PROTENIX_DATA_ROOT_DIR or place " *
+                "components.v20240608.cif in release_data/ccd_cache/)."
+            )
+        end
     end
     return atoms
 end
@@ -839,6 +863,10 @@ function _normalize_ligand_atom_map(atom_map_any, context::String)
     end
     return out
 end
+
+# Stub: overridden by PXDesignMoleculeFlowExt when MoleculeFlow is loaded.
+# Returns (atoms::Vector{AtomRecord}, bonds::Vector{Tuple{String,String}})
+function _smiles_to_atoms_and_bonds end
 
 function _smiles_atom_name(element::String, i::Int)
     elem = uppercase(strip(element))
@@ -884,6 +912,22 @@ function _build_ligand_atoms_from_smiles(smiles::AbstractString; chain_id::Strin
     s = strip(String(smiles))
     isempty(s) && error("SMILES ligand string cannot be empty")
 
+    # Use MoleculeFlow extension for real 3D conformers + bonds when available
+    if hasmethod(_smiles_to_atoms_and_bonds, Tuple{String, String})
+        mf_atoms, mf_bonds = _smiles_to_atoms_and_bonds(String(s), chain_id)
+        isempty(mf_atoms) && error("MoleculeFlow returned no atoms for SMILES: $smiles")
+        # Inject bonds into CCD cache so _compute_token_bonds picks them up
+        if !isempty(mf_bonds)
+            Features._CCD_BOND_CACHE["UNL"] = mf_bonds
+        end
+        atom_map = Dict{Int, String}()
+        for k in 1:length(mf_atoms)
+            atom_map[k] = mf_atoms[k].atom_name
+        end
+        return mf_atoms, atom_map
+    end
+
+    # Fallback: parse SMILES manually (no bonds, spiral placeholder coords)
     elems = String[]
     atom_map = Dict{Int, String}()
     i = firstindex(s)
@@ -976,14 +1020,17 @@ function _build_ligand_atoms_from_file(
     end
     isfile(path) || error("Ligand FILE_ path does not exist: $path")
 
-    loaded = load_structure_atoms(path)
+    loaded, sdf_bonds = load_structure_atoms(path)
     atoms = AtomRecord[]
     atom_map = Dict{Int, String}()
+    # Build old→new atom name mapping for SDF bonds
+    old_to_new_name = Dict{String, String}()
     atom_counter = 0
     for a in loaded
         atom_counter += 1
         atom_name = uppercase(strip(a.atom_name))
         atom_map[atom_counter] = atom_name
+        old_to_new_name[a.atom_name] = atom_name
         push!(
             atoms,
             AtomRecord(
@@ -1002,6 +1049,19 @@ function _build_ligand_atoms_from_file(
         )
     end
     isempty(atoms) && error("No atoms parsed from FILE_ ligand: $path")
+
+    # Inject SDF bonds into the CCD bond cache so _compute_token_bonds picks them up
+    if !isempty(sdf_bonds)
+        res_name = atoms[1].res_name
+        mapped_bonds = Tuple{String, String}[]
+        for (a1, a2) in sdf_bonds
+            n1 = get(old_to_new_name, a1, "")
+            n2 = get(old_to_new_name, a2, "")
+            (!isempty(n1) && !isempty(n2)) && push!(mapped_bonds, (n1, n2))
+        end
+        Features._CCD_BOND_CACHE[uppercase(res_name)] = mapped_bonds
+    end
+
     return atoms, atom_map
 end
 
@@ -1790,6 +1850,7 @@ function _inject_task_covalent_token_bonds!(
     bonds_any isa AbstractVector || error("task.covalent_bonds must be an array when provided.")
     isempty(bonds_any) && return feat
 
+    cif_bonds = NamedTuple{(:chain1,:res_name1,:res_id1,:atom_name1,:chain2,:res_name2,:res_id2,:atom_name2), Tuple{String,String,Int,String,String,String,Int,String}}[]
     n_tok = size(feat["restype"], 1)
     token_bonds = haskey(feat, "token_bonds") ? Int.(feat["token_bonds"]) : zeros(Int, n_tok, n_tok)
     atom_to_token_idx = Int.(feat["atom_to_token_idx"])
@@ -1851,10 +1912,20 @@ function _inject_task_covalent_token_bonds!(
             (1 <= t1 <= n_tok && 1 <= t2 <= n_tok) || error("$ctx resolved token index out of range.")
             token_bonds[t1, t2] = 1
             token_bonds[t2, t1] = 1
+            # Store cross-chain bond records for CIF output
+            ra1 = atoms[a1]
+            ra2 = atoms[a2]
+            if ra1.chain_id != ra2.chain_id
+                push!(cif_bonds, (
+                    chain1 = ra1.chain_id, res_name1 = ra1.res_name, res_id1 = ra1.res_id, atom_name1 = ra1.atom_name,
+                    chain2 = ra2.chain_id, res_name2 = ra2.res_name, res_id2 = ra2.res_id, atom_name2 = ra2.atom_name,
+                ))
+            end
         end
     end
 
     feat["token_bonds"] = token_bonds
+    feat["_cif_cross_chain_bonds"] = cif_bonds
     return feat
 end
 
@@ -2613,7 +2684,7 @@ function _load_model(model_name::AbstractString, weights_path::AbstractString; s
 
     w = load_safetensors_weights(weights_path)
     if params.family == :mini
-        m = ProtenixMini.build_protenix_mini_model(w)
+        m = ProtenixMini.build_protenix_mini_model(w; esm_enable = params.needs_esm_embedding)
         ProtenixMini.load_protenix_mini_model!(m, w; strict = strict)
         return (model = m, family = :mini)
     elseif params.family == :base
@@ -2669,6 +2740,37 @@ function _run_model(
     error("Unsupported model family: $(loaded.family)")
 end
 
+function _constraint_to_device(cf::Nothing, ref)
+    return nothing
+end
+
+function _constraint_to_device(cf, ref)
+    return ProtenixMini.Features.ConstraintFeatures(
+        cf.contact === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.contact)), cf.contact),
+        cf.pocket === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.pocket)), cf.pocket),
+        cf.contact_atom === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.contact_atom)), cf.contact_atom),
+        cf.substructure === nothing ? nothing : copyto!(similar(ref, Float32, size(cf.substructure)), cf.substructure),
+    )
+end
+
+function _features_to_device(feat::ProtenixMini.ProtenixFeatures, ref::AbstractArray)
+    return ProtenixMini.features_to_device(feat, ref)
+end
+
+function _pred_to_cpu(pred)
+    return (
+        coordinate = Array(pred.coordinate),
+        s_inputs = Array(pred.s_inputs),
+        s_trunk = Array(pred.s_trunk),
+        z_trunk = Array(pred.z_trunk),
+        distogram_logits = Array(pred.distogram_logits),
+        plddt = Array(pred.plddt),
+        pae = Array(pred.pae),
+        pde = Array(pred.pde),
+        resolved = Array(pred.resolved),
+    )
+end
+
 function _softmax(v::AbstractVector{<:Real})
     m = maximum(v)
     ex = exp.(Float64.(v) .- Float64(m))
@@ -2677,13 +2779,14 @@ function _softmax(v::AbstractVector{<:Real})
 end
 
 function _confidence_proxy(logits::AbstractArray{<:Real, 2})
-    size(logits, 1) > 0 || return 0.0
+    # Features-first: logits (bins, N_item). Softmax over dim=1 (bins), average over dim=2 (items).
+    size(logits, 2) > 0 || return 0.0
     acc = 0.0
-    for i in 1:size(logits, 1)
-        p = _softmax(@view logits[i, :])
+    for i in 1:size(logits, 2)
+        p = _softmax(@view logits[:, i])
         acc += maximum(p)
     end
-    return acc / size(logits, 1)
+    return acc / size(logits, 2)
 end
 
 function _write_confidence_summaries(
@@ -2692,12 +2795,13 @@ function _write_confidence_summaries(
     seed::Int,
     pred,
 )
-    n_sample = size(pred.coordinate, 1)
+    # Features-first: coordinate (3, N_atom, N_sample), plddt (b, N_atom, N_sample), etc.
+    n_sample = size(pred.coordinate, 3)
     for sample_idx in 1:n_sample
-        plddt_i = Array{Float32, 2}(pred.plddt[sample_idx, :, :])
-        pae_i = Array{Float32, 3}(pred.pae[sample_idx, :, :, :])
-        pde_i = Array{Float32, 3}(pred.pde[sample_idx, :, :, :])
-        resolved_i = Array{Float32, 2}(pred.resolved[sample_idx, :, :])
+        plddt_i = Array{Float32, 2}(pred.plddt[:, :, sample_idx])
+        pae_i = Array{Float32, 3}(pred.pae[:, :, :, sample_idx])
+        pde_i = Array{Float32, 3}(pred.pde[:, :, :, sample_idx])
+        resolved_i = Array{Float32, 2}(pred.resolved[:, :, sample_idx])
 
         summary = (
             model_output = "julia_protenix",
@@ -2741,13 +2845,17 @@ function _resolve_predict_runtime(opts::ProtenixPredictOptions)
     )
     weights_ref = default_weights_path(opts.model_name)
     loaded = _load_model(opts.model_name, weights_ref; strict = opts.strict)
-    return (params = params, loaded = loaded)
+    if opts.gpu
+        loaded = (model = gpu(loaded.model), family = loaded.family)
+    end
+    return (params = params, loaded = loaded, gpu = opts.gpu)
 end
 
 function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
     runtime = _resolve_predict_runtime(opts)
     params = runtime.params
     loaded = runtime.loaded
+    use_gpu = runtime.gpu
     json_paths = _collect_input_paths(input; exts = (".json",))
     records = PredictJSONRecord[]
 
@@ -2805,6 +2913,10 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     "task '$task_name' in $(basename(json_path))",
                 )
                 typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+                if use_gpu
+                    ref = device_ref(loaded.model)
+                    typed_feat = _features_to_device(typed_feat, ref)
+                end
                 pred = _run_model(
                     loaded,
                     typed_feat;
@@ -2813,9 +2925,13 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     sample = params.sample,
                     rng = rng,
                 )
+                if use_gpu
+                    pred = _pred_to_cpu(pred)
+                end
 
                 task_dump_dir = joinpath(opts.out_dir, task_name, "seed_$(seed)")
-                pred_dir = dump_prediction_bundle(task_dump_dir, task_name, bundle["atoms"], pred.coordinate)
+                cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+                pred_dir = dump_prediction_bundle(task_dump_dir, task_name, bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
                 _write_confidence_summaries(pred_dir, task_name, seed, pred)
                 cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
 
@@ -2848,6 +2964,7 @@ function predict_json(
     sample::Union{Nothing, Int} = nothing,
     use_msa::Union{Nothing, Bool} = nothing,
     strict::Bool = true,
+    gpu::Bool = false,
 )
     opts = ProtenixPredictOptions(
         out_dir = out_dir,
@@ -2860,6 +2977,7 @@ function predict_json(
         sample = sample,
         use_msa = use_msa,
         strict = strict,
+        gpu = gpu,
     )
     return predict_json(input, opts)
 end
@@ -2871,6 +2989,7 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
     runtime = _resolve_predict_runtime(opts.common)
     params = runtime.params
     loaded = runtime.loaded
+    use_gpu = runtime.gpu
     records = PredictSequenceRecord[]
 
     for seed in opts.common.seeds
@@ -2899,6 +3018,10 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
             "sequence task '$(opts.task_name)'",
         )
         typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+        if use_gpu
+            ref = device_ref(loaded.model)
+            typed_feat = _features_to_device(typed_feat, ref)
+        end
         pred = _run_model(
             loaded,
             typed_feat;
@@ -2907,9 +3030,13 @@ function predict_sequence(sequence::AbstractString, opts::ProtenixSequenceOption
             sample = params.sample,
             rng = rng,
         )
+        if use_gpu
+            pred = _pred_to_cpu(pred)
+        end
 
         task_dump_dir = joinpath(opts.common.out_dir, opts.task_name, "seed_$(seed)")
-        pred_dir = dump_prediction_bundle(task_dump_dir, opts.task_name, bundle["atoms"], pred.coordinate)
+        cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+        pred_dir = dump_prediction_bundle(task_dump_dir, opts.task_name, bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
         _write_confidence_summaries(pred_dir, opts.task_name, seed, pred)
         cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
 
@@ -2933,7 +3060,7 @@ function predict_sequence(
     model_name::String = "protenix_base_default_v0.5.0",
     weights_path::AbstractString = "",
     task_name::String = "protenix_sequence",
-    chain_id::String = "A0",
+    chain_id::String = "A",
     seeds::Vector{Int} = [101],
     use_default_params::Bool = true,
     cycle::Union{Nothing, Int} = nothing,
@@ -2942,6 +3069,7 @@ function predict_sequence(
     use_msa::Union{Nothing, Bool} = nothing,
     esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
     strict::Bool = true,
+    gpu::Bool = false,
 )
     common = ProtenixPredictOptions(
         out_dir = out_dir,
@@ -2954,6 +3082,7 @@ function predict_sequence(
         sample = sample,
         use_msa = use_msa,
         strict = strict,
+        gpu = gpu,
     )
     seq_opts = ProtenixSequenceOptions(
         common = common,
@@ -2977,7 +3106,7 @@ function convert_structure_to_infer_json(
     out_paths = String[]
 
     for p in paths
-        atoms = load_structure_atoms(p)
+        atoms, _ = load_structure_atoms(p)
         ext = lowercase(splitext(p)[2])
         chains = _protein_chain_sequences(atoms)
         isempty(chains) && error("No protein chains parsed from structure: $p")
@@ -3069,6 +3198,237 @@ function add_precomputed_msa_to_json(
     end
     write_json(out_path, output_payload)
     return out_path
+end
+
+# ──────────────────────────────────────────────────────────────────────
+# REPL-friendly API: load_protenix / fold / confidence_metrics
+# ──────────────────────────────────────────────────────────────────────
+
+"""
+    ProtenixHandle
+
+Reusable model handle returned by [`load_protenix`](@ref).
+
+Load once, predict many times:
+
+```julia
+h = load_protenix("protenix_mini_default_v0.5.0"; gpu=true)
+r1 = fold(h, "MKQLLED..."; seed=42)
+r2 = fold(h, "GGGGGGG..."; seed=7)
+```
+"""
+struct ProtenixHandle
+    model::Any          # ProtenixMiniModel or ProtenixBaseModel
+    family::Symbol      # :mini or :base
+    model_name::String
+    on_gpu::Bool
+    params::NamedTuple  # from recommended_params
+end
+
+function Base.show(io::IO, h::ProtenixHandle)
+    print(io, "ProtenixHandle($(h.model_name), family=:$(h.family), gpu=$(h.on_gpu))")
+end
+
+"""
+    load_protenix(model_name="protenix_base_default_v0.5.0"; gpu=false, strict=true)
+
+Load a Protenix model and return a reusable [`ProtenixHandle`](@ref).
+
+# Examples
+
+```julia
+h = load_protenix(gpu=true)
+h = load_protenix("protenix_mini_default_v0.5.0"; gpu=true)
+h = load_protenix("protenix_base_constraint_v0.5.0"; gpu=true)
+```
+"""
+const _flux_gpu = gpu
+
+# pLDDT: 50 bins from 0 to 1, score in 0-100 range
+# pAE: 64 bins from 0 to 32 Angstroms
+# Features-first: bins are in dim=1, spatial dims follow.
+function _logits_to_score(logits::AbstractArray{<:Real}, min_bin::Real, max_bin::Real, no_bins::Int)
+    bin_width = (max_bin - min_bin) / no_bins
+    bin_centers = Float32[min_bin + bin_width * (i - 0.5f0) for i in 1:no_bins]
+    # logits has shape (no_bins, ...). Apply softmax along dim=1 and dot with bin_centers.
+    # Flatten all but first dim
+    outer = prod(size(logits)[2:end])
+    reshaped = reshape(Float64.(logits), no_bins, outer)
+    scores = Vector{Float32}(undef, outer)
+    bc = Float64.(bin_centers)
+    for i in 1:outer
+        col = @view reshaped[:, i]
+        m = maximum(col)
+        ex = exp.(col .- m)
+        s = sum(ex)
+        prob = ex ./ s
+        scores[i] = Float32(sum(prob .* bc))
+    end
+    return reshape(scores, size(logits)[2:end]...)
+end
+
+function _logits_to_plddt(logits::AbstractArray{<:Real})
+    # Features-first: bins in dim=1. pLDDT: bins from 0 to 1, scale to 0-100
+    no_bins = size(logits, 1)
+    scores = _logits_to_score(logits, 0f0, 1f0, no_bins)
+    return scores .* 100f0
+end
+
+function _logits_to_pae(logits::AbstractArray{<:Real})
+    # Features-first: bins in dim=1. PAE: bins from 0 to 32 Angstroms
+    no_bins = size(logits, 1)
+    return _logits_to_score(logits, 0f0, 32f0, no_bins)
+end
+
+function load_protenix(
+    model_name::AbstractString = "protenix_base_default_v0.5.0";
+    gpu::Bool = false,
+    strict::Bool = true,
+)
+    params = recommended_params(model_name; use_default_params = true)
+    weights_ref = default_weights_path(model_name)
+    loaded = _load_model(model_name, weights_ref; strict = strict)
+    if gpu
+        loaded = (model = _flux_gpu(loaded.model), family = loaded.family)
+    end
+    return ProtenixHandle(loaded.model, loaded.family, String(model_name), gpu, params)
+end
+
+"""
+    fold(handle, sequence; seed=101, step=nothing, sample=nothing, cycle=nothing,
+         out_dir=nothing, task_name="protenix_sequence", chain_id="A",
+         esm_token_embedding=nothing)
+
+Fold a protein sequence using a loaded model handle. Returns a `NamedTuple` with
+coordinates, CIF text, file paths, and confidence metrics for a single seed.
+
+# Examples
+
+```julia
+h = load_protenix(gpu=true)
+result = fold(h, "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH")
+result.cif       # mmCIF text as String
+result.plddt     # per-residue pLDDT vector
+result.mean_plddt
+```
+"""
+function fold(
+    handle::ProtenixHandle,
+    sequence::AbstractString;
+    seed::Integer = 101,
+    step::Union{Nothing, Integer} = nothing,
+    sample::Union{Nothing, Integer} = nothing,
+    cycle::Union{Nothing, Integer} = nothing,
+    out_dir::Union{Nothing, AbstractString} = nothing,
+    task_name::AbstractString = "protenix_sequence",
+    chain_id::AbstractString = "A",
+    esm_token_embedding::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
+)
+    seq = uppercase(strip(String(sequence)))
+    isempty(seq) && error("sequence must be non-empty")
+
+    p = handle.params
+    run_cycle = cycle === nothing ? p.cycle : Int(cycle)
+    run_step = step === nothing ? p.step : Int(step)
+    run_sample = sample === nothing ? 1 : Int(sample)
+    actual_out_dir = out_dir === nothing ? mktempdir() : mkpath(String(out_dir))
+
+    rng = MersenneTwister(Int(seed))
+    atoms = ProtenixMini.build_sequence_atoms(seq; chain_id = String(chain_id))
+    bundle = build_feature_bundle_from_atoms(atoms; task_name = String(task_name), rng = rng)
+    _normalize_protenix_feature_dict!(bundle["input_feature_dict"])
+
+    if esm_token_embedding !== nothing
+        emb = esm_token_embedding
+        n_tok = size(bundle["input_feature_dict"]["restype"], 1)
+        size(emb, 1) == n_tok || error(
+            "esm_token_embedding token length mismatch: expected $n_tok, got $(size(emb, 1)).",
+        )
+        bundle["input_feature_dict"]["esm_token_embedding"] = emb
+    end
+    _inject_auto_esm_token_embedding!(
+        bundle["input_feature_dict"],
+        bundle["atoms"],
+        bundle["tokens"],
+        Dict(String(chain_id) => seq),
+        p,
+        "fold task '$(task_name)'",
+    )
+    _validate_required_model_inputs!(p, bundle["input_feature_dict"], "fold task '$(task_name)'")
+
+    typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+    if handle.on_gpu
+        ref = device_ref(handle.model)
+        typed_feat = _features_to_device(typed_feat, ref)
+    end
+
+    pred = _run_model(
+        (model = handle.model, family = handle.family),
+        typed_feat;
+        cycle = run_cycle,
+        step = run_step,
+        sample = run_sample,
+        rng = rng,
+    )
+    if handle.on_gpu
+        pred = _pred_to_cpu(pred)
+    end
+
+    task_dump_dir = joinpath(actual_out_dir, String(task_name), "seed_$(seed)")
+    cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+    pred_dir = dump_prediction_bundle(task_dump_dir, String(task_name), bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
+    _write_confidence_summaries(pred_dir, String(task_name), Int(seed), pred)
+
+    cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
+    cif_text = isempty(cif_paths) ? "" : read(first(cif_paths), String)
+
+    # Convert logits to proper pLDDT scores (0-100 scale)
+    plddt_scores = _logits_to_plddt(pred.plddt)
+    pae_scores = _logits_to_pae(pred.pae)
+    mean_plddt = Float32(Statistics.mean(plddt_scores))
+    mean_pae = Float32(Statistics.mean(pae_scores))
+
+    return (
+        coordinate = pred.coordinate,
+        cif = cif_text,
+        cif_paths = cif_paths,
+        prediction_dir = pred_dir,
+        plddt = plddt_scores,
+        mean_plddt = mean_plddt,
+        pae = pae_scores,
+        mean_pae = mean_pae,
+        pde = pred.pde,
+        resolved = pred.resolved,
+        distogram_logits = pred.distogram_logits,
+        plddt_logits = pred.plddt,
+        pae_logits = pred.pae,
+        seed = Int(seed),
+        task_name = String(task_name),
+    )
+end
+
+"""
+    confidence_metrics(result) → NamedTuple
+
+Extract confidence metrics from a fold result.
+
+```julia
+h = load_protenix(gpu=true)
+result = fold(h, "MKQLLED...")
+m = confidence_metrics(result)
+m.mean_plddt  # average predicted local distance difference test
+m.mean_pae    # average predicted aligned error
+```
+"""
+function confidence_metrics(result::NamedTuple)
+    return (
+        plddt = result.plddt,
+        mean_plddt = result.mean_plddt,
+        pae = result.pae,
+        mean_pae = result.mean_pae,
+        pde = result.pde,
+        resolved = result.resolved,
+    )
 end
 
 end

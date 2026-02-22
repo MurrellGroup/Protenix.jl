@@ -2,7 +2,8 @@ module Utils
 
 using Random
 
-export softmax_lastdim,
+export softmax_firstdim,
+    softmax_lastdim,
     softmax_dim2,
     one_hot_interval,
     one_hot_int,
@@ -13,89 +14,84 @@ export softmax_lastdim,
     sample_msa_indices
 
 function clamp01(x::AbstractArray{<:Real})
-    out = Float32.(x)
-    @inbounds for i in eachindex(out)
-        if out[i] < 0f0
-            out[i] = 0f0
-        elseif out[i] > 1f0
-            out[i] = 1f0
-        end
-    end
-    return out
+    return clamp.(Float32.(x), 0f0, 1f0)
 end
 
+"""
+Softmax along dim=1 (features dimension in features-first convention).
+"""
+function softmax_firstdim(x::AbstractArray{<:Real})
+    y = Float32.(x)
+    c = size(y, 1)
+    rest = Base.tail(size(y))
+    flat = reshape(y, c, :)
+    m = maximum(flat; dims=1)
+    ex = exp.(flat .- m)
+    s = sum(ex; dims=1)
+    return reshape(ex ./ s, size(y))
+end
+
+"""
+Softmax along the last dimension of an array (e.g., for attention over keys).
+"""
 function softmax_lastdim(x::AbstractArray{<:Real})
     y = Float32.(x)
     n = ndims(y)
     n >= 1 || error("softmax_lastdim requires rank >= 1")
     c = size(y, n)
     flat = reshape(y, :, c)
-    out = similar(flat)
-    @inbounds for i in 1:size(flat, 1)
-        row = @view flat[i, :]
-        m = maximum(row)
-        ex = exp.(row .- m)
-        s = sum(ex)
-        out[i, :] .= ex ./ s
-    end
-    return reshape(out, size(y))
+    m = maximum(flat; dims=2)
+    ex = exp.(flat .- m)
+    s = sum(ex; dims=2)
+    return reshape(ex ./ s, size(y))
 end
 
 """
-Softmax along the second dimension of a rank-3 tensor `[I, J, H]`.
+Softmax along the second dimension of a rank-3 tensor `[H, I, J]`.
+Used for attention weights where softmax is over the I dimension.
 """
 function softmax_dim2(x::AbstractArray{<:Real,3})
     y = Float32.(x)
-    i_dim, j_dim, h_dim = size(y)
-    out = similar(y)
-    @inbounds for i in 1:i_dim, h in 1:h_dim
-        m = -Inf32
-        for j in 1:j_dim
-            v = y[i, j, h]
-            if v > m
-                m = v
-            end
-        end
-        s = 0f0
-        for j in 1:j_dim
-            e = exp(y[i, j, h] - m)
-            out[i, j, h] = e
-            s += e
-        end
-        invs = inv(s)
-        for j in 1:j_dim
-            out[i, j, h] *= invs
-        end
-    end
-    return out
+    m = maximum(y; dims=2)
+    ex = exp.(y .- m)
+    s = sum(ex; dims=2)
+    return ex ./ s
 end
 
+"""
+One-hot encoding for a 1D integer vector.
+Features-first: returns `(num_classes, N)`.
+"""
 function one_hot_int(x::AbstractVector{<:Integer}, num_classes::Int)
     num_classes > 0 || error("num_classes must be positive")
-    out = zeros(Float32, length(x), num_classes)
+    out = zeros(Float32, num_classes, length(x))
     @inbounds for i in eachindex(x)
         idx = Int(x[i]) + 1
         1 <= idx <= num_classes || error("one_hot_int index $(x[i]) out of range [0, $(num_classes-1)]")
-        out[i, idx] = 1f0
+        out[idx, i] = 1f0
     end
     return out
 end
 
+"""
+One-hot encoding for a 2D integer matrix.
+Features-first: returns `(num_classes, n1, n2)` from input `(n1, n2)`.
+"""
 function one_hot_int(x::AbstractMatrix{<:Integer}, num_classes::Int)
     num_classes > 0 || error("num_classes must be positive")
     n1, n2 = size(x)
-    out = zeros(Float32, n1, n2, num_classes)
+    out = zeros(Float32, num_classes, n1, n2)
     @inbounds for i in 1:n1, j in 1:n2
         idx = Int(x[i, j]) + 1
         1 <= idx <= num_classes || error("one_hot_int index $(x[i, j]) out of range [0, $(num_classes-1)]")
-        out[i, j, idx] = 1f0
+        out[idx, i, j] = 1f0
     end
     return out
 end
 
 """
 Interval one-hot for scalar distances.
-Returns `[N, M, B]` mask where `lower[b] < x < upper[b]`.
+Features-first: returns `(B, N, M)` mask where `lower[b] < x < upper[b]`.
 """
 function one_hot_interval(
     x::AbstractMatrix{<:Real},
@@ -105,81 +101,68 @@ function one_hot_interval(
     length(lower_bins) == length(upper_bins) || error("lower_bins/upper_bins length mismatch")
     n, m = size(x)
     b = length(lower_bins)
-    out = zeros(Float32, n, m, b)
-    @inbounds for i in 1:n, j in 1:m
-        v = Float32(x[i, j])
-        for k in 1:b
-            lo = Float32(lower_bins[k])
-            hi = Float32(upper_bins[k])
-            out[i, j, k] = (v > lo && v < hi) ? 1f0 : 0f0
-        end
-    end
-    return out
+    xf = Float32.(reshape(x, 1, n, m))
+    lo = reshape(Float32.(lower_bins), b, 1, 1)
+    hi = reshape(Float32.(upper_bins), b, 1, 1)
+    return Float32.((xf .> lo) .& (xf .< hi))
 end
 
+"""
+Broadcast token features to atoms.
+Features-first: `(c, N_token)` → `(c, N_atom)`.
+"""
 function broadcast_token_to_atom(
     x_token::AbstractMatrix{<:Real},
     atom_to_token_idx::AbstractVector{<:Integer},
 )
-    n_atom = length(atom_to_token_idx)
-    c = size(x_token, 2)
-    out = zeros(Float32, n_atom, c)
-    @inbounds for a in 1:n_atom
-        t = Int(atom_to_token_idx[a]) + 1
-        1 <= t <= size(x_token, 1) || error("atom_to_token_idx[$a] out of range")
-        out[a, :] .= Float32.(x_token[t, :])
-    end
-    return out
+    idx_cpu = Array(Int.(atom_to_token_idx)) .+ 1
+    all(i -> 1 <= i <= size(x_token, 2), idx_cpu) || error("atom_to_token_idx out of range")
+    return Float32.(x_token[:, idx_cpu])
 end
 
+"""
+Aggregate atom features to token features by mean.
+Features-first: `(c, N_atom)` → `(c, N_token)`.
+"""
 function aggregate_atom_to_token_mean(
     x_atom::AbstractMatrix{<:Real},
     atom_to_token_idx::AbstractVector{<:Integer},
     n_token::Int,
 )
     n_token > 0 || error("n_token must be positive")
-    size(x_atom, 1) == length(atom_to_token_idx) || error("x_atom/atom_to_token_idx length mismatch")
-    c = size(x_atom, 2)
-    out = zeros(Float32, n_token, c)
-    counts = zeros(Int, n_token)
-    @inbounds for a in 1:size(x_atom, 1)
-        t = Int(atom_to_token_idx[a]) + 1
-        1 <= t <= n_token || error("atom_to_token_idx[$a] out of range")
-        out[t, :] .+= Float32.(x_atom[a, :])
-        counts[t] += 1
+    c = size(x_atom, 1)
+    n_atom = size(x_atom, 2)
+    n_atom == length(atom_to_token_idx) || error("x_atom/atom_to_token_idx length mismatch")
+    x_f = Float32.(x_atom)
+    idx_cpu = Array(Int.(atom_to_token_idx)) .+ 1
+    # Build one-hot mapping on CPU: (N_token, N_atom)
+    oh_cpu = zeros(Float32, n_token, n_atom)
+    @inbounds for i in 1:n_atom
+        1 <= idx_cpu[i] <= n_token || error("atom_to_token_idx[$i] out of range")
+        oh_cpu[idx_cpu[i], i] = 1f0
     end
-    @inbounds for t in 1:n_token
-        if counts[t] > 0
-            out[t, :] ./= counts[t]
-        end
-    end
-    return out
-end
-
-function pairwise_distances(x::AbstractMatrix{<:Real})
-    n = size(x, 1)
-    size(x, 2) == 3 || error("pairwise_distances expects [N,3]")
-    out = zeros(Float32, n, n)
-    @inbounds for i in 1:n
-        xi = Float32(x[i, 1])
-        yi = Float32(x[i, 2])
-        zi = Float32(x[i, 3])
-        for j in 1:n
-            dx = xi - Float32(x[j, 1])
-            dy = yi - Float32(x[j, 2])
-            dz = zi - Float32(x[j, 3])
-            out[i, j] = sqrt(dx * dx + dy * dy + dz * dz)
-        end
-    end
-    return out
+    oh = copyto!(similar(x_f, Float32, n_token, n_atom), oh_cpu)
+    # (c, N_atom) × (N_atom, N_token)' → (c, N_token)
+    sums = x_f * transpose(oh)
+    counts = max.(sum(oh; dims=2)', 1f0)  # (1, N_token)
+    return sums ./ counts
 end
 
 """
-Sample MSA row indices without replacement, matching Python behavior at inference:
-- sample size is random in `[lower_bound, n]`
-- `strategy="random"` uses random permutation
-- `strategy="topk"` uses first rows
-- optional `cutoff` truncates sampled indices
+Pairwise Euclidean distances.
+Features-first: input `(3, N)`, output `(N, N)`.
+"""
+function pairwise_distances(x::AbstractMatrix{<:Real})
+    size(x, 1) == 3 || error("pairwise_distances expects (3, N)")
+    n = size(x, 2)
+    xf = Float32.(x)
+    # (3, N, 1) - (3, 1, N) → (3, N, N), then sum squared over dim 1
+    diff = reshape(xf, 3, n, 1) .- reshape(xf, 3, 1, n)
+    return dropdims(sqrt.(sum(diff .^ 2; dims=1)); dims=1)
+end
+
+"""
+Sample MSA row indices without replacement, matching Python behavior at inference.
 """
 function sample_msa_indices(
     n::Int;

@@ -1,0 +1,13 @@
+# Target 23: Conditional + Hotspots (PDL1 Baseline)
+# Standard binder design: target CIF with hotspots
+# Based on PXDesign's PDL1_quick_start.yaml example
+# Tests: condition embedding, hotspot masking, target structure parsing
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-116"]
+      hotspots: [40, 99, 107]
+
+binder_length: 80

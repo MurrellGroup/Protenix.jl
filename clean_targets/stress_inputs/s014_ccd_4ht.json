@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s014_ccd_4ht",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_4HT",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -62,8 +62,11 @@ function main()
     path = get(ENV, "PAIRFORMER_BLOCK_DIAG", "/tmp/py_pairformer_block_diag.json")
     raw = PXDesign.JSONLite.parse_json(read(path, String))
 
-    s = _to_array_f32(raw["s_in"])
-    z = _to_array_f32(raw["z_in"])
+    # Python reference is features-last; permute to features-first
+    s_py = _to_array_f32(raw["s_in"])    # (N_tok, c_s)
+    z_py = _to_array_f32(raw["z_in"])    # (N_tok, N_tok, c_z)
+    s = permutedims(s_py)                # (c_s, N_tok) features-first
+    z = permutedims(z_py, (3, 1, 2))    # (c_z, N_tok, N_tok) features-first
 
     weights_dir = get(
         ENV,
@@ -75,16 +78,17 @@ function main()
     PXDesign.ProtenixMini.load_protenix_mini_model!(m, w; strict = true)
     blk = m.pairformer_stack.blocks[1]
 
+    # Features-first: z is (c_z, N, N), triangle ops swap dims 2,3 for "end" attention
     tmu_out = blk.tri_mul_out(z; mask = nothing)
     z1 = z + tmu_out
     tmu_in = blk.tri_mul_in(z1; mask = nothing)
     z2 = z1 + tmu_in
     ta_start = blk.tri_att_start(z2; mask = nothing)
     z3 = z2 + ta_start
-    z4 = permutedims(z3, (2, 1, 3))
+    z4 = permutedims(z3, (1, 3, 2))   # swap spatial dims, keep features in dim 1
     ta_end = blk.tri_att_end(z4; mask = nothing)
     z5 = z4 + ta_end
-    z6 = permutedims(z5, (2, 1, 3))
+    z6 = permutedims(z5, (1, 3, 2))   # swap back
     pair_tr = blk.pair_transition(z6)
     z7 = z6 + pair_tr
     apb = blk.attention_pair_bias(s, z7, nothing)
@@ -92,20 +96,23 @@ function main()
     s_tr = blk.single_transition(s1)
     s2 = s1 + s_tr
 
-    _report("tmu_out", _to_array_f32(raw["tmu_out"]), tmu_out)
-    _report("z1", _to_array_f32(raw["z1"]), z1)
-    _report("tmu_in", _to_array_f32(raw["tmu_in"]), tmu_in)
-    _report("z2", _to_array_f32(raw["z2"]), z2)
-    _report("ta_start", _to_array_f32(raw["ta_start"]), ta_start)
-    _report("z3", _to_array_f32(raw["z3"]), z3)
-    _report("ta_end", _to_array_f32(raw["ta_end"]), ta_end)
-    _report("z6", _to_array_f32(raw["z6"]), z6)
-    _report("pair_tr", _to_array_f32(raw["pair_tr"]), pair_tr)
-    _report("z7", _to_array_f32(raw["z7"]), z7)
-    _report("apb", _to_array_f32(raw["apb"]), apb)
-    _report("s1", _to_array_f32(raw["s1"]), s1)
-    _report("s_tr", _to_array_f32(raw["s_tr"]), s_tr)
-    _report("s2", _to_array_f32(raw["s2"]), s2)
+    # Compare in features-first: permute Python (N,N,C) → (C,N,N), (N,C) → (C,N)
+    _p2(x) = permutedims(x)
+    _p3(x) = permutedims(x, (3, 1, 2))
+    _report("tmu_out", _p3(_to_array_f32(raw["tmu_out"])), tmu_out)
+    _report("z1", _p3(_to_array_f32(raw["z1"])), z1)
+    _report("tmu_in", _p3(_to_array_f32(raw["tmu_in"])), tmu_in)
+    _report("z2", _p3(_to_array_f32(raw["z2"])), z2)
+    _report("ta_start", _p3(_to_array_f32(raw["ta_start"])), ta_start)
+    _report("z3", _p3(_to_array_f32(raw["z3"])), z3)
+    _report("ta_end", _p3(_to_array_f32(raw["ta_end"])), ta_end)
+    _report("z6", _p3(_to_array_f32(raw["z6"])), z6)
+    _report("pair_tr", _p3(_to_array_f32(raw["pair_tr"])), pair_tr)
+    _report("z7", _p3(_to_array_f32(raw["z7"])), z7)
+    _report("apb", _p2(_to_array_f32(raw["apb"])), apb)
+    _report("s1", _p2(_to_array_f32(raw["s1"])), s1)
+    _report("s_tr", _p2(_to_array_f32(raw["s_tr"])), s_tr)
+    _report("s2", _p2(_to_array_f32(raw["s2"])), s2)
 end
 
 main()

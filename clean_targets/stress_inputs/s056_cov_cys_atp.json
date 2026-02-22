@@ -1,0 +1,29 @@
+[
+  {
+    "name": "s056_cov_cys_atp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MACGTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_ATP",
+          "count": 1
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": "1",
+        "position1": "3",
+        "atom1": "SG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "PA"
+      }
+    ]
+  }
+]

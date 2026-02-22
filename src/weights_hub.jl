@@ -123,11 +123,32 @@ function _download_sharded(
         repo_dir = ""
     end
     shard_names = sort!(unique(String(v) for v in values(weight_map)))
+    # Derive the model prefix from the index filename to fix shard name mismatches.
+    # Some index JSONs reference shards as "model-NNNNN-of-MMMMM.safetensors" while
+    # the actual HF files are named "{model_name}-NNNNN-of-MMMMM.safetensors".
+    idx_base = basename(String(index_filename))
+    model_prefix = replace(idx_base, ".safetensors.index.json" => "")
+
+    # HuggingFaceApi caches each file in a content-addressed hash directory, so shard
+    # files end up in separate directories.  Stage symlinks into a single directory so
+    # that load_safetensors_weights can discover them.
+    stage_dir = dirname(index_path) * "_shards"
+    mkpath(stage_dir)
+
     for shard in shard_names
-        shard_remote = _repo_join(repo_dir, shard)
-        _download_one(repo_id, shard_remote, revision, local_files_only; cache = cache)
+        actual_shard = shard
+        if startswith(shard, "model-") && !isempty(model_prefix)
+            actual_shard = replace(shard, "model-" => model_prefix * "-"; count = 1)
+        end
+        shard_remote = _repo_join(repo_dir, actual_shard)
+        cached_path = _download_one(repo_id, shard_remote, revision, local_files_only; cache = cache)
+        link_name = basename(actual_shard)
+        link_path = joinpath(stage_dir, link_name)
+        if !isfile(link_path)
+            symlink(cached_path, link_path)
+        end
     end
-    return dirname(index_path)
+    return stage_dir
 end
 
 function resolve_weight_source(model_name::AbstractString)

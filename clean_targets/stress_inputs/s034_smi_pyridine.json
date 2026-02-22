@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s034_smi_pyridine",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "c1ccncc1",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

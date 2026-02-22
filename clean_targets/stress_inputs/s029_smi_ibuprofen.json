@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s029_smi_ibuprofen",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CC(C)Cc1ccc(cc1)C(C)C(=O)O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s026_smi_benzene",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "c1ccccc1",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

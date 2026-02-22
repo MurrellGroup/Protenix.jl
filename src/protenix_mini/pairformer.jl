@@ -1,6 +1,9 @@
 module Pairformer
 
 using Random
+using ConcreteStructs
+using Flux: @layer
+using NNlib
 
 import ..Primitives: Linear, LinearNoBias, LayerNorm, transition
 import ..Features: ProtenixFeatures
@@ -9,7 +12,7 @@ import ..OpenFoldBlocks:
     TriangleMultiplication,
     TriangleAttention,
     OuterProductMean
-import ..Utils: softmax_dim2, sample_msa_indices, one_hot_int
+import ..Utils: softmax_lastdim, sample_msa_indices, one_hot_int
 
 export TransitionBlock,
     PairformerBlock,
@@ -24,23 +27,27 @@ export TransitionBlock,
 _as_f32_array(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? x : Float32.(x)
 _as_f32_copy(x::AbstractArray{<:Real}) = x isa AbstractArray{Float32} ? copy(x) : Float32.(x)
 
-struct TransitionBlock
-    c_in::Int
-    n::Int
-    layernorm1::LayerNorm
-    linear_no_bias_a::LinearNoBias
-    linear_no_bias_b::LinearNoBias
-    linear_no_bias::LinearNoBias
+# ─── TransitionBlock ───────────────────────────────────────────────────────────
+# Features-first: (c_in, ...) → (c_in, ...)
+
+@concrete struct TransitionBlock
+    c_in
+    n
+    layernorm1
+    linear_no_bias_a
+    linear_no_bias_b
+    linear_no_bias
 end
+@layer TransitionBlock
 
 function TransitionBlock(c_in::Int; n::Int = 4, rng::AbstractRNG = Random.default_rng())
     return TransitionBlock(
         c_in,
         n,
         LayerNorm(c_in),
-        LinearNoBias(n * c_in, c_in; rng = rng),
-        LinearNoBias(n * c_in, c_in; rng = rng),
-        LinearNoBias(c_in, n * c_in; rng = rng),
+        LinearNoBias(c_in, n * c_in; rng = rng),   # c_in → n*c_in
+        LinearNoBias(c_in, n * c_in; rng = rng),   # c_in → n*c_in
+        LinearNoBias(n * c_in, c_in; rng = rng),   # n*c_in → c_in
     )
 end
 
@@ -48,16 +55,20 @@ function (m::TransitionBlock)(x::AbstractArray{<:Real})
     return transition(x, m.layernorm1, m.linear_no_bias_a, m.linear_no_bias_b, m.linear_no_bias)
 end
 
-struct PairformerBlock
-    c_s::Int
-    tri_mul_out::TriangleMultiplication
-    tri_mul_in::TriangleMultiplication
-    tri_att_start::TriangleAttention
-    tri_att_end::TriangleAttention
-    pair_transition::TransitionBlock
-    attention_pair_bias::Union{PairAttentionNoS, Nothing}
-    single_transition::Union{TransitionBlock, Nothing}
+# ─── PairformerBlock ───────────────────────────────────────────────────────────
+# Features-first: s (c_s, N), z (c_z, N, N)
+
+@concrete struct PairformerBlock
+    c_s
+    tri_mul_out
+    tri_mul_in
+    tri_att_start
+    tri_att_end
+    pair_transition
+    attention_pair_bias
+    single_transition
 end
+@layer PairformerBlock
 
 function PairformerBlock(
     c_z::Int,
@@ -108,9 +119,12 @@ function (m::PairformerBlock)(
     return nothing, z_f
 end
 
-struct PairformerStack
-    blocks::Vector{PairformerBlock}
+# ─── PairformerStack ───────────────────────────────────────────────────────────
+
+@concrete struct PairformerStack
+    blocks
 end
+@layer PairformerStack
 
 function PairformerStack(
     c_z::Int,
@@ -140,18 +154,22 @@ function (m::PairformerStack)(
     return s_cur, z_cur
 end
 
-struct MSAPairWeightedAveraging
-    c_m::Int
-    c::Int
-    n_heads::Int
-    c_z::Int
-    layernorm_m::LayerNorm
-    linear_no_bias_mv::LinearNoBias
-    layernorm_z::LayerNorm
-    linear_no_bias_z::LinearNoBias
-    linear_no_bias_mg::LinearNoBias
-    linear_no_bias_out::LinearNoBias
+# ─── MSAPairWeightedAveraging ─────────────────────────────────────────────────
+# Features-first: msa (c_m, n_tok, n_msa), z (c_z, n_tok, n_tok)
+
+@concrete struct MSAPairWeightedAveraging
+    c_m
+    c
+    n_heads
+    c_z
+    layernorm_m
+    linear_no_bias_mv
+    layernorm_z
+    linear_no_bias_z
+    linear_no_bias_mg
+    linear_no_bias_out
 end
+@layer MSAPairWeightedAveraging
 
 function MSAPairWeightedAveraging(
     c_m::Int,
@@ -166,11 +184,11 @@ function MSAPairWeightedAveraging(
         n_heads,
         c_z,
         LayerNorm(c_m),
-        LinearNoBias(c * n_heads, c_m; rng = rng),
+        LinearNoBias(c_m, c * n_heads; rng = rng),   # c_m → H*C
         LayerNorm(c_z),
-        LinearNoBias(n_heads, c_z; rng = rng),
-        LinearNoBias(c * n_heads, c_m; rng = rng),
-        LinearNoBias(c_m, c * n_heads; rng = rng),
+        LinearNoBias(c_z, n_heads; rng = rng),        # c_z → n_heads
+        LinearNoBias(c_m, c * n_heads; rng = rng),   # c_m → H*C
+        LinearNoBias(c * n_heads, c_m; rng = rng),   # H*C → c_m
     )
 end
 
@@ -178,34 +196,43 @@ function (m::MSAPairWeightedAveraging)(
     msa::AbstractArray{<:Real,3},
     z::AbstractArray{<:Real,3},
 )
-    n_msa, n_tok, c_m = size(msa)
+    # msa: (c_m, n_tok, n_msa), z: (c_z, n_tok, n_tok) features-first
+    c_m, n_tok, n_msa = size(msa)
     c_m == m.c_m || error("MSAPairWeightedAveraging c_m mismatch")
-    size(z) == (n_tok, n_tok, m.c_z) || error("MSAPairWeightedAveraging z shape mismatch")
+    size(z) == (m.c_z, n_tok, n_tok) || error("MSAPairWeightedAveraging z shape mismatch")
 
-    msa_ln = m.layernorm_m(msa)
-    v_lin = m.linear_no_bias_mv(msa_ln) # [N_msa, N_tok, H*C]
-    b = m.linear_no_bias_z(m.layernorm_z(z)) # [N, N, H]
-    g_lin = 1f0 ./ (1f0 .+ exp.(-m.linear_no_bias_mg(msa_ln))) # [N_msa, N_tok, H*C]
+    msa_ln = m.layernorm_m(msa)                # (c_m, n_tok, n_msa)
+    v_lin = m.linear_no_bias_mv(msa_ln)        # (H*C, n_tok, n_msa)
+    b = m.linear_no_bias_z(m.layernorm_z(z))   # (H, n_tok, n_tok) — pair weights
+    g_lin = 1f0 ./ (1f0 .+ exp.(-m.linear_no_bias_mg(msa_ln)))  # (H*C, n_tok, n_msa)
 
-    w = softmax_dim2(b) # softmax over second token dimension
+    # Softmax over last dim (key token dimension) of (H, n_tok_q, n_tok_k)
+    w = softmax_lastdim(b)  # (H, n_tok, n_tok)
 
-    o_lin = zeros(Float32, n_msa, n_tok, m.n_heads * m.c)
-    @inbounds for m_ix in 1:n_msa, i in 1:n_tok, h in 1:m.n_heads, c_ix in 1:m.c
-        idx = (h - 1) * m.c + c_ix
-        acc = 0f0
-        for j in 1:n_tok
-            acc += w[i, j, h] * v_lin[m_ix, j, idx]
-        end
-        o_lin[m_ix, i, idx] = g_lin[m_ix, i, idx] * acc
-    end
+    # Batched weighted sum over all heads simultaneously:
+    # o[c, i, s] (for head h) = sum_j v_h[c, j, s] * w[h, i, j]
+    # Reshape v_lin: (H*C, n_tok, n_msa) → (C, H, n_tok, n_msa) → (C*n_msa, n_tok, H)
+    v4 = reshape(v_lin, m.c, m.n_heads, n_tok, n_msa)
+    v_flat = reshape(permutedims(v4, (1, 4, 3, 2)), m.c * n_msa, n_tok, m.n_heads)
+    # w transposed per head: (n_tok, n_tok, H)
+    w_t = permutedims(w, (3, 2, 1))  # w_t[:,:,h] = w[h,:,:]^T
+    # Single batched BLAS call
+    o_flat = NNlib.batched_mul(v_flat, w_t)  # (C*n_msa, n_tok, H)
+    # Reshape back: (C, n_msa, n_tok, H) → (C, H, n_tok, n_msa) → (H*C, n_tok, n_msa)
+    o_lin = reshape(permutedims(reshape(o_flat, m.c, n_msa, n_tok, m.n_heads), (1, 4, 3, 2)),
+                    m.n_heads * m.c, n_tok, n_msa)
+    o_lin = o_lin .* g_lin
 
-    return m.linear_no_bias_out(o_lin)
+    return m.linear_no_bias_out(o_lin)  # (c_m, n_tok, n_msa)
 end
 
-struct MSAStack
-    msa_pair_weighted_averaging::MSAPairWeightedAveraging
-    transition_m::TransitionBlock
+# ─── MSAStack ─────────────────────────────────────────────────────────────────
+
+@concrete struct MSAStack
+    msa_pair_weighted_averaging
+    transition_m
 end
+@layer MSAStack
 
 function MSAStack(
     c_m::Int,
@@ -225,12 +252,15 @@ function (m::MSAStack)(msa::AbstractArray{<:Real,3}, z::AbstractArray{<:Real,3})
     return msa_f
 end
 
-struct MSABlock
-    is_last_block::Bool
-    outer_product_mean_msa::OuterProductMean
-    msa_stack::Union{MSAStack, Nothing}
-    pair_stack::PairformerBlock
+# ─── MSABlock ─────────────────────────────────────────────────────────────────
+
+@concrete struct MSABlock
+    is_last_block
+    outer_product_mean_msa
+    msa_stack
+    pair_stack
 end
+@layer MSABlock
 
 function MSABlock(
     c_m::Int,
@@ -268,17 +298,21 @@ function (m::MSABlock)(
     return msa_f, z_f
 end
 
-struct MSAModule
-    n_blocks::Int
-    c_m::Int
-    c_s_inputs::Int
-    sample_cutoff::Int
-    sample_lower_bound::Int
-    sample_strategy::String
-    linear_no_bias_m::LinearNoBias
-    linear_no_bias_s::LinearNoBias
-    blocks::Vector{MSABlock}
+# ─── MSAModule ────────────────────────────────────────────────────────────────
+# Features-first: z (c_z, N, N), s_inputs (c_s_inputs, N)
+
+@concrete struct MSAModule
+    n_blocks
+    c_m
+    c_s_inputs
+    sample_cutoff
+    sample_lower_bound
+    sample_strategy
+    linear_no_bias_m
+    linear_no_bias_s
+    blocks
 end
+@layer MSAModule
 
 function MSAModule(
     c_z::Int,
@@ -301,20 +335,10 @@ function MSAModule(
         sample_cutoff,
         sample_lower_bound,
         sample_strategy,
-        LinearNoBias(c_m, 34; rng = rng),
-        LinearNoBias(c_m, c_s_inputs; rng = rng),
+        LinearNoBias(34, c_m; rng = rng),          # 34 → c_m
+        LinearNoBias(c_s_inputs, c_m; rng = rng),  # c_s_inputs → c_m
         blocks,
     )
-end
-
-function _select_rows(x::AbstractArray, idx::Vector{Int}, dim::Int)
-    if dim == 1
-        return x[idx, :, :]
-    elseif dim == 2
-        return x[:, idx, :]
-    else
-        error("_select_rows only supports dim=1 or dim=2")
-    end
 end
 
 function (m::MSAModule)(
@@ -329,10 +353,11 @@ function (m::MSAModule)(
     feat.has_deletion === nothing && error("Missing 'has_deletion' for MSAModule")
     feat.deletion_value === nothing && error("Missing 'deletion_value' for MSAModule")
 
+    # feat.msa: (N_tok, N_msa) features-first
     msa_raw = feat.msa
-    size(msa_raw, 2) > 0 || return _as_f32_array(z)
+    size(msa_raw, 1) > 0 || return _as_f32_array(z)
 
-    n_msa = size(msa_raw, 1)
+    n_msa = size(msa_raw, 2)  # MSA sequences in dim 2
     idx = sample_msa_indices(
         n_msa;
         cutoff = m.sample_cutoff,
@@ -342,16 +367,27 @@ function (m::MSAModule)(
     )
     isempty(idx) && return _as_f32_array(z)
 
-    msa_sel = Int.(msa_raw[idx, :])
-    del_mask = _as_f32_array(feat.has_deletion[idx, :])
-    del_val = _as_f32_array(feat.deletion_value[idx, :])
+    # Select MSA columns: (N_tok, n_sel)
+    msa_sel = Int.(Array(msa_raw[:, idx]))
+    del_mask = _as_f32_array(feat.has_deletion[:, idx])   # (N_tok, n_sel)
+    del_val = _as_f32_array(feat.deletion_value[:, idx])  # (N_tok, n_sel)
 
-    msa_onehot = one_hot_int(msa_sel, 32)
-    msa_feat = cat(msa_onehot, reshape(del_mask, size(del_mask)..., 1), reshape(del_val, size(del_val)..., 1); dims = 3)
+    # one_hot_int on (N_tok, n_sel) → (32, N_tok, n_sel) features-first
+    msa_onehot_cpu = one_hot_int(msa_sel, 32)
+    msa_onehot = z isa Array ? msa_onehot_cpu : copyto!(similar(z, Float32, size(msa_onehot_cpu)...), msa_onehot_cpu)
 
-    msa_emb = m.linear_no_bias_m(msa_feat)
-    s_proj = m.linear_no_bias_s(_as_f32_array(s_inputs))
-    msa_emb .+= reshape(s_proj, 1, size(s_proj, 1), size(s_proj, 2))
+    # Concatenate along dim=1: (32, N_tok, n_sel) + (1, N_tok, n_sel) + (1, N_tok, n_sel) → (34, N_tok, n_sel)
+    n_tok_msa, n_sel = size(del_mask)
+    msa_feat = cat(
+        msa_onehot,
+        reshape(del_mask, 1, n_tok_msa, n_sel),
+        reshape(del_val, 1, n_tok_msa, n_sel);
+        dims = 1,
+    )
+
+    msa_emb = m.linear_no_bias_m(msa_feat)  # (c_m, N_tok, n_sel)
+    s_proj = m.linear_no_bias_s(_as_f32_array(s_inputs))  # (c_m, N_tok)
+    msa_emb .+= reshape(s_proj, size(s_proj, 1), size(s_proj, 2), 1)  # broadcast over MSA dim
 
     z_cur = _as_f32_copy(z)
     msa_cur = msa_emb
@@ -373,12 +409,15 @@ function (m::MSAModule)(
 
     msa_raw = input_feature_dict["msa"]
     msa_raw isa AbstractMatrix || return _as_f32_array(z)
-    size(msa_raw, 2) > 0 || return _as_f32_array(z)
+    size(msa_raw, 1) > 0 || return _as_f32_array(z)
 
     haskey(input_feature_dict, "has_deletion") || error("Missing 'has_deletion' for MSAModule")
     haskey(input_feature_dict, "deletion_value") || error("Missing 'deletion_value' for MSAModule")
 
-    n_msa = size(msa_raw, 1)
+    # Dict values are features-last from Python: msa (N_msa, N_tok)
+    # Transpose to features-first: (N_tok, N_msa)
+    msa_ff = permutedims(Int.(msa_raw))
+    n_msa = size(msa_ff, 2)
     idx = sample_msa_indices(
         n_msa;
         cutoff = m.sample_cutoff,
@@ -388,16 +427,26 @@ function (m::MSAModule)(
     )
     isempty(idx) && return _as_f32_array(z)
 
-    msa_sel = Int.(msa_raw[idx, :])
-    del_mask = _as_f32_array(input_feature_dict["has_deletion"][idx, :])
-    del_val = _as_f32_array(input_feature_dict["deletion_value"][idx, :])
+    msa_sel = Int.(Array(msa_ff[:, idx]))  # (N_tok, n_sel)
+    del_mask_raw = _as_f32_array(input_feature_dict["has_deletion"])
+    del_val_raw = _as_f32_array(input_feature_dict["deletion_value"])
+    del_mask = permutedims(del_mask_raw)[:, idx]  # → (N_tok, n_sel)
+    del_val = permutedims(del_val_raw)[:, idx]    # → (N_tok, n_sel)
 
-    msa_onehot = one_hot_int(msa_sel, 32)
-    msa_feat = cat(msa_onehot, reshape(del_mask, size(del_mask)..., 1), reshape(del_val, size(del_val)..., 1); dims = 3)
+    msa_onehot_cpu = one_hot_int(msa_sel, 32)  # (32, N_tok, n_sel)
+    msa_onehot = z isa Array ? msa_onehot_cpu : copyto!(similar(z, Float32, size(msa_onehot_cpu)...), msa_onehot_cpu)
+
+    n_tok_msa, n_sel = size(del_mask)
+    msa_feat = cat(
+        msa_onehot,
+        reshape(del_mask, 1, n_tok_msa, n_sel),
+        reshape(del_val, 1, n_tok_msa, n_sel);
+        dims = 1,
+    )
 
     msa_emb = m.linear_no_bias_m(msa_feat)
     s_proj = m.linear_no_bias_s(_as_f32_array(s_inputs))
-    msa_emb .+= reshape(s_proj, 1, size(s_proj, 1), size(s_proj, 2))
+    msa_emb .+= reshape(s_proj, size(s_proj, 1), size(s_proj, 2), 1)
 
     z_cur = _as_f32_copy(z)
     msa_cur = msa_emb
@@ -407,17 +456,21 @@ function (m::MSAModule)(
     return z_cur
 end
 
-struct TemplateEmbedder
-    n_blocks::Int
-    c::Int
-    c_z::Int
-    layernorm_z::LayerNorm
-    linear_no_bias_z::LinearNoBias
-    linear_no_bias_a::LinearNoBias
-    pairformer_stack::PairformerStack
-    layernorm_v::LayerNorm
-    linear_no_bias_u::LinearNoBias
+# ─── TemplateEmbedder ─────────────────────────────────────────────────────────
+# Template branch is currently disabled in reference; structure kept for checkpoint compat.
+
+@concrete struct TemplateEmbedder
+    n_blocks
+    c
+    c_z
+    layernorm_z
+    linear_no_bias_z
+    linear_no_bias_a
+    pairformer_stack
+    layernorm_v
+    linear_no_bias_u
 end
+@layer TemplateEmbedder
 
 function TemplateEmbedder(
     c_z::Int;
@@ -430,11 +483,11 @@ function TemplateEmbedder(
         c,
         c_z,
         LayerNorm(c_z),
-        LinearNoBias(c, c_z; rng = rng),
-        LinearNoBias(c, 39 + 1 + 3 + 1 + 32 + 32; rng = rng),
+        LinearNoBias(c_z, c; rng = rng),                          # c_z → c
+        LinearNoBias(39 + 1 + 3 + 1 + 32 + 32, c; rng = rng),   # 108 → c
         PairformerStack(c, 0; n_blocks = n_blocks, n_heads = 4, rng = rng),
         LayerNorm(c),
-        LinearNoBias(c_z, c; rng = rng),
+        LinearNoBias(c, c_z; rng = rng),                          # c → c_z
     )
 end
 
@@ -444,10 +497,10 @@ function (m::TemplateEmbedder)(
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     if m.n_blocks < 1 || feat.template_restype === nothing
-        return zeros(Float32, size(z))
+        return fill!(similar(z, Float32, size(z)), 0f0)
     end
     # Mirrors Python implementation: template branch currently disabled.
-    return zeros(Float32, size(z))
+    return fill!(similar(z, Float32, size(z)), 0f0)
 end
 
 function (m::TemplateEmbedder)(
@@ -456,21 +509,25 @@ function (m::TemplateEmbedder)(
     pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
 )
     if m.n_blocks < 1 || !haskey(input_feature_dict, "template_restype")
-        return zeros(Float32, size(z))
+        return fill!(similar(z, Float32, size(z)), 0f0)
     end
     # Mirrors Python implementation: template branch currently disabled.
-    return zeros(Float32, size(z))
+    return fill!(similar(z, Float32, size(z)), 0f0)
 end
 
-struct NoisyStructureEmbedder
-    c_z::Int
-    bins::Vector{Float32}
-    upper_bins::Vector{Float32}
-    linear_struct::LinearNoBias
-    layernorm_z::LayerNorm
-    linear_z::LinearNoBias
-    transition_out::TransitionBlock
+# ─── NoisyStructureEmbedder ──────────────────────────────────────────────────
+# Features-first: z (c_z, N, N), coords (3, N)
+
+@concrete struct NoisyStructureEmbedder
+    c_z
+    bins
+    upper_bins
+    linear_struct
+    layernorm_z
+    linear_z
+    transition_out
 end
+@layer NoisyStructureEmbedder
 
 function NoisyStructureEmbedder(
     c_z::Int;
@@ -487,29 +544,57 @@ function NoisyStructureEmbedder(
         c_z,
         bins,
         upper,
-        LinearNoBias(c, no_bins + 1; rng = rng),
+        LinearNoBias(no_bins + 1, c; rng = rng),  # no_bins+1 → c
         LayerNorm(c_z),
-        LinearNoBias(c, c_z; rng = rng),
+        LinearNoBias(c_z, c; rng = rng),           # c_z → c
         TransitionBlock(c_z; n = 2, rng = rng),
     )
 end
 
+"""
+Pairwise binned distance one-hot, features-first.
+Input: (3, N), output: (no_bins, N, N).
+"""
 function _one_hot_binned_sqdist(
     x::AbstractMatrix{<:Real},
-    bins::Vector{Float32},
-    upper_bins::Vector{Float32},
+    bins::AbstractVector{Float32},
+    upper_bins::AbstractVector{Float32},
 )
-    n = size(x, 1)
-    out = zeros(Float32, n, n, length(bins))
-    @inbounds for i in 1:n, j in 1:n
-        dx = Float32(x[i, 1]) - Float32(x[j, 1])
-        dy = Float32(x[i, 2]) - Float32(x[j, 2])
-        dz = Float32(x[i, 3]) - Float32(x[j, 3])
-        d = sqrt(dx * dx + dy * dy + dz * dz)
-        for b in 1:length(bins)
-            out[i, j, b] = (d > bins[b] && d < upper_bins[b]) ? 1f0 : 0f0
-        end
-    end
+    size(x, 1) == 3 || error("Expected (3, N) input for _one_hot_binned_sqdist")
+    n = size(x, 2)
+    xf = Float32.(x)
+    # (3, N, 1) - (3, 1, N) → (3, N, N)
+    diff = reshape(xf, 3, n, 1) .- reshape(xf, 3, 1, n)
+    d = dropdims(sqrt.(sum(diff .^ 2; dims=1)); dims=1)  # (N, N)
+    nb = length(bins)
+    d3 = reshape(d, 1, n, n)  # (1, N, N)
+    lo = reshape(bins, nb, 1, 1)
+    hi = reshape(upper_bins, nb, 1, 1)
+    return Float32.((d3 .> lo) .& (d3 .< hi))  # (nb, N, N) features-first
+end
+
+function _noisy_structure_forward(
+    m::NoisyStructureEmbedder,
+    z::AbstractArray{<:Real,3},
+    x::AbstractMatrix{<:Real},
+    mask::AbstractVector{Bool},
+)
+    any(mask) || return fill!(similar(z, Float32, size(z)), 0f0)
+
+    _, n, _ = size(z)
+    mf_cpu = Float32.(mask)
+    # pair_mask: (1, N, N) for broadcasting with features-first tensors
+    pair_mask_cpu = reshape(mf_cpu, 1, n, 1) .* reshape(mf_cpu, 1, 1, n)
+    pair_mask = z isa Array ? pair_mask_cpu : copyto!(similar(z, Float32, size(pair_mask_cpu)...), pair_mask_cpu)
+
+    d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask  # (nb, N, N)
+    d = cat(d, pair_mask; dims = 1)  # (nb+1, N, N)
+    d = m.linear_struct(d)  # (c/2, N, N)
+
+    z_proj = m.linear_z(m.layernorm_z(z))  # (c/2, N, N)
+    z_cat = cat(z_proj, d; dims = 1)  # (c_z, N, N)
+    out = m.transition_out(z_cat)  # (c_z, N, N)
+
     return out
 end
 
@@ -517,58 +602,31 @@ function (m::NoisyStructureEmbedder)(
     feat::ProtenixFeatures,
     z::AbstractArray{<:Real,3},
 )
-    n = size(z, 1)
-    x = feat.struct_cb_coords === nothing ? zeros(Float32, n, 3) : feat.struct_cb_coords
-    mask = feat.struct_cb_mask === nothing ? falses(n) : feat.struct_cb_mask
-
-    pair_mask = zeros(Float32, n, n, 1)
-    @inbounds for i in 1:n, j in 1:n
-        pair_mask[i, j, 1] = (mask[i] && mask[j]) ? 1f0 : 0f0
-    end
-
-    d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask
-    d = cat(d, pair_mask; dims = 3)
-    d = m.linear_struct(d)
-
-    z_proj = m.linear_z(m.layernorm_z(z))
-    z_cat = cat(z_proj, d; dims = 3)
-    out = m.transition_out(z_cat)
-
-    any(mask) || (out .= 0f0)
-    return out
+    _, n, _ = size(z)
+    # struct_cb_coords is (3, N) features-first in ProtenixFeatures
+    x = feat.struct_cb_coords === nothing ? fill!(similar(z, Float32, 3, n), 0f0) : Float32.(feat.struct_cb_coords)
+    mask = feat.struct_cb_mask === nothing ? falses(n) : Bool.(Array(feat.struct_cb_mask))
+    return _noisy_structure_forward(m, z, x, mask)
 end
 
 function (m::NoisyStructureEmbedder)(
     input_feature_dict::AbstractDict{<:AbstractString, <:Any},
     z::AbstractArray{<:Real,3},
 )
-    n = size(z, 1)
+    _, n, _ = size(z)
     x = if haskey(input_feature_dict, "struct_cb_coords")
-        _as_f32_array(input_feature_dict["struct_cb_coords"])
+        # Dict values from Python are features-last (N, 3); transpose to (3, N)
+        raw = _as_f32_array(input_feature_dict["struct_cb_coords"])
+        ndims(raw) == 2 && size(raw, 2) == 3 ? permutedims(raw) : raw
     else
-        zeros(Float32, n, 3)
+        fill!(similar(z, Float32, 3, n), 0f0)
     end
     mask = if haskey(input_feature_dict, "struct_cb_mask")
-        Bool.(input_feature_dict["struct_cb_mask"])
+        Bool.(Array(input_feature_dict["struct_cb_mask"]))
     else
         falses(n)
     end
-
-    pair_mask = zeros(Float32, n, n, 1)
-    @inbounds for i in 1:n, j in 1:n
-        pair_mask[i, j, 1] = (mask[i] && mask[j]) ? 1f0 : 0f0
-    end
-
-    d = _one_hot_binned_sqdist(x, m.bins, m.upper_bins) .* pair_mask
-    d = cat(d, pair_mask; dims = 3)
-    d = m.linear_struct(d)
-
-    z_proj = m.linear_z(m.layernorm_z(z))
-    z_cat = cat(z_proj, d; dims = 3)
-    out = m.transition_out(z_cat)
-
-    any(mask) || (out .= 0f0)
-    return out
+    return _noisy_structure_forward(m, z, x, mask)
 end
 
 end

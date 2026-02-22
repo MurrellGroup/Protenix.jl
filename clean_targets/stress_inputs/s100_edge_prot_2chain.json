@@ -1,0 +1,31 @@
+[
+  {
+    "name": "s100_edge_prot_2chain",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MACGTYLK",
+          "count": 2
+        }
+      },
+      {
+        "proteinChain": {
+          "sequence": "GKLYTSAM",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_ATP",
+          "count": 1
+        }
+      },
+      {
+        "ion": {
+          "ion": "ZN",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

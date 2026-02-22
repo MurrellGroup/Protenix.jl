@@ -1,0 +1,12 @@
+# Target 26: Discontinuous Crop
+# Target chain with discontinuous crop regions (gaps in sequence)
+# Tests: range parsing, gap handling in condition features
+
+target:
+  file: "../structures/5o45.cif"
+  chains:
+    A:
+      crop: ["1-50", "80-116"]
+      hotspots: [40, 99, 107]
+
+binder_length: 80

@@ -52,18 +52,28 @@ function _residue_runs(atoms::Vector{AtomRecord})
 end
 
 function _canonical_resname(mol_type::String, res_name::String)
-    one_letter = if res_name == "xpb"
-        "j"
-    else
-        get(PROT_THREE_TO_ONE, res_name, mol_type == "protein" ? "X" : "N")
+    # Design placeholder
+    if res_name == "xpb"
+        return mol_type == "protein" ? get(PROT_STD_RESIDUES_ONE_TO_THREE, "j", "UNK") :
+               mol_type == "dna" ? "DN" :
+               mol_type == "rna" ? "N" : "UNK"
     end
 
     if mol_type == "protein"
+        one_letter = get(PROT_THREE_TO_ONE, res_name, "X")
         return get(PROT_STD_RESIDUES_ONE_TO_THREE, one_letter, "UNK")
     elseif mol_type == "dna"
+        # Standard DNA names (DA, DC, DG, DT) are already canonical
+        haskey(DNA_STD_RESIDUES, res_name) && return res_name
+        # Modified DNA: try one-letter code lookup via protein table (some share names)
+        one_letter = get(PROT_THREE_TO_ONE, res_name, "N")
         dna_name = "D" * one_letter
         return haskey(DNA_STD_RESIDUES, dna_name) ? dna_name : "DN"
     elseif mol_type == "rna"
+        # Standard RNA names (A, U, C, G) are already canonical
+        haskey(RNA_STD_RESIDUES_NATURAL, res_name) && return res_name
+        # Modified RNA: try one-letter code lookup
+        one_letter = get(PROT_THREE_TO_ONE, res_name, "N")
         return haskey(RNA_STD_RESIDUES_NATURAL, one_letter) ? one_letter : "N"
     else
         return "UNK"

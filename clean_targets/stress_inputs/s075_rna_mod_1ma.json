@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s075_rna_mod_1ma",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "rnaSequence": {
+          "sequence": "AUGC",
+          "count": 1,
+          "modifications": [
+            {
+              "modificationType": "CCD_1MA",
+              "basePosition": 1
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

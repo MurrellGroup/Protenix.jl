@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s074_rna_mod_5mu",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "rnaSequence": {
+          "sequence": "AUGC",
+          "count": 1,
+          "modifications": [
+            {
+              "modificationType": "CCD_5MU",
+              "basePosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

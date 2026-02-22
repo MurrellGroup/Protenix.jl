@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s030_smi_glucose",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "OC[C@H]1OC(O)[C@H](O)[C@@H](O)[C@@H]1O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

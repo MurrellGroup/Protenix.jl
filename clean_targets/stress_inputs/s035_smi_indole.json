@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s035_smi_indole",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "c1ccc2c(c1)[nH]cc2",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -112,12 +112,11 @@ function main()
     resolved_py = _to_array_f32(raw["resolved"])
     n_cycle = Int(round(Float64(raw["n_cycle"])))
 
-    weights_dir = get(
-        ENV,
-        "PMINI_WEIGHTS_DIR",
-        _default_weights_dir("weights_safetensors_protenix_mini_default_v0.5.0"),
-    )
-    w = PXDesign.Model.load_safetensors_weights(weights_dir)
+    weights_ref = get(ENV, "PMINI_WEIGHTS_DIR", nothing)
+    if weights_ref === nothing
+        weights_ref = PXDesign.default_weights_path("protenix_mini_default_v0.5.0")
+    end
+    w = PXDesign.Model.load_safetensors_weights(weights_ref)
     m = PXDesign.ProtenixMini.build_protenix_mini_model(w)
     PXDesign.ProtenixMini.load_protenix_mini_model!(m, w; strict = true)
 
@@ -125,13 +124,15 @@ function main()
     relpos = PXDesign.Model.as_relpos_input(feat)
     atom_input = PXDesign.Model.as_atom_attention_input(feat)
     atom_to_token_idx = vec(Int.(feat["atom_to_token_idx"]))
-    x_denoised_jl = m.diffusion_module(
-        x_noisy,
+    # Everything is features-first now; convert Python reference (features-last) for comparison
+    x_noisy_ff = permutedims(x_noisy, (3, 2, 1))          # Python (N_sample, N_atom, 3) → (3, N_atom, N_sample)
+    x_denoised_ff = m.diffusion_module(
+        x_noisy_ff,
         t_hat;
         relpos_input = relpos,
-        s_inputs = trunk.s_inputs,
-        s_trunk = trunk.s,
-        z_trunk = trunk.z,
+        s_inputs = trunk.s_inputs,       # (c_s_inputs, N_tok) features-first
+        s_trunk = trunk.s,               # (c_s, N_tok) features-first
+        z_trunk = trunk.z,               # (c_z, N_tok, N_tok) features-first
         atom_to_token_idx = atom_to_token_idx,
         input_feature_dict = atom_input,
     )
@@ -142,19 +143,20 @@ function main()
         s_trunk = trunk.s,
         z_trunk = trunk.z,
         pair_mask = nothing,
-        x_pred_coords = x_denoised_jl,
+        x_pred_coords = x_denoised_ff,   # (3, N_atom, N_sample) features-first
         use_embedding = true,
     )
 
-    _report("trunk.s_inputs", s_inputs_py, trunk.s_inputs)
-    _report("trunk.s", s_trunk_py, trunk.s)
-    _report("trunk.z", z_trunk_py, trunk.z)
-    _report("diffusion.x_denoised", x_denoised_py, x_denoised_jl)
-    _report("distogram.logits", distogram_py, distogram_jl)
-    _report("confidence.plddt", plddt_py, plddt_jl)
-    _report("confidence.pae", pae_py, pae_jl)
-    _report("confidence.pde", pde_py, pde_jl)
-    _report("confidence.resolved", resolved_py, resolved_jl)
+    # Compare with Python reference (permute Julia features-first → Python features-last for comparison)
+    _report("trunk.s_inputs", s_inputs_py, permutedims(trunk.s_inputs))
+    _report("trunk.s", s_trunk_py, permutedims(trunk.s))
+    _report("trunk.z", z_trunk_py, permutedims(trunk.z, (2, 3, 1)))
+    _report("diffusion.x_denoised", x_denoised_py, permutedims(x_denoised_ff, (3, 2, 1)))
+    _report("distogram.logits", distogram_py, permutedims(distogram_jl, (2, 3, 1)))
+    _report("confidence.plddt", plddt_py, permutedims(plddt_jl, (2, 3, 1)))
+    _report("confidence.pae", pae_py, permutedims(pae_jl, (2, 3, 4, 1)))
+    _report("confidence.pde", pde_py, permutedims(pde_jl, (2, 3, 4, 1)))
+    _report("confidence.resolved", resolved_py, permutedims(resolved_jl, (2, 3, 1)))
 end
 
 main()

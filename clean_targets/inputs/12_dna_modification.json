@@ -1,0 +1,14 @@
+[{
+  "name": "dna_modification",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"dnaSequence": {
+      "sequence": "GATTACAGATTACA",
+      "count": 1,
+      "modifications": [
+        {"modificationType": "CCD_6OG", "basePosition": 1}
+      ]
+    }},
+    {"dnaSequence": {"sequence": "TGTAATCTGTAATC", "count": 1}}
+  ]
+}]

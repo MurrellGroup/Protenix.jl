@@ -70,27 +70,27 @@ function _random_rotation_matrix(rng::AbstractRNG, ::Type{T}) where {T}
     ]
 end
 
+# Features-first: x shape (3, N_atom, N_sample)
 function _center_random_augmentation!(x::Array{T,3}, rng::AbstractRNG; s_trans::T = one(T)) where {T}
-    # x shape: [N_sample, N_atom, 3]
-    n_sample = size(x, 1)
     n_atom = size(x, 2)
+    n_sample = size(x, 3)
     for s in 1:n_sample
         mx = zero(T)
         my = zero(T)
         mz = zero(T)
         @inbounds for a in 1:n_atom
-            mx += x[s, a, 1]
-            my += x[s, a, 2]
-            mz += x[s, a, 3]
+            mx += x[1, a, s]
+            my += x[2, a, s]
+            mz += x[3, a, s]
         end
         inv_n = inv(T(n_atom))
         mx *= inv_n
         my *= inv_n
         mz *= inv_n
         @inbounds for a in 1:n_atom
-            x[s, a, 1] -= mx
-            x[s, a, 2] -= my
-            x[s, a, 3] -= mz
+            x[1, a, s] -= mx
+            x[2, a, s] -= my
+            x[3, a, s] -= mz
         end
 
         rot = _random_rotation_matrix(rng, T)
@@ -98,29 +98,55 @@ function _center_random_augmentation!(x::Array{T,3}, rng::AbstractRNG; s_trans::
         ty = s_trans * randn(rng, T)
         tz = s_trans * randn(rng, T)
         @inbounds for a in 1:n_atom
-            x0 = x[s, a, 1]
-            y0 = x[s, a, 2]
-            z0 = x[s, a, 3]
-            x[s, a, 1] = rot[1, 1] * x0 + rot[1, 2] * y0 + rot[1, 3] * z0 + tx
-            x[s, a, 2] = rot[2, 1] * x0 + rot[2, 2] * y0 + rot[2, 3] * z0 + ty
-            x[s, a, 3] = rot[3, 1] * x0 + rot[3, 2] * y0 + rot[3, 3] * z0 + tz
+            x0 = x[1, a, s]
+            y0 = x[2, a, s]
+            z0 = x[3, a, s]
+            x[1, a, s] = rot[1, 1] * x0 + rot[1, 2] * y0 + rot[1, 3] * z0 + tx
+            x[2, a, s] = rot[2, 1] * x0 + rot[2, 2] * y0 + rot[2, 3] * z0 + ty
+            x[3, a, s] = rot[3, 1] * x0 + rot[3, 2] * y0 + rot[3, 3] * z0 + tz
         end
     end
     return x
 end
 
-"""
-Port of PXDesign diffusion sampling loop.
+# Device-native center + random augmentation (no CPU round-trip for GPU arrays).
+# x_l shape: (3, N_atom, N_sample).
+# Uses broadcast ops that stay on whatever device x_l lives on.
+function _center_random_augmentation_device!(x_l::AbstractArray{T,3}, rng::AbstractRNG; s_trans::T = one(T)) where {T}
+    n_atom = size(x_l, 2)
+    n_sample = size(x_l, 3)
+    inv_n = T(1 / n_atom)
 
-`denoise_net` contract:
-```
-x_denoised = denoise_net(x_noisy, t_hat; kwargs...)
-```
+    # Center: subtract mean along atom dim (broadcast stays on device)
+    mean_xyz = sum(x_l; dims=2) .* inv_n  # (3, 1, N_sample) on device
+    x_l .-= mean_xyz
 
-Shapes:
-- `x_noisy`: `[N_sample, N_atom, 3]`
-- `t_hat`: scalar float
-"""
+    # Random rotation + translation per sample
+    for s in 1:n_sample
+        rot_cpu = _random_rotation_matrix(rng, T)        # 3×3 CPU matrix
+        tx = s_trans * randn(rng, T)
+        ty = s_trans * randn(rng, T)
+        tz = s_trans * randn(rng, T)
+
+        # Copy tiny rotation matrix to same device as x_l, do matmul + broadcast
+        rot_dev = _to_device(rot_cpu, x_l)               # 3×3 transfer (no-op on CPU)
+        trans_dev = _to_device(T[tx, ty, tz], x_l)       # 3-element transfer (no-op on CPU)
+        xs = @view x_l[:, :, s]                           # (3, N_atom) view on device
+        xs .= rot_dev * xs .+ trans_dev                   # matmul + broadcast on device
+    end
+    return x_l
+end
+
+# Copy cpu_array to the same device as x_ref (no-op for CPU Arrays).
+function _to_device(cpu_array::Array, x_ref::Array)
+    return cpu_array
+end
+function _to_device(cpu_array::Array, x_ref::AbstractArray)
+    dst = similar(x_ref, eltype(cpu_array), size(cpu_array))
+    copyto!(dst, cpu_array)
+    return dst
+end
+
 function sample_diffusion(
     denoise_net::Function;
     noise_schedule::AbstractVector{<:Real},
@@ -132,6 +158,7 @@ function sample_diffusion(
     step_scale_eta = (type = "const", min = 1.5, max = 1.5),
     diffusion_chunk_size::Union{Nothing, Int} = nothing,
     rng::AbstractRNG = Random.default_rng(),
+    device_ref::Union{Nothing, AbstractArray} = nothing,
     kwargs...,
 )
     N_sample <= 0 && error("N_sample must be positive.")
@@ -141,11 +168,17 @@ function sample_diffusion(
     T = Float32
     function _chunk_sample(n_s::Int)
         sigma0 = T(noise_schedule[1])
-        x_l = sigma0 .* randn(rng, T, n_s, N_atom, 3)
+        noise_cpu = sigma0 .* randn(rng, T, 3, N_atom, n_s)
+        x_l = device_ref === nothing ? noise_cpu : _to_device(noise_cpu, device_ref)
 
         total = length(noise_schedule)
         for (step_t, (tau_last, tau)) in enumerate(zip(noise_schedule[1:end-1], noise_schedule[2:end]))
-            _center_random_augmentation!(x_l, rng)
+            # Center + augmentation — device-native (no CPU round-trip for GPU)
+            if x_l isa Array
+                _center_random_augmentation!(x_l, rng)
+            else
+                _center_random_augmentation_device!(x_l, rng)
+            end
 
             c_tau_last = T(tau_last)
             c_tau = T(tau)
@@ -154,7 +187,12 @@ function sample_diffusion(
             t_hat = c_tau_last * (gamma + one(T))
             delta_noise = sqrt(max(zero(T), t_hat^2 - c_tau_last^2))
 
-            x_noisy = x_l .+ T(noise_scale_lambda) * delta_noise .* randn(rng, T, size(x_l))
+            # Generate noise directly on device with randn!
+            noise_scale = T(noise_scale_lambda) * delta_noise
+            step_noise = similar(x_l)
+            randn!(step_noise)
+            step_noise .*= noise_scale
+            x_noisy = x_l .+ step_noise
             x_denoised = denoise_net(x_noisy, t_hat; kwargs...)
             size(x_denoised) == size(x_noisy) || error("denoise_net must return same shape as input.")
 
@@ -170,14 +208,14 @@ function sample_diffusion(
         return _chunk_sample(N_sample)
     end
 
-    chunks = Array{T,3}[]
+    chunks = AbstractArray{T,3}[]
     remaining = N_sample
     while remaining > 0
         n_s = min(diffusion_chunk_size, remaining)
         push!(chunks, _chunk_sample(n_s))
         remaining -= n_s
     end
-    return cat(chunks...; dims = 1)
+    return cat(chunks...; dims = 3)
 end
 
 end

@@ -1,0 +1,6 @@
+N_design_token = 80
+task_name = "26_design_discontinuous_crop"
+N_condition_token = 87
+N_atom = 1010
+N_token = 167
+N_msa = 1

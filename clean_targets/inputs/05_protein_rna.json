@@ -1,0 +1,7 @@
+[{
+  "name": "protein_rna",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"rnaSequence": {"sequence": "GUACGUACGUACGUAC", "count": 1}}
+  ]
+}]

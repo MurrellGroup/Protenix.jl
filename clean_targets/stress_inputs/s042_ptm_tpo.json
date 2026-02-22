@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s042_ptm_tpo",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGTTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_TPO",
+              "ptmPosition": 4
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

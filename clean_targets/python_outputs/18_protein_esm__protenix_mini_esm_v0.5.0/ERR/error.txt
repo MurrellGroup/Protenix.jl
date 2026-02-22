@@ -1,0 +1,35 @@
+Weights only load failed. This file can still be loaded, to do so you have two options, [1mdo those steps only if you trust the source of the checkpoint[0m. 
+	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
+	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
+	WeightsUnpickler error: Unsupported global: GLOBAL argparse.Namespace was not an allowed global by default. Please use `torch.serialization.add_safe_globals([argparse.Namespace])` or the `torch.serialization.safe_globals([argparse.Namespace])` context manager to allowlist this global if you trust this class/function.
+
+Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.:
+Traceback (most recent call last):
+  File "/home/claudey/FixingKAFA/PXDesign.jl/.external/Protenix/runner/inference.py", line 281, in infer_predict
+    dataloader = get_inference_dataloader(configs=configs)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claudey/FixingKAFA/PXDesign.jl/.external/Protenix/protenix/data/infer_data_pipeline.py", line 52, in get_inference_dataloader
+    inference_dataset = InferenceDataset(
+                        ^^^^^^^^^^^^^^^^^
+  File "/home/claudey/FixingKAFA/PXDesign.jl/.external/Protenix/protenix/data/infer_data_pipeline.py", line 98, in __init__
+    ESMFeaturizer.precompute_esm_embedding(
+  File "/home/claudey/FixingKAFA/PXDesign.jl/.external/Protenix/protenix/data/esm_featurizer.py", line 156, in precompute_esm_embedding
+    model, alphabet = load_esm_model(model_name, local_esm_dir=checkpoint_dir)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claudey/FixingKAFA/PXDesign.jl/.external/Protenix/protenix/data/compute_esm.py", line 61, in load_esm_model
+    model, alphabet = _load_esm2_model(local_model_path)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claudey/FixingKAFA/PXDesign.jl/.external/Protenix/protenix/data/compute_esm.py", line 41, in _load_esm2_model
+    model, alphabet = pretrained.load_model_and_alphabet_local(model_path)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claudey/venvs/python_esmfold/lib/python3.12/site-packages/esm/pretrained.py", line 70, in load_model_and_alphabet_local
+    model_data = torch.load(str(model_location), map_location="cpu")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/claudey/venvs/python_esmfold/lib/python3.12/site-packages/torch/serialization.py", line 1548, in load
+    raise pickle.UnpicklingError(_get_wo_message(str(e))) from None
+_pickle.UnpicklingError: Weights only load failed. This file can still be loaded, to do so you have two options, [1mdo those steps only if you trust the source of the checkpoint[0m. 
+	(1) In PyTorch 2.6, we changed the default value of the `weights_only` argument in `torch.load` from `False` to `True`. Re-running `torch.load` with `weights_only` set to `False` will likely succeed, but it can result in arbitrary code execution. Do it only if you got the file from a trusted source.
+	(2) Alternatively, to load with `weights_only=True` please check the recommended steps in the following error message.
+	WeightsUnpickler error: Unsupported global: GLOBAL argparse.Namespace was not an allowed global by default. Please use `torch.serialization.add_safe_globals([argparse.Namespace])` or the `torch.serialization.safe_globals([argparse.Namespace])` context manager to allowlist this global if you trust this class/function.
+
+Check the documentation of torch.load to learn more about types accepted by default with weights_only https://pytorch.org/docs/stable/generated/torch.load.html.

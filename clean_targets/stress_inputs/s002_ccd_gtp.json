@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s002_ccd_gtp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_GTP",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

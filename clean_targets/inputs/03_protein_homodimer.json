@@ -1,0 +1,6 @@
+[{
+  "name": "protein_homodimer",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 2}}
+  ]
+}]

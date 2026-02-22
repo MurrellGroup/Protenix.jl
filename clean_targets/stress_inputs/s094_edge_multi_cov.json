@@ -1,0 +1,45 @@
+[
+  {
+    "name": "s094_edge_multi_cov",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MCCCGYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_SF4",
+          "count": 1
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": "1",
+        "position1": "2",
+        "atom1": "SG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "FE1"
+      },
+      {
+        "entity1": "1",
+        "position1": "3",
+        "atom1": "SG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "FE2"
+      },
+      {
+        "entity1": "1",
+        "position1": "4",
+        "atom1": "SG",
+        "entity2": "2",
+        "position2": "1",
+        "atom2": "FE3"
+      }
+    ]
+  }
+]

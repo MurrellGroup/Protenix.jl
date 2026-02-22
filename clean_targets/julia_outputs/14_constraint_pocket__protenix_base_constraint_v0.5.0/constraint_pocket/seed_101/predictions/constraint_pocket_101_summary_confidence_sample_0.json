@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"constraint_pocket","seed":101,"sample_idx":0,"plddt_logits_shape":[50,966],"pae_logits_shape":[64,130,130],"pde_logits_shape":[64,130,130],"resolved_logits_shape":[2,966],"plddt_logits_maxprob_mean":0.28873020992670745,"resolved_logits_maxprob_mean":0.9792469171157158}

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s039_smi_metformin",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CN(C)C(=N)NC(=N)N",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

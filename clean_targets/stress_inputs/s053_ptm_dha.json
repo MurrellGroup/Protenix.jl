@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s053_ptm_dha",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAAGSTYK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_DHA",
+              "ptmPosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

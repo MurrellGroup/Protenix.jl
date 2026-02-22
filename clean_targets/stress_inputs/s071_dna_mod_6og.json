@@ -1,0 +1,25 @@
+[
+  {
+    "name": "s071_dna_mod_6og",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "dnaSequence": {
+          "sequence": "ATGC",
+          "count": 1,
+          "modifications": [
+            {
+              "modificationType": "CCD_6OG",
+              "basePosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

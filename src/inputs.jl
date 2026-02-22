@@ -66,7 +66,8 @@ function _parse_yaml_cfg_to_tasks(cfg::Dict{String, Any}, yaml_path::AbstractStr
     target_cfg isa AbstractDict || error("Field 'target' must be a mapping")
     haskey(target_cfg, "file") || error("Missing required field: 'target.file'")
 
-    target_file_path = String(target_cfg["file"])
+    target_file_raw = String(target_cfg["file"])
+    target_file_path = isabspath(target_file_raw) ? target_file_raw : normpath(joinpath(dirname(abspath(yaml_path)), target_file_raw))
     isfile(target_file_path) || error("Target structure file not found: $target_file_path")
 
     chains_cfg = get(target_cfg, "chains", nothing)
@@ -103,7 +104,8 @@ function _parse_yaml_cfg_to_tasks(cfg::Dict{String, Any}, yaml_path::AbstractStr
         end
 
         if haskey(props, "msa") && props["msa"] !== nothing && !isempty(string(props["msa"]))
-            msa_path = String(props["msa"])
+            msa_path_raw = String(props["msa"])
+            msa_path = isabspath(msa_path_raw) ? msa_path_raw : normpath(joinpath(dirname(abspath(yaml_path)), msa_path_raw))
             non_pair = joinpath(msa_path, "non_pairing.a3m")
             isfile(non_pair) || error("MSA file not found: $non_pair")
             msa_dict_per_chain[chain_id] = Dict(

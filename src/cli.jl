@@ -335,7 +335,7 @@ function _parse_predict_args(args::Vector{String})
     use_msa = nothing
     strict = true
     task_name = "protenix_sequence"
-    chain_id = "A0"
+    chain_id = "A"
     list_models = false
     esm_token_embedding_json = nothing
 

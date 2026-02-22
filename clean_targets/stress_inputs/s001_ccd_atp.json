@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s001_ccd_atp",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_ATP",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

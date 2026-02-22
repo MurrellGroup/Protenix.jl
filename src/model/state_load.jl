@@ -3,7 +3,7 @@ module StateLoad
 import ..Embedders: ConditionTemplateEmbedder, RelativePositionEncoding
 import ..DesignConditionEmbedderModule: DesignConditionEmbedder, InputFeatureEmbedderDesign
 import ..AtomAttentionModule: AtomAttentionEncoder, AtomAttentionDecoder
-import ..Primitives: AdaptiveLayerNorm, LayerNormNoOffset, LinearNoBias, Transition
+import ..Primitives: AdaptiveLayerNorm, LayerNormFirst, BGLinear, LinearNoBias
 import ..DiffusionConditioningModule: DiffusionConditioning
 import ..TransformerBlocks:
     AttentionPairBias,
@@ -32,22 +32,23 @@ function _key(weights::AbstractDict{<:AbstractString, <:Any}, key::String; stric
     return nothing
 end
 
-function _load_vector!(dst::Vector{Float32}, src, key::String)
+function _load_vector!(dst::AbstractVector{Float32}, src, key::String)
     src isa AbstractVector || error("Checkpoint key $key must be a vector, got $(typeof(src))")
     length(dst) == length(src) || error("Shape mismatch for $key: expected $(length(dst)), got $(length(src))")
     dst .= Float32.(src)
     return dst
 end
 
-function _load_matrix!(dst::Matrix{Float32}, src, key::String)
+function _load_matrix!(dst::AbstractMatrix{Float32}, src, key::String)
     src isa AbstractMatrix || error("Checkpoint key $key must be a matrix, got $(typeof(src))")
     size(dst) == size(src) || error("Shape mismatch for $key: expected $(size(dst)), got $(size(src))")
     dst .= Float32.(src)
     return dst
 end
 
+# Load weight into a BGLinear (or any layer with .weight field)
 function _load_linear!(
-    linear::LinearNoBias,
+    linear,
     weights::AbstractDict{<:AbstractString, <:Any},
     key::String;
     strict::Bool = true,
@@ -58,16 +59,44 @@ function _load_linear!(
     return linear
 end
 
+# Load into a Flux Dense layer's weight
+function _load_dense_weight!(
+    dense,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    key::String;
+    strict::Bool = true,
+)
+    src = _key(weights, key; strict = strict)
+    src === nothing && return dense
+    _load_matrix!(dense.weight, src, key)
+    return dense
+end
+
+# Load into a Flux Dense layer's bias (only if it has a real bias vector)
+function _load_dense_bias!(
+    dense,
+    weights::AbstractDict{<:AbstractString, <:Any},
+    key::String;
+    strict::Bool = true,
+)
+    src = _key(weights, key; strict = strict)
+    src === nothing && return dense
+    dense.bias isa AbstractVector || return dense
+    _load_vector!(dense.bias, src, key)
+    return dense
+end
+
+# LayerNormFirst has fields w and b (not weight/bias)
 function _load_layernorm!(
-    ln::LayerNormNoOffset,
+    ln,
     weights::AbstractDict{<:AbstractString, <:Any},
     prefix::String;
     strict::Bool = true,
 )
     w = _key(weights, "$prefix.weight"; strict = strict)
-    w !== nothing && _load_vector!(ln.weight, w, "$prefix.weight")
+    w !== nothing && _load_vector!(ln.w, w, "$prefix.weight")
     b = _key(weights, "$prefix.bias"; strict = false)
-    b !== nothing && _load_vector!(ln.bias, b, "$prefix.bias")
+    b !== nothing && _load_vector!(ln.b, b, "$prefix.bias")
     return ln
 end
 
@@ -80,21 +109,23 @@ function _load_adaptive_layernorm!(
     _load_layernorm!(ada.layernorm_s, weights, "$prefix.layernorm_s"; strict = strict)
     _load_linear!(ada.linear_nobias_s, weights, "$prefix.linear_nobias_s.weight"; strict = strict)
     _load_linear!(ada.linear_s, weights, "$prefix.linear_s.weight"; strict = strict)
+    # bias is now inside ada.linear_s.bias (BGLinear with bias=true)
     b = _key(weights, "$prefix.linear_s.bias"; strict = false)
-    b !== nothing && _load_vector!(ada.bias_s, b, "$prefix.linear_s.bias")
+    b !== nothing && _load_vector!(ada.linear_s.bias, b, "$prefix.linear_s.bias")
     return ada
 end
 
+# Onion.Transition: norm (LayerNormFirst/BGLayerNorm), fc1/fc2/fc3 (Dense)
 function _load_transition!(
-    tr::Transition,
+    tr,
     weights::AbstractDict{<:AbstractString, <:Any},
     prefix::String;
     strict::Bool = true,
 )
-    _load_layernorm!(tr.layernorm, weights, "$prefix.layernorm1"; strict = strict)
-    _load_linear!(tr.linear_a, weights, "$prefix.linear_no_bias_a.weight"; strict = strict)
-    _load_linear!(tr.linear_b, weights, "$prefix.linear_no_bias_b.weight"; strict = strict)
-    _load_linear!(tr.linear_out, weights, "$prefix.linear_no_bias.weight"; strict = strict)
+    _load_layernorm!(tr.norm, weights, "$prefix.layernorm1"; strict = strict)
+    _load_dense_weight!(tr.fc1, weights, "$prefix.linear_no_bias_a.weight"; strict = strict)
+    _load_dense_weight!(tr.fc2, weights, "$prefix.linear_no_bias_b.weight"; strict = strict)
+    _load_dense_weight!(tr.fc3, weights, "$prefix.linear_no_bias.weight"; strict = strict)
     return tr
 end
 
@@ -240,7 +271,8 @@ function load_relative_position_encoding!(
     prefix::String;
     strict::Bool = true,
 )
-    _load_linear!(LinearNoBias(relpe.weight), weights, "$prefix.linear_no_bias.weight"; strict = strict)
+    w = _key(weights, "$prefix.linear_no_bias.weight"; strict = strict)
+    w !== nothing && _load_matrix!(relpe.weight, w, "$prefix.linear_no_bias.weight")
     return relpe
 end
 
@@ -271,6 +303,7 @@ function load_diffusion_conditioning!(
     return cond
 end
 
+# New AttentionPairBias wrapper: adaln_a, adaln_kv, pair_bias_norm, pair_bias_proj, attn (Onion), output_gate
 function _load_attention_pair_bias!(
     blk::AttentionPairBias,
     weights::AbstractDict{<:AbstractString, <:Any},
@@ -281,20 +314,22 @@ function _load_attention_pair_bias!(
     if blk.adaln_kv !== nothing
         _load_adaptive_layernorm!(blk.adaln_kv, weights, "$prefix.layernorm_kv"; strict = strict)
     end
-    _load_layernorm!(blk.layernorm_z, weights, "$prefix.layernorm_z"; strict = strict)
-    _load_linear!(blk.linear_bias_z, weights, "$prefix.linear_nobias_z.weight"; strict = strict)
+    _load_layernorm!(blk.pair_bias_norm, weights, "$prefix.layernorm_z"; strict = strict)
+    _load_linear!(blk.pair_bias_proj, weights, "$prefix.linear_nobias_z.weight"; strict = strict)
 
-    _load_linear!(blk.linear_q, weights, "$prefix.attention.linear_q.weight"; strict = strict)
-    q_bias = _key(weights, "$prefix.attention.linear_q.bias"; strict = false)
-    q_bias !== nothing && _load_vector!(blk.bias_q, q_bias, "$prefix.attention.linear_q.bias")
-    _load_linear!(blk.linear_k, weights, "$prefix.attention.linear_k.weight"; strict = strict)
-    _load_linear!(blk.linear_v, weights, "$prefix.attention.linear_v.weight"; strict = strict)
-    _load_linear!(blk.linear_o, weights, "$prefix.attention.linear_o.weight"; strict = strict)
-    _load_linear!(blk.linear_g, weights, "$prefix.attention.linear_g.weight"; strict = strict)
+    # Onion.AttentionPairBias internal Dense layers
+    attn = blk.attn
+    _load_dense_weight!(attn.proj_q, weights, "$prefix.attention.linear_q.weight"; strict = strict)
+    _load_dense_bias!(attn.proj_q, weights, "$prefix.attention.linear_q.bias"; strict = false)
+    _load_dense_weight!(attn.proj_k, weights, "$prefix.attention.linear_k.weight"; strict = strict)
+    _load_dense_weight!(attn.proj_v, weights, "$prefix.attention.linear_v.weight"; strict = strict)
+    _load_dense_weight!(attn.proj_o, weights, "$prefix.attention.linear_o.weight"; strict = strict)
+    _load_dense_weight!(attn.proj_g, weights, "$prefix.attention.linear_g.weight"; strict = strict)
 
-    _load_linear!(blk.linear_a_last, weights, "$prefix.linear_a_last.weight"; strict = strict)
+    # Output gate (was linear_a_last in old code)
+    _load_linear!(blk.output_gate, weights, "$prefix.linear_a_last.weight"; strict = strict)
     b_last = _key(weights, "$prefix.linear_a_last.bias"; strict = false)
-    b_last !== nothing && _load_vector!(blk.bias_a_last, b_last, "$prefix.linear_a_last.bias")
+    b_last !== nothing && _load_vector!(blk.output_gate.bias, b_last, "$prefix.linear_a_last.bias")
     return blk
 end
 
@@ -309,8 +344,9 @@ function _load_conditioned_transition_block!(
     _load_linear!(blk.linear_a2, weights, "$prefix.linear_nobias_a2.weight"; strict = strict)
     _load_linear!(blk.linear_b, weights, "$prefix.linear_nobias_b.weight"; strict = strict)
     _load_linear!(blk.linear_s, weights, "$prefix.linear_s.weight"; strict = strict)
+    # bias is now inside blk.linear_s.bias (BGLinear with bias=true)
     b = _key(weights, "$prefix.linear_s.bias"; strict = false)
-    b !== nothing && _load_vector!(blk.bias_s, b, "$prefix.linear_s.bias")
+    b !== nothing && _load_vector!(blk.linear_s.bias, b, "$prefix.linear_s.bias")
     return blk
 end
 
@@ -358,6 +394,9 @@ function load_diffusion_module!(
     return dm
 end
 
+# ---------------------------------------------------------------------------
+# Expected key generation (checkpoint keys from Python — unchanged)
+# ---------------------------------------------------------------------------
 function _append_transition_keys!(keys::Vector{String}, prefix::String)
     push!(keys, "$prefix.layernorm1.weight")
     push!(keys, "$prefix.layernorm1.bias")

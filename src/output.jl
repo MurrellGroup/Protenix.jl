@@ -23,25 +23,8 @@ function _chain_order(atoms::Vector{AtomRecord})
     return order
 end
 
-function _chain_index_map(atoms::Vector{AtomRecord})
-    chain_to_idx = Dict{String, Int}()
-    next_idx = 1
-    for a in atoms
-        if !haskey(chain_to_idx, a.chain_id)
-            chain_to_idx[a.chain_id] = next_idx
-            next_idx += 1
-        end
-    end
-    return chain_to_idx
-end
-
-function _normalize_asym_id(chain_id::String)
-    return occursin(r"^[A-Za-z]$", chain_id) ? string(chain_id, "0") : chain_id
-end
-
-function _strand_id(asym_id::String)
-    stripped = replace(asym_id, r"[0-9]+$" => "")
-    return isempty(stripped) ? asym_id : stripped
+function _quote_atom_name(name::String)
+    return occursin('\'', name) ? string('"', name, '"') : name
 end
 
 function _residue_runs(atoms::Vector{AtomRecord})
@@ -90,49 +73,122 @@ function _residue_has_atom(
     return false
 end
 
-function _write_cif(path::AbstractString, atoms::Vector{AtomRecord}, coord::Array{Float32,2}; entry_id::String = "pxdesign")
-    size(coord, 1) == length(atoms) || error("Coordinate row count must match atom count.")
-    size(coord, 2) == 3 || error("Coordinate tensor must be [N_atom, 3].")
+function _chain_mol_type(atoms::Vector{AtomRecord}, chains::Vector{String})
+    chain_to_mol = Dict{String, String}()
+    for a in atoms
+        if !haskey(chain_to_mol, a.chain_id)
+            chain_to_mol[a.chain_id] = a.mol_type
+        end
+    end
+    return chain_to_mol
+end
+
+function _entity_type(mol_type::String)
+    mol_type in ("protein", "dna", "rna") && return "polymer"
+    return "non-polymer"
+end
+
+function _polymer_type(mol_type::String)
+    mol_type == "protein" && return "polypeptide(L)"
+    mol_type == "dna" && return "polydeoxyribonucleotide"
+    mol_type == "rna" && return "polyribonucleotide"
+    return nothing
+end
+
+function _chain_residue_key(chain::String, chain_to_mol::Dict{String,String}, runs::Vector{ResidueRun})
+    mol = chain_to_mol[chain]
+    seq = String[r.res_name for r in runs if r.chain_id == chain]
+    return (mol, seq)
+end
+
+function _entity_grouping(chains::Vector{String}, chain_to_mol::Dict{String,String}, runs::Vector{ResidueRun})
+    chain_to_entity = Dict{String, Int}()
+    key_to_entity = Dict{Tuple{String,Vector{String}}, Int}()
+    next_id = 1
+    for c in chains
+        key = _chain_residue_key(c, chain_to_mol, runs)
+        if haskey(key_to_entity, key)
+            chain_to_entity[c] = key_to_entity[key]
+        else
+            key_to_entity[key] = next_id
+            chain_to_entity[c] = next_id
+            next_id += 1
+        end
+    end
+    return chain_to_entity
+end
+
+function _write_cif(path::AbstractString, atoms::Vector{AtomRecord}, coord::Array{Float32,2}; entry_id::String = "pxdesign", cross_chain_bonds=nothing)
+    size(coord, 1) == 3 || error("Coordinate tensor must be (3, N_atom) features-first.")
+    size(coord, 2) == length(atoms) || error("Coordinate column count must match atom count.")
 
     chains = _chain_order(atoms)
-    chain_to_entity = _chain_index_map(atoms)
-    chain_to_asym = Dict{String, String}(c => _normalize_asym_id(c) for c in chains)
+    chain_to_mol = _chain_mol_type(atoms, chains)
     runs = _residue_runs(atoms)
+
+    # Entity grouping: merge chains with same mol_type + residue sequence
+    chain_to_entity = _entity_grouping(chains, chain_to_mol, runs)
 
     open(path, "w") do io
         println(io, "data_$(entry_id)")
         println(io, "_entry.id ", entry_id)
         println(io, "#")
 
+        # Build entity → chains mapping (deduplicated)
+        entity_chains = Dict{Int, Vector{String}}()
+        for c in chains
+            eid = chain_to_entity[c]
+            if !haskey(entity_chains, eid)
+                entity_chains[eid] = String[]
+            end
+            push!(entity_chains[eid], c)
+        end
+        entity_ids = sort(collect(keys(entity_chains)))
+
+        # _entity — polymer for protein/dna/rna, non-polymer for ligand/ion
         println(io, "loop_")
         println(io, "_entity.id")
         println(io, "_entity.pdbx_description")
         println(io, "_entity.type")
-        for c in chains
-            println(io, chain_to_entity[c], " . polymer")
+        for eid in entity_ids
+            mol = chain_to_mol[entity_chains[eid][1]]
+            println(io, eid, " . ", _entity_type(mol))
         end
         println(io, "#")
 
-        println(io, "loop_")
-        println(io, "_entity_poly.entity_id")
-        println(io, "_entity_poly.pdbx_strand_id")
-        println(io, "_entity_poly.type")
-        for c in chains
-            asym = chain_to_asym[c]
-            println(io, chain_to_entity[c], " ", _strand_id(asym), " polypeptide(L)")
+        # _entity_poly — only for polymer entities
+        poly_entity_ids = filter(eid -> _entity_type(chain_to_mol[entity_chains[eid][1]]) == "polymer", entity_ids)
+        if !isempty(poly_entity_ids)
+            println(io, "loop_")
+            println(io, "_entity_poly.entity_id")
+            println(io, "_entity_poly.pdbx_strand_id")
+            println(io, "_entity_poly.type")
+            for eid in poly_entity_ids
+                strand_ids = join(entity_chains[eid], ",")
+                mol = chain_to_mol[entity_chains[eid][1]]
+                println(io, eid, " ", strand_ids, " ", _polymer_type(mol))
+            end
+            println(io, "#")
         end
-        println(io, "#")
 
-        println(io, "loop_")
-        println(io, "_entity_poly_seq.entity_id")
-        println(io, "_entity_poly_seq.hetero")
-        println(io, "_entity_poly_seq.mon_id")
-        println(io, "_entity_poly_seq.num")
-        for run in runs
-            println(io, chain_to_entity[run.chain_id], " n ", run.res_name, " ", run.res_id)
+        # _entity_poly_seq — only for polymer entities (one copy per entity, from first chain)
+        if !isempty(poly_entity_ids)
+            println(io, "loop_")
+            println(io, "_entity_poly_seq.entity_id")
+            println(io, "_entity_poly_seq.hetero")
+            println(io, "_entity_poly_seq.mon_id")
+            println(io, "_entity_poly_seq.num")
+            for eid in poly_entity_ids
+                first_chain = entity_chains[eid][1]
+                for run in runs
+                    run.chain_id == first_chain || continue
+                    println(io, eid, " n ", run.res_name, " ", run.res_id)
+                end
+            end
+            println(io, "#")
         end
-        println(io, "#")
 
+        # _struct_conn — peptide bonds (C-N) for protein, phosphodiester (O3'-P) for DNA/RNA
         println(io, "loop_")
         println(io, "_struct_conn.id")
         println(io, "_struct_conn.conn_type_id")
@@ -152,27 +208,53 @@ function _write_cif(path::AbstractString, atoms::Vector{AtomRecord}, coord::Arra
             prev = runs[i - 1]
             curr = runs[i]
             prev.chain_id == curr.chain_id || continue
-            _residue_has_atom(atoms, prev, "C") || continue
-            _residue_has_atom(atoms, curr, "N") || continue
-            asym = chain_to_asym[prev.chain_id]
-            println(
-                io,
-                conn_id,
-                " covale sing ",
-                asym,
-                " ",
-                asym,
-                " ",
-                prev.res_name,
-                " ",
-                curr.res_name,
-                " ",
-                prev.res_id,
-                " ",
-                curr.res_id,
-                " C N . .",
-            )
-            conn_id += 1
+            mol = chain_to_mol[prev.chain_id]
+            if mol == "protein"
+                _residue_has_atom(atoms, prev, "C") || continue
+                _residue_has_atom(atoms, curr, "N") || continue
+                cid = prev.chain_id
+                println(
+                    io,
+                    conn_id,
+                    " covale sing ",
+                    cid, " ", cid, " ",
+                    prev.res_name, " ", curr.res_name, " ",
+                    prev.res_id, " ", curr.res_id,
+                    " C N . .",
+                )
+                conn_id += 1
+            elseif mol == "dna" || mol == "rna"
+                _residue_has_atom(atoms, prev, "O3'") || continue
+                _residue_has_atom(atoms, curr, "P") || continue
+                cid = prev.chain_id
+                println(
+                    io,
+                    conn_id,
+                    " covale sing ",
+                    cid, " ", cid, " ",
+                    prev.res_name, " ", curr.res_name, " ",
+                    prev.res_id, " ", curr.res_id,
+                    " ", _quote_atom_name("O3'"), " P . .",
+                )
+                conn_id += 1
+            end
+            # ligand/ion chains: no polymeric bonds
+        end
+        # Cross-chain covalent bonds (from input JSON covalent_bonds)
+        if cross_chain_bonds !== nothing
+            for b in cross_chain_bonds
+                println(
+                    io,
+                    conn_id,
+                    " covale sing ",
+                    b.chain1, " ", b.chain2, " ",
+                    b.res_name1, " ", b.res_name2, " ",
+                    b.res_id1, " ", b.res_id2, " ",
+                    _quote_atom_name(b.atom_name1), " ", _quote_atom_name(b.atom_name2),
+                    " . .",
+                )
+                conn_id += 1
+            end
         end
         println(io, "#")
 
@@ -199,26 +281,26 @@ function _write_cif(path::AbstractString, atoms::Vector{AtomRecord}, coord::Arra
         println(io, "_atom_site.id")
 
         for (i, a) in enumerate(atoms)
-            group_pdb = a.mol_type == "ligand" ? "HETATM" : "ATOM"
-            asym_id = chain_to_asym[a.chain_id]
+            group_pdb = a.mol_type in ("ligand", "ion") ? "HETATM" : "ATOM"
             entity_id = chain_to_entity[a.chain_id]
-            x = coord[i, 1]
-            y = coord[i, 2]
-            z = coord[i, 3]
+            qname = _quote_atom_name(a.atom_name)
+            x = coord[1, i]
+            y = coord[2, i]
+            z = coord[3, i]
             println(
                 io,
                 string(
                     group_pdb, " ",
                     a.element, " ",
-                    a.atom_name, " . ",
+                    qname, " . ",
                     a.res_name, " ",
-                    asym_id, " ",
+                    a.chain_id, " ",
                     entity_id, " ",
-                    a.res_id, " ? ",
+                    a.res_id, " . ",
                     a.res_id, " ",
                     a.res_name, " ",
-                    asym_id, " ",
-                    a.atom_name, " ",
+                    a.chain_id, " ",
+                    qname, " ",
                     "0.0 1.0 ",
                     @sprintf("%.6f", x), " ",
                     @sprintf("%.6f", y), " ",
@@ -254,22 +336,25 @@ function dump_prediction_bundle(
     task_dump_dir::AbstractString,
     task_name::AbstractString,
     atoms::Vector{AtomRecord},
-    coordinates::Array{Float32,3},
+    coordinates::AbstractArray{Float32,3};
+    cross_chain_bonds=nothing,
 )
-    size(coordinates, 2) == length(atoms) || error("Coordinates must be [N_sample, N_atom, 3].")
-    size(coordinates, 3) == 3 || error("Coordinates must be [N_sample, N_atom, 3].")
+    # Features-first: (3, N_atom, N_sample)
+    size(coordinates, 1) == 3 || error("Coordinates must be (3, N_atom, N_sample) features-first.")
+    size(coordinates, 2) == length(atoms) || error("Coordinates dim-2 must match atom count.")
 
     pred_dir = joinpath(task_dump_dir, "predictions")
     mkpath(pred_dir)
-    n_sample = size(coordinates, 1)
+    n_sample = size(coordinates, 3)
     for sample_idx in 1:n_sample
         cif_path = joinpath(pred_dir, "$(task_name)_sample_$(sample_idx - 1).cif")
-        coord2 = Array{Float32,2}(coordinates[sample_idx, :, :])
+        coord2 = Array{Float32,2}(coordinates[:, :, sample_idx])  # (3, N_atom)
         _write_cif(
             cif_path,
             atoms,
             coord2;
             entry_id = "$(task_name)_sample_$(sample_idx - 1)",
+            cross_chain_bonds=cross_chain_bonds,
         )
     end
     _write_sample_level_csv(pred_dir, task_name, n_sample)

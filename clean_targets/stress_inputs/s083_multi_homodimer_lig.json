@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s083_multi_homodimer_lig",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 2
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_FAD",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

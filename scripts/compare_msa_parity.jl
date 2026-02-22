@@ -90,12 +90,13 @@ function main()
     )
     raw = PXDesign.JSONLite.parse_json(read(path, String))
 
-    z_in = _to_array_f32(raw["z_in"])
-    s_inputs = _to_array_f32(raw["s_inputs"])
-    msa = _to_array_i(raw["msa"])
-    has_del = _to_array_f32(raw["has_deletion"])
-    del_val = _to_array_f32(raw["deletion_value"])
-    m0_py = _to_array_f32(raw["m0"])
+    # Python reference data is features-last; load and permute to features-first
+    z_in_py_fl = _to_array_f32(raw["z_in"])             # (N, N, c_z) features-last
+    s_inputs_py_fl = _to_array_f32(raw["s_inputs"])     # (N, c_s_inputs) features-last
+    msa_py = _to_array_i(raw["msa"])                    # (N_msa, N_tok)
+    has_del_py = _to_array_f32(raw["has_deletion"])     # (N_msa, N_tok)
+    del_val_py = _to_array_f32(raw["deletion_value"])   # (N_msa, N_tok)
+    m0_py = _to_array_f32(raw["m0"])                    # features-last
     opm_py = _to_array_f32(raw["opm"])
     z1_py = _to_array_f32(raw["z1"])
     z2_py = _to_array_f32(raw["z2"])
@@ -105,25 +106,31 @@ function main()
     m_blocks_py = haskey(raw, "m_blocks") ? raw["m_blocks"] : Any[]
     block_debug_py = haskey(raw, "block_debug") ? raw["block_debug"] : Any[]
 
+    # Convert to features-first for Julia
+    z_in = permutedims(z_in_py_fl, (3, 1, 2))          # (c_z, N, N)
+    s_inputs = permutedims(s_inputs_py_fl)              # (c_s_inputs, N)
+    msa = permutedims(msa_py)                           # (N_tok, N_msa)
+    has_del = permutedims(has_del_py)                   # (N_tok, N_msa)
+    del_val = permutedims(del_val_py)                   # (N_tok, N_msa)
+
     w = PXDesign.Model.load_safetensors_weights(weights_dir)
     m = PXDesign.ProtenixMini.build_protenix_mini_model(w)
     PXDesign.ProtenixMini.load_protenix_mini_model!(m, w; strict = true)
 
-    feat = Dict{String,Any}(
-        "msa" => msa,
-        "has_deletion" => has_del,
-        "deletion_value" => del_val,
-    )
-
-    msa_oh = PXDesign.ProtenixMini.one_hot_int(msa, 32)
+    # Features-first MSA feature construction
+    # MSA module uses features-first: msa (N_tok, N_msa), one_hot (32, N_tok, N_msa)
+    msa_oh = PXDesign.ProtenixMini.one_hot_int(msa, 32)  # (32, N_tok, N_msa)
+    n_tok = size(msa, 1)
+    n_msa = size(msa, 2)
     msa_feat = cat(
         msa_oh,
-        reshape(has_del, size(has_del, 1), size(has_del, 2), 1),
-        reshape(del_val, size(del_val, 1), size(del_val, 2), 1);
-        dims = 3,
-    )
-    m0_jl = m.msa_module.linear_no_bias_m(msa_feat)
-    m0_jl .+= reshape(m.msa_module.linear_no_bias_s(s_inputs), 1, size(s_inputs, 1), m.msa_module.c_m)
+        reshape(has_del, 1, n_tok, n_msa),
+        reshape(del_val, 1, n_tok, n_msa);
+        dims = 1,
+    )  # (34, N_tok, N_msa) features-first
+    m0_jl = m.msa_module.linear_no_bias_m(msa_feat)  # (c_m, N_tok, N_msa)
+    c_m = m.msa_module.c_m
+    m0_jl .+= reshape(m.msa_module.linear_no_bias_s(s_inputs), c_m, n_tok, 1)  # broadcast over N_msa
     opm_jl = m.msa_module.blocks[1].outer_product_mean_msa(m0_jl)
     z1_jl = z_in + opm_jl
     _, z2_jl = m.msa_module.blocks[1].pair_stack(nothing, z1_jl; pair_mask = nothing)
@@ -150,46 +157,56 @@ function main()
 
         if i_blk <= length(block_debug_py)
             dbg = block_debug_py[i_blk]
+            _perm3(x) = permutedims(_to_array_f32(x), (3, 1, 2))
             if haskey(dbg, "opm")
-                _report("msa.block_$(i_blk).opm", _to_array_f32(dbg["opm"]), opm_blk_jl)
+                _report("msa.block_$(i_blk).opm", _perm3(dbg["opm"]), opm_blk_jl)
             end
             if haskey(dbg, "z_pre_pair")
-                _report("msa.block_$(i_blk).z_pre_pair", _to_array_f32(dbg["z_pre_pair"]), z_pre_pair_jl)
+                _report("msa.block_$(i_blk).z_pre_pair", _perm3(dbg["z_pre_pair"]), z_pre_pair_jl)
             end
             if m_pair_jl !== nothing && haskey(dbg, "m_pair") && dbg["m_pair"] !== nothing
-                _report("msa.block_$(i_blk).m_pair", _to_array_f32(dbg["m_pair"]), m_pair_jl)
+                _report("msa.block_$(i_blk).m_pair", _perm3(dbg["m_pair"]), m_pair_jl)
             end
             if m_after_pair_jl !== nothing && haskey(dbg, "m_after_pair") && dbg["m_after_pair"] !== nothing
-                _report("msa.block_$(i_blk).m_after_pair", _to_array_f32(dbg["m_after_pair"]), m_after_pair_jl)
+                _report("msa.block_$(i_blk).m_after_pair", _perm3(dbg["m_after_pair"]), m_after_pair_jl)
             end
             if m_trans_jl !== nothing && haskey(dbg, "m_trans") && dbg["m_trans"] !== nothing
-                _report("msa.block_$(i_blk).m_trans", _to_array_f32(dbg["m_trans"]), m_trans_jl)
+                _report("msa.block_$(i_blk).m_trans", _perm3(dbg["m_trans"]), m_trans_jl)
             end
             if m_after_trans_jl !== nothing && haskey(dbg, "m_after_trans") && dbg["m_after_trans"] !== nothing
-                _report("msa.block_$(i_blk).m_after_trans", _to_array_f32(dbg["m_after_trans"]), m_after_trans_jl)
+                _report("msa.block_$(i_blk).m_after_trans", _perm3(dbg["m_after_trans"]), m_after_trans_jl)
             end
             if haskey(dbg, "z_post_pair")
-                _report("msa.block_$(i_blk).z_post_pair", _to_array_f32(dbg["z_post_pair"]), z_cur)
+                _report("msa.block_$(i_blk).z_post_pair", _perm3(dbg["z_post_pair"]), z_cur)
             end
         end
     end
-    z_out_jl = m.msa_module(feat, z_in, s_inputs; pair_mask = nothing, rng = MersenneTwister(0))
+    # MSA module expects raw dict with (N_msa, N_tok) convention (pre-as_protenix_features)
+    feat_raw = Dict{String,Any}(
+        "msa" => msa_py,               # (N_msa, N_tok) Python convention
+        "has_deletion" => has_del_py,   # (N_msa, N_tok)
+        "deletion_value" => del_val_py, # (N_msa, N_tok)
+    )
+    z_out_jl = m.msa_module(feat_raw, z_in, s_inputs; pair_mask = nothing, rng = MersenneTwister(0))
 
-    _report("msa.m0", m0_py, m0_jl)
-    _report("msa.opm", opm_py, opm_jl)
-    _report("msa.z1", z1_py, z1_jl)
-    _report("msa.z2", z2_py, z2_jl)
+    # Compare in features-first space (permute Python references)
+    _perm2(x) = permutedims(x)
+    _perm3(x) = permutedims(x, (3, 1, 2))
+    _report("msa.m0", _perm3(m0_py), m0_jl)
+    _report("msa.opm", _perm3(opm_py), opm_jl)
+    _report("msa.z1", _perm3(z1_py), z1_jl)
+    _report("msa.z2", _perm3(z2_py), z2_jl)
     for i in 1:min(length(z_blocks_py), length(z_blocks_jl))
-        _report("msa.z_block_$(i)", _to_array_f32(z_blocks_py[i]), z_blocks_jl[i])
+        _report("msa.z_block_$(i)", _perm3(_to_array_f32(z_blocks_py[i])), z_blocks_jl[i])
     end
     for i in 1:min(length(m_blocks_py), length(m_blocks_jl))
         if m_blocks_py[i] !== nothing && m_blocks_jl[i] !== nothing
-            _report("msa.m_block_$(i)", _to_array_f32(m_blocks_py[i]), m_blocks_jl[i])
+            _report("msa.m_block_$(i)", _perm3(_to_array_f32(m_blocks_py[i])), m_blocks_jl[i])
         end
     end
-    _report("msa.z_out_loop", z_out_py, z_cur)
-    _report("msa.z_out_module_py", z_out_module_py, z_out_jl)
-    _report("msa.z_out", z_out_py, z_out_jl)
+    _report("msa.z_out_loop", _perm3(z_out_py), z_cur)
+    _report("msa.z_out_module_py", _perm3(z_out_module_py), z_out_jl)
+    _report("msa.z_out", _perm3(z_out_py), z_out_jl)
 end
 
 main()

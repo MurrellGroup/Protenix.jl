@@ -1,0 +1,7 @@
+[{
+  "name": "protein_ligand_ccd",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"ligand": {"ligand": "CCD_ATP", "count": 1}}
+  ]
+}]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s037_smi_morphine",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CN1CC[C@]23c4c5ccc(c4O[C@H]2C(=C[C@@H]31)C=C5)O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

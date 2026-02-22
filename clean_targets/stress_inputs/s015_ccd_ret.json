@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s015_ccd_ret",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_RET",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s088_edge_tiny_smi",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

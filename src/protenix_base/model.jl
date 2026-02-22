@@ -98,13 +98,13 @@ function run_inference(
     )
 end
 
-function build_sequence_atoms(sequence::AbstractString; chain_id::String = "A0")
+function build_sequence_atoms(sequence::AbstractString; chain_id::String = "A")
     return build_sequence_atoms_mini(sequence; chain_id = chain_id)
 end
 
 function build_sequence_feature_bundle(
     sequence::AbstractString;
-    chain_id::String = "A0",
+    chain_id::String = "A",
     task_name::String = "protenix_base_sequence",
     rng::AbstractRNG = Random.default_rng(),
 )
@@ -122,7 +122,7 @@ Run infer-only Protenix-base folding from a one-letter sequence.
 function fold_sequence(
     model::ProtenixBaseModel,
     sequence::AbstractString;
-    chain_id::String = "A0",
+    chain_id::String = "A",
     n_cycle::Int = model.n_cycle,
     n_step::Int = model.sample_n_step,
     n_sample::Int = model.sample_n_sample,

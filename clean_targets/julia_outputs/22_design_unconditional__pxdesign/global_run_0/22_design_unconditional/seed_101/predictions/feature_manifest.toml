@@ -1,0 +1,6 @@
+N_design_token = 60
+task_name = "22_design_unconditional"
+N_condition_token = 0
+N_atom = 241
+N_token = 60
+N_msa = 1

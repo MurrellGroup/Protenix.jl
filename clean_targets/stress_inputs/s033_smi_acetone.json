@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s033_smi_acetone",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CC(=O)C",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

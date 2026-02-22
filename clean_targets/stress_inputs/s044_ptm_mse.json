@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s044_ptm_mse",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAMGTYLK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_MSE",
+              "ptmPosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

@@ -17,14 +17,15 @@ function _to_f32_vector(x, key::AbstractString)
     return Float32.(x)
 end
 
-function _to_f32_matrix(x, key::AbstractString)
+function _to_f32_matrix_ff(x, key::AbstractString)
     if key == "ref_atom_name_chars" && x isa AbstractArray && ndims(x) == 3 && size(x, 2) == 4 && size(x, 3) == 64
         # Match Python flatten order: (pos-1)*64 + bucket.
         xp = permutedims(Float32.(x), (1, 3, 2))
-        return reshape(xp, size(x, 1), 256)
+        flat = reshape(xp, size(x, 1), 256)
+        return permutedims(flat)  # (256, N_atom) features-first
     end
     x isa AbstractMatrix || error("Feature '$key' must be a matrix.")
-    return Float32.(x)
+    return permutedims(Float32.(x))  # features-last → features-first
 end
 
 """
@@ -75,11 +76,11 @@ function as_atom_attention_input(input_feature_dict::AbstractDict{<:AbstractStri
         haskey(input_feature_dict, k) || error("Missing feature '$k' for atom attention.")
     end
     return (
-        ref_pos = _to_f32_matrix(input_feature_dict["ref_pos"], "ref_pos"),
+        ref_pos = _to_f32_matrix_ff(input_feature_dict["ref_pos"], "ref_pos"),
         ref_charge = _to_f32_vector(input_feature_dict["ref_charge"], "ref_charge"),
         ref_mask = _to_f32_vector(input_feature_dict["ref_mask"], "ref_mask"),
-        ref_element = _to_f32_matrix(input_feature_dict["ref_element"], "ref_element"),
-        ref_atom_name_chars = _to_f32_matrix(input_feature_dict["ref_atom_name_chars"], "ref_atom_name_chars"),
+        ref_element = _to_f32_matrix_ff(input_feature_dict["ref_element"], "ref_element"),
+        ref_atom_name_chars = _to_f32_matrix_ff(input_feature_dict["ref_atom_name_chars"], "ref_atom_name_chars"),
         ref_space_uid = _to_int_vector(input_feature_dict["ref_space_uid"], "ref_space_uid"),
         atom_to_token_idx = _to_int_vector(input_feature_dict["atom_to_token_idx"], "atom_to_token_idx"),
     )

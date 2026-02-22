@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s052_ptm_aib",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAAGSTYK",
+          "count": 1,
+          "modifications": [
+            {
+              "ptmType": "CCD_AIB",
+              "ptmPosition": 3
+            }
+          ]
+        }
+      }
+    ]
+  }
+]

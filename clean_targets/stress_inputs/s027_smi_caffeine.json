@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s027_smi_caffeine",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "Cn1cnc2c1c(=O)[nH]c(=O)n2C",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

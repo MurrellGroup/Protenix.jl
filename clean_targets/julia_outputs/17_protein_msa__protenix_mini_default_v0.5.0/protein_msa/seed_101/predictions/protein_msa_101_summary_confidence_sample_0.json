@@ -1,0 +1,1 @@
+{"model_output":"julia_protenix","sample_name":"protein_msa","seed":101,"sample_idx":0,"plddt_logits_shape":[50,1666],"pae_logits_shape":[64,203,203],"pde_logits_shape":[64,203,203],"resolved_logits_shape":[2,1666],"plddt_logits_maxprob_mean":0.18108210217203347,"resolved_logits_maxprob_mean":0.8891876848695452}

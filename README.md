@@ -2,6 +2,20 @@
 
 Infer-only Julia port of PXDesign.
 
+## Running the Feature-Parity Test Set
+
+Environment: `/home/claudey/FixingKAFA/ka_run_env`
+Julia: `/home/claudey/.julia/juliaup/julia-1.11.8+0.aarch64.linux.gnu/bin/julia`
+
+```bash
+cd /home/claudey/FixingKAFA/ka_run_env
+/home/claudey/.julia/juliaup/julia-1.11.8+0.aarch64.linux.gnu/bin/julia --project=. ../PXDesign.jl/clean_targets/scripts/run_fixed_targets.jl
+```
+
+Inputs: `PXDesign.jl/clean_targets/inputs/` (32 JSON/YAML files)
+Outputs: `PXDesign.jl/clean_targets/julia_outputs_fixed/`
+CIFs: `PXDesign.jl/clean_targets/cif_results_fixed/`
+
 ## Status
 
 - Implemented:

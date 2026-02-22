@@ -1,0 +1,13 @@
+[
+  {
+    "name": "s099_edge_rna_only",
+    "sequences": [
+      {
+        "rnaSequence": {
+          "sequence": "AUGCAUGC",
+          "count": 1
+        }
+      }
+    ]
+  }
+]

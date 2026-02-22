@@ -1,0 +1,19 @@
+[
+  {
+    "name": "s097_edge_smi_amino_acid",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "MAGSTYLK",
+          "count": 1
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "NCC(=O)O",
+          "count": 1
+        }
+      }
+    ]
+  }
+]
