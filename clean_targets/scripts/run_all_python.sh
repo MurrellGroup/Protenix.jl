@@ -205,12 +205,20 @@ for n in 22 23 24 25 26 27 28 29 30 31 32; do
         echo "  CLI: pxdesign infer"
         echo "============================================================"
         # PXDesign generation-only mode (no evaluation)
+        # --num_workers 0 avoids multiprocessing deadlock on this machine
+        # --seeds 101 for reproducibility / parity with Julia
+        # --load_checkpoint_dir points to shared checkpoint cache
+        # Note: Target 22 (unconditional) has no target.file; Python YAML parser
+        # requires it, so unconditional generation must use JSON format or be skipped.
         python3 -m pxdesign.runner.cli infer \
             -i "$f" \
             -o "$outdir" \
             --N_sample 1 \
             --N_step 200 \
             --dtype bf16 \
+            --seeds 101 \
+            --num_workers 0 \
+            --load_checkpoint_dir "$CKPT_DIR" \
             || echo "FAILED: $name / pxdesign infer"
         echo ""
     done

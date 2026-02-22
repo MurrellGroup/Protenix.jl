@@ -229,40 +229,52 @@ if should_run("21")
 end
 
 # ── Category 10: Design (22-32) ── Julia PXDesign inference ──────────────────
+# Design targets use YAML format and the PXDesign design pipeline (run_infer),
+# NOT the Protenix folding pipeline (predict_json).
+const DESIGN_N_STEP = 200
+const DESIGN_N_SAMPLE = 1
+
+function run_design_target(yaml_path::String)
+    name = splitext(basename(yaml_path))[1]
+    outdir = joinpath(OUTBASE, "$(name)__pxdesign")
+
+    println("=" ^ 60)
+    println("  Design Target: $name")
+    println("  Model:  pxdesign_v0.1.0")
+    println("  Steps:  $DESIGN_N_STEP   Samples: $DESIGN_N_SAMPLE")
+    println("=" ^ 60)
+
+    try
+        cfg = PXDesign.Config.default_config(; project_root = ROOT)
+        cfg["input_json_path"] = yaml_path
+        cfg["dump_dir"] = outdir
+        cfg["model_name"] = "pxdesign_v0.1.0"
+        cfg["seeds"] = [101]
+        cfg["gpu"] = true
+        PXDesign.Config.set_nested!(cfg, "sample_diffusion.N_step", DESIGN_N_STEP)
+        PXDesign.Config.set_nested!(cfg, "sample_diffusion.N_sample", DESIGN_N_SAMPLE)
+        # model_scaffold.enabled defaults to true in default_config
+
+        result = PXDesign.run_infer(cfg)
+        println("  Result: $(result["status"])  tasks=$(get(result, "num_tasks", "?"))")
+        println("  Output: $outdir")
+    catch e
+        println("  FAILED: $name")
+        println("  Error: ", e)
+        for (exc, bt) in current_exceptions()
+            showerror(stdout, exc, bt)
+            println()
+        end
+    end
+
+    GC.gc(); CUDA.reclaim()
+    println()
+end
+
 for n in ("22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32")
     should_run(n) || continue
     for f in sort(filter(x -> startswith(basename(x), n) && endswith(x, ".yaml"), readdir(INPUTS; join=true)))
-        name = splitext(basename(f))[1]
-        outdir = joinpath(OUTBASE, "$(name)__pxdesign")
-
-        println("=" ^ 60)
-        println("  Design Target: $name")
-        println("=" ^ 60)
-
-        try
-            # Parse YAML → JSON tasks
-            tasks_json = PXDesign.Inputs.load_input_tasks(f)
-            parsed_tasks = PXDesign.Schema.parse_tasks(tasks_json)
-
-            for task in parsed_tasks
-                feat_bundle = PXDesign.Data.build_basic_feature_bundle(task; rng = MersenneTwister(101))
-                feat = feat_bundle["input_feature_dict"]
-                n_atom = Int(feat_bundle["dims"]["N_atom"])
-                n_tok = length(feat["token_index"])
-                println("  Task: $(task.name)  N_atom=$n_atom  N_token=$n_tok")
-
-                # Build design model with real weights
-                # Note: Design model weights loaded via pxdesign_v0.1.0
-                println("  Design model inference would run here")
-                println("  (Full design pipeline requires pxdesign_v0.1.0 weights)")
-            end
-        catch e
-            println("  FAILED: $name")
-            println("  Error: ", e)
-        end
-
-        GC.gc(); CUDA.reclaim()
-        println()
+        run_design_target(f)
     end
 end
 
