@@ -1,1 +1,0 @@
-[{"name":"32_design_many_hotspots","hotspot":{"A":[10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,99,107]},"generation":[{"length":80,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-116"},"chain_id":["A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif","msa":{}}}]

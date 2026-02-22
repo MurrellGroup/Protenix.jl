@@ -1,1 +1,0 @@
-[{"name": "25_design_full_chain", "condition": {"structure_file": "../structures/5o45.cif", "filter": {"chain_id": ["A"], "crop": {}}, "msa": {}}, "hotspot": {"A": [40, 99, 107]}, "generation": [{"type": "protein", "length": 80, "count": 1}]}]

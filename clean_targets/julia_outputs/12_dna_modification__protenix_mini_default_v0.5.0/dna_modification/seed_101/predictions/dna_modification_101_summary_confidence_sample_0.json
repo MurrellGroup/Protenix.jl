@@ -1,1 +1,0 @@
-{"model_output":"julia_protenix","sample_name":"dna_modification","seed":101,"sample_idx":0,"plddt_logits_shape":[50,975],"pae_logits_shape":[64,79,79],"pde_logits_shape":[64,79,79],"resolved_logits_shape":[2,975],"plddt_logits_maxprob_mean":0.06395895613448407,"resolved_logits_maxprob_mean":0.9420525654314411}

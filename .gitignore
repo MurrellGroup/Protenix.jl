@@ -10,3 +10,8 @@ weights_raw_*/
 weights_safetensors/
 weights_safetensors_*/
 release_data/
+clean_targets/cif_results*/
+clean_targets/julia_outputs*/
+clean_targets/python_outputs/
+clean_targets/stress_outputs/
+clean_targets/stress_cif_results/

@@ -1,1 +1,0 @@
-{"model_output":"julia_protenix","sample_name":"protein_dna","seed":101,"sample_idx":0,"plddt_logits_shape":[50,2529],"pae_logits_shape":[64,245,245],"pde_logits_shape":[64,245,245],"resolved_logits_shape":[2,2529],"plddt_logits_maxprob_mean":0.06698924940194743,"resolved_logits_maxprob_mean":0.8569813638700551}

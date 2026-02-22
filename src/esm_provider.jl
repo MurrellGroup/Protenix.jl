@@ -1,8 +1,9 @@
 module ESMProvider
 
-export embed_sequence, embed_sequences, clear_esm_cache!, set_sequence_embedder_override!, hf_hub_download_file
+export embed_sequence, embed_sequences, clear_esm_cache!, set_sequence_embedder_override!
 
 using SafeTensors
+using HuggingFaceApi: hf_hub_download
 
 const _MODEL_CACHE = Dict{Tuple{Symbol, String, String, String, Bool, Symbol}, Any}()
 const _SEQUENCE_CACHE = Dict{Tuple{Symbol, String, String, String, Bool, Symbol, String}, Matrix{Float32}}()
@@ -100,28 +101,6 @@ function _load_model(variant::Symbol)
     return model
 end
 
-function hf_hub_download_file(
-    repo_id::AbstractString,
-    filename::AbstractString;
-    revision::AbstractString = "main",
-    cache::Bool = true,
-    local_files_only::Bool = false,
-)
-    # Allow explicit local-file override for offline/debug parity workflows.
-    if isfile(String(filename))
-        return abspath(String(filename))
-    end
-    ESMFold = _esmfold_module()
-    return Base.invokelatest(
-        ESMFold.hf_hub_download,
-        String(repo_id),
-        String(filename);
-        revision = String(revision),
-        cache = cache,
-        local_files_only = local_files_only,
-    )
-end
-
 function _find_num_layers(state::AbstractDict{<:AbstractString, <:Any})
     ids = Int[]
     for key in keys(state)
@@ -147,7 +126,7 @@ end
 
 function _load_fair_esm2_model(src::NamedTuple)
     ESMFold = _esmfold_module()
-    path = hf_hub_download_file(
+    path = hf_hub_download(
         src.repo_id,
         src.filename;
         revision = src.revision,

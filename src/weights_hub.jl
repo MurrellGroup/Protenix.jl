@@ -1,6 +1,6 @@
 module WeightsHub
 
-import ..ESMProvider
+using HuggingFaceApi: hf_hub_download
 import ..JSONLite: parse_json
 
 export resolve_weight_source, download_model_weights
@@ -91,7 +91,7 @@ function _download_one(
     local_files_only::Bool;
     cache::Bool = true,
 )
-    return ESMProvider.hf_hub_download_file(
+    return hf_hub_download(
         repo_id,
         filename;
         revision = revision,

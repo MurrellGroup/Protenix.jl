@@ -1,1 +1,0 @@
-{"model_output":"julia_protenix","sample_name":"protein_monomer","seed":101,"sample_idx":0,"plddt_logits_shape":[50,398],"pae_logits_shape":[64,51,51],"pde_logits_shape":[64,51,51],"resolved_logits_shape":[2,398],"plddt_logits_maxprob_mean":0.05684602276843733,"resolved_logits_maxprob_mean":0.9486782611705189}

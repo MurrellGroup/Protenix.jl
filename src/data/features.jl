@@ -9,6 +9,7 @@ import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELE
 import ..Tokenizer: AtomRecord, Token, TokenArray, centre_atom_indices, tokenize_atoms
 import ..Design: canonical_resname_for_atom, restype_onehot_encoded
 import ..Structure: load_structure_atoms
+using HuggingFaceApi: hf_hub_download
 
 export build_design_backbone_atoms, build_basic_feature_bundle, build_feature_bundle_from_atoms
 
@@ -417,23 +418,13 @@ function _default_ccd_components_path()
 end
 
 function _default_ccd_std_ref_path()
-    if haskey(ENV, "PROTENIX_DATA_ROOT_DIR")
-        root = ENV["PROTENIX_DATA_ROOT_DIR"]
-        p = joinpath(root, "ref_coords_std.json")
-        isfile(p) && return p
-    end
-    project_root = normpath(joinpath(@__DIR__, "..", ".."))
-    p = joinpath(project_root, "release_data", "ccd_cache", "ref_coords_std.json")
-    isfile(p) && return p
-    return ""
+    return hf_hub_download("MurrellLab/PXDesign.jl", "ref_coords_std.json")
 end
 
 function _load_ccd_std_ref_cache!()
     _CCD_STD_REF_CACHE_LOADED[] && return
     _CCD_STD_REF_CACHE_LOADED[] = true
     p = _default_ccd_std_ref_path()
-    isempty(p) && return
-
     raw = parse_json(read(p, String))
     raw isa AbstractDict || return
     for (code_any, entry_any) in raw
