@@ -43,6 +43,7 @@ struct ProtenixModelSpec
     default_sample::Int
     default_use_msa::Bool
     needs_esm_embedding::Bool
+    msa_pair_as_unpair::Bool
 end
 
 """
@@ -137,6 +138,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         true,
         false,
+        false,
     ),
     "protenix_base_constraint_v0.5.0" => ProtenixModelSpec(
         "protenix_base_constraint_v0.5.0",
@@ -145,6 +147,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         200,
         5,
         true,
+        false,
         false,
     ),
     "protenix_mini_default_v0.5.0" => ProtenixModelSpec(
@@ -155,6 +158,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         true,
         false,
+        false,
     ),
     "protenix_mini_tmpl_v0.5.0" => ProtenixModelSpec(
         "protenix_mini_tmpl_v0.5.0",
@@ -163,6 +167,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         5,
         true,
+        false,
         false,
     ),
     "protenix_tiny_default_v0.5.0" => ProtenixModelSpec(
@@ -173,6 +178,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         true,
         false,
+        false,
     ),
     "protenix_mini_esm_v0.5.0" => ProtenixModelSpec(
         "protenix_mini_esm_v0.5.0",
@@ -182,6 +188,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         false,
         true,
+        false,
     ),
     "protenix_mini_ism_v0.5.0" => ProtenixModelSpec(
         "protenix_mini_ism_v0.5.0",
@@ -191,6 +198,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         false,
         true,
+        false,
     ),
     "protenix_base_default_v1.0.0" => ProtenixModelSpec(
         "protenix_base_default_v1.0.0",
@@ -200,6 +208,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         true,
         false,
+        true,
     ),
     "protenix_base_20250630_v1.0.0" => ProtenixModelSpec(
         "protenix_base_20250630_v1.0.0",
@@ -209,6 +218,7 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         5,
         true,
         false,
+        true,
     ),
 )
 
@@ -439,6 +449,7 @@ function recommended_params(
         sample = n_sample,
         use_msa = use_msa_eff,
         needs_esm_embedding = spec.needs_esm_embedding,
+        msa_pair_as_unpair = spec.msa_pair_as_unpair,
     )
 end
 
@@ -472,6 +483,7 @@ function list_supported_models()
             default_sample = MODEL_SPECS[n].default_sample,
             default_use_msa = MODEL_SPECS[n].default_use_msa,
             needs_esm_embedding = MODEL_SPECS[n].needs_esm_embedding,
+            msa_pair_as_unpair = MODEL_SPECS[n].msa_pair_as_unpair,
         ) for n in names
     ]
 end
@@ -1730,6 +1742,7 @@ function _chain_msa_features(
     msa_cfg::NamedTuple{(:precomputed_msa_dir, :pairing_db), Tuple{Union{Nothing, String}, String}},
     json_dir::AbstractString;
     require_pairing::Bool,
+    msa_pair_as_unpair::Bool = false,
 )::ChainMSAFeatures
     function _query_only_features()
         query_idx = _sequence_to_protenix_indices(sequence)
@@ -1756,10 +1769,25 @@ function _chain_msa_features(
     msa_dir = isabspath(msa_dir_raw) ? msa_dir_raw : normpath(joinpath(json_dir, msa_dir_raw))
     isdir(msa_dir) || error("The provided precomputed_msa_dir does not exist: $msa_dir")
 
+    # Read non_pairing.a3m sequences
     non_pair_path = joinpath(msa_dir, "non_pairing.a3m")
-    non_pairing = if isfile(non_pair_path)
-        seqs, _ = _parse_a3m(non_pair_path; seq_limit = -1)
-        aln, del = _aligned_and_deletions_from_a3m(seqs)
+    np_seqs = String[]
+    if isfile(non_pair_path)
+        np_seqs, _ = _parse_a3m(non_pair_path; seq_limit = -1)
+    end
+
+    # When msa_pair_as_unpair (v1.0 default), merge pairing.a3m into the unpaired set.
+    # Python: u_a3m = RawMsa.from_a3m(seq, ctype, p_a3m + u_a3m, dedup=True).to_a3m()
+    if msa_pair_as_unpair
+        pair_path = joinpath(msa_dir, "pairing.a3m")
+        if isfile(pair_path)
+            p_seqs, _ = _parse_a3m(pair_path; seq_limit = -1)
+            np_seqs = vcat(p_seqs, np_seqs)  # paired first, then unpaired
+        end
+    end
+
+    non_pairing = if !isempty(np_seqs)
+        aln, del = _aligned_and_deletions_from_a3m(np_seqs)
         _build_chain_msa_features(sequence, aln, del)
     else
         _query_only_features()
@@ -1945,6 +1973,7 @@ function _inject_task_msa_features!(
     task::AbstractDict{<:Any, <:Any},
     json_path::AbstractString;
     use_msa::Bool,
+    msa_pair_as_unpair::Bool = false,
     chain_specs::Union{Nothing, Vector{ProteinChainSpec}} = nothing,
     rna_chain_specs::Union{Nothing, Vector{RNAChainSpec}} = nothing,
     token_chain_ids::Union{Nothing, Vector{String}} = nothing,
@@ -1986,6 +2015,7 @@ function _inject_task_msa_features!(
                 spec.msa_cfg,
                 json_dir;
                 require_pairing = !is_homomer_or_monomer,
+                msa_pair_as_unpair = msa_pair_as_unpair,
             )
         end
 
@@ -2065,7 +2095,11 @@ function _inject_task_msa_features!(
         rna_rows = isempty(rna_features) ? 0 : sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in rna_features)
         paired_rows + nonpair_extra_rows + rna_rows
     else
-        prot_rows = isempty(prot_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in prot_features)
+        # Python always creates a paired MSA with at least the query sequence for each
+        # protein chain, then prepends it during assembly.  Add 1 query row per protein
+        # chain to match that behaviour.
+        prot_paired_query_rows = length(prot_features)
+        prot_rows = isempty(prot_features) ? 0 : prot_paired_query_rows + sum(size(cf.combined.msa, 1) for cf in prot_features)
         rna_rows = isempty(rna_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in rna_features)
         prot_rows + rna_rows
     end
@@ -2135,7 +2169,27 @@ function _inject_task_msa_features!(
         row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch (expected $total_rows, got $(row-1))")
     else
         row_start = 1
-        for (cf, cols) in zip(all_features, all_token_cols)
+        # Protein chains: prepend a paired query-only row (query with zero deletions),
+        # matching the Python FeatureAssemblyLine which always adds a paired MSA with
+        # at least the query sequence.
+        for (cf, cols) in zip(prot_features, prot_token_cols)
+            # Query row (paired): same as first row of non_pairing (query), zero deletions.
+            msa[row_start, cols] .= cf.combined.msa[1, :]
+            # has_deletion and deletion_value stay zero (already initialized)
+            row_start += 1
+            # Unpaired rows
+            n_row = size(cf.combined.msa, 1)
+            row_stop = row_start + n_row - 1
+            rows = row_start:row_stop
+            msa[rows, cols] .= cf.combined.msa
+            has_deletion[rows, cols] .= cf.combined.has_deletion
+            deletion_value[rows, cols] .= cf.combined.deletion_value
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+            row_start = row_stop + 1
+        end
+        # RNA chains: no extra paired query row
+        for (cf, cols) in zip(rna_features, rna_token_cols)
             n_row = size(cf.combined.msa, 1)
             row_stop = row_start + n_row - 1
             rows = row_start:row_stop
@@ -3261,6 +3315,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     task,
                     json_path;
                     use_msa = params.use_msa,
+                    msa_pair_as_unpair = params.msa_pair_as_unpair,
                     chain_specs = parsed_task.protein_specs,
                     rna_chain_specs = parsed_task.rna_specs,
                     token_chain_ids = token_chain_ids,

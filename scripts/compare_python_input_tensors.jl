@@ -240,6 +240,7 @@ function _build_julia_feature_dict(
         task,
         input_json;
         use_msa = params.use_msa,
+        msa_pair_as_unpair = params.msa_pair_as_unpair,
         chain_specs = parsed_task.protein_specs,
         token_chain_ids = token_chain_ids,
     )
