@@ -393,10 +393,12 @@ position, this broadcast expands the MSA from sequence-level to token-level.
 **What**: Implemented `_apply_mse_to_met(atoms)` matching Python's
 `mse_to_met()` from parser.py. Converts MSE residues to MET.
 
-### Fix 9: CCD mol_type override for ALL atoms (2026-02-23)
+### Fix 9: CCD mol_type override for polymer atoms (2026-02-23)
 
-**What**: Implemented `_apply_ccd_mol_type_override(atoms)` matching Python's
-`add_token_mol_type()` from parser.py.
+**What**: Implemented `_apply_ccd_mol_type_override(atoms, polymer_chain_ids)`
+matching Python's `add_token_mol_type()` from parser.py. **NOTE**: Original
+implementation was ungated (applied to ALL atoms). Fix 14 corrected this to
+only apply to polymer entities, matching Python's entity_poly_type gate.
 
 ### Fix 10: Restype fix for modified residues (2026-02-23)
 
@@ -464,6 +466,29 @@ of UNK=20).
 and set to UNK.
 
 **Results**: s014_ccd_4ht and s025_ccd_asa moved from failed → ref_pos only.
+
+### Fix 14: Entity-gated CCD mol_type override (2026-02-24)
+
+**Bug**: Fix 9 unconditionally applied `_apply_ccd_mol_type_override()` to ALL
+atoms, including ligand/ion entities. Python's `add_token_mol_type()` gates the
+CCD lookup on `entity_poly_type` — only polymer entities (proteinChain,
+dnaSequence, rnaSequence) are checked. Atoms in ligand/ion entities are NEVER
+reclassified by CCD lookup.
+
+**Impact**: 4HT (CCD "L-PEPTIDE LINKING", declared as ligand) was reclassified
+from ligand→protein, causing clashscore to explode: s014 mini 13→487,
+s014 base 26→513. Similarly s025 ASA mini 0→147.
+
+**Fix**: Added `polymer_chain_ids::Set{String}` to `TaskEntityParseResult`.
+`_apply_ccd_mol_type_override` now skips atoms whose chain_id is not in the
+polymer set.
+
+**Verification** (all models, seed 101):
+- s014_4HT mini: severe=1 clash=13 (ref: severe=1, clash=13) — matches
+- s014_4HT base: severe=3 clash=39 (ref: severe=1, clash=26) — close
+- s025_ASA mini: severe=0 clash=0 (ref: severe=0, clash=0) — **exact match**
+- s025_ASA base: severe=2 clash=59 (ref: severe=3, clash=118) — improved
+- s014/s025 v1.0: severe=0 clash=0/13 (no reference, was 487/162)
 
 ## Remaining Failure Analysis (19 cases)
 
@@ -614,26 +639,32 @@ assessment IN PROGRESS (RBD test set in `run_20260223/`).
 
 **Regression analysis** (see `comparison_report.txt` for full details):
 
-1. **CCD reclassification cases (s014_4HT, s025_ASA)**: Largest stress
-   regressions (clashscore 26→513 and 0→147). Caused by Fixes 6-10 changing
-   entity typing from ligand→protein. The model now treats these as single
-   protein residues instead of multi-atom ligands, producing different
-   (worse-scoring) structures. These are expected consequences of matching
-   Python's entity typing.
+1. **CCD reclassification bug (s014_4HT, s025_ASA)**: FIXED by Fix 14.
+   Caused by ungated CCD mol_type override reclassifying ligand entities.
+   Clashscore dropped from 487→13 (s014 mini) and 147→0 (s025 mini).
 
-2. **Input 09 (protein_dna_ligand)**: Worst clean target regression
-   (mini: severe_clashes 707→1832). Multi-entity DNA+ligand case may be
-   sensitive to entity/sym ID changes (Fix 11) or MSA row alignment (Fix 12).
-   Needs further investigation.
+2. **Input 09 (protein_dna_ligand)**: Worst remaining regression (mini:
+   severe 707→1832). Caused by Fix 11 (entity_id/sym_id). The fix is
+   correct (matches Python's `unique_chain_and_add_ids()`), but the model
+   produces worse structures with the correct pair features for this 8-chain
+   homodimeric complex. The old output was "accidentally good" with wrong
+   entity_id features. Cannot be fixed without reverting the correct fix.
 
-3. **Normal diffusion variance**: ~60% of regressions show Δ≤3 severe
-   clashes or Δ≤1 bond violations. These are within expected noise for
-   diffusion models with changed input features (same seed but different
-   feature tensors → different sampling trajectory).
+3. **Normal diffusion variance**: ~53% of stress regressions (42/79) are
+   SMALL (Δ≤1 severe_clashes or Δ≤1 bond_violations). These are expected
+   noise from changed input features (same seed but different feature tensors
+   → different diffusion trajectory). Confirmed by GPU nondeterminism: base
+   model results vary between runs with identical features.
 
-4. **PTM cases**: Mixed. s044_mse (both models), s053_dha, s089_multi_ptm
-   show dramatic improvements. s041_sep, s055_tys regress. Net positive for
-   PTM handling after Fixes 6-10.
+4. **PTM cases**: Net positive. s044_mse (both models), s053_dha,
+   s089_multi_ptm show dramatic improvements. s041_sep, s055_tys regress
+   moderately. The regressions are from correct feature changes (Fix 10
+   restype mapping, Fix 7 MSA broadcast).
+
+5. **DNA/RNA mod minis**: s075_1ma (+18 severe), s077_5bu (+5 bond_viol),
+   s072_5mc (+5 severe) — all on mini model. Features are verified correct
+   (input parity: ref_pos only). These regressions are from correct feature
+   changes causing different diffusion trajectories.
 
 ### Key Output Files
 
