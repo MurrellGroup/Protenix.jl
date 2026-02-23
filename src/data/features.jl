@@ -811,6 +811,36 @@ function _compute_token_bonds(
     return token_bonds
 end
 
+"""
+    _chain_majority_mol_type(atoms) → Vector{String}
+
+Compute chain-level majority mol_type for each atom. Matches Python's
+`add_atom_mol_type_mask()` which assigns the most frequent mol_type within
+each chain uniformly to all atoms in that chain.
+"""
+function _chain_majority_mol_type(atoms::Vector{AtomRecord})::Vector{String}
+    # Count mol_type frequencies per chain
+    chain_counts = Dict{String, Dict{String, Int}}()
+    for a in atoms
+        counts = get!(Dict{String, Int}, chain_counts, a.chain_id)
+        counts[a.mol_type] = get(counts, a.mol_type, 0) + 1
+    end
+    # Find majority mol_type per chain (most frequent wins)
+    chain_majority = Dict{String, String}()
+    for (cid, counts) in chain_counts
+        best_mt = ""
+        best_n = 0
+        for (mt, n) in counts
+            if n > best_n
+                best_n = n
+                best_mt = mt
+            end
+        end
+        chain_majority[cid] = best_mt
+    end
+    return [chain_majority[a.chain_id] for a in atoms]
+end
+
 function _basic_atom_features(
     atoms::Vector{AtomRecord},
     tokens::TokenArray,
@@ -828,11 +858,17 @@ function _basic_atom_features(
         ref_pos_augment = ref_pos_augment,
     )
     token_bonds = _compute_token_bonds(atoms, atom_to_token_idx, ref_space_uid, n_token)
+    # Python's add_atom_mol_type_mask() uses chain-level majority vote:
+    # group atoms by chain, count mol_type frequencies per chain, assign the
+    # most frequent mol_type uniformly to all atoms in that chain.  This means
+    # a modified base like 5MC (CCD "RNA LINKING") in a DNA chain still gets
+    # is_dna=1 because the majority of the chain is DNA.
+    chain_mt = _chain_majority_mol_type(atoms)
     return Dict(
-        "is_protein" => [a.mol_type == "protein" for a in atoms],
-        "is_ligand" => [a.mol_type == "ligand" for a in atoms],
-        "is_dna" => [a.mol_type == "dna" for a in atoms],
-        "is_rna" => [a.mol_type == "rna" for a in atoms],
+        "is_protein" => [chain_mt[i] == "protein" for i in eachindex(atoms)],
+        "is_ligand" => [chain_mt[i] == "ligand" for i in eachindex(atoms)],
+        "is_dna" => [chain_mt[i] == "dna" for i in eachindex(atoms)],
+        "is_rna" => [chain_mt[i] == "rna" for i in eachindex(atoms)],
         "distogram_rep_atom_mask" => _distogram_rep_atom_mask(atoms, tokens),
         "condition_atom_mask" => [a.res_name != "xpb" for a in atoms],
         "ref_pos" => ref_pos,
