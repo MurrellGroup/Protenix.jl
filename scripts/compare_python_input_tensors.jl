@@ -222,12 +222,13 @@ function _build_julia_feature_dict(
     task = PA._as_string_dict(task_any)
     task_name = _predict_task_name(task, input_json, 1)
     parsed_task = PA._parse_task_entities(task; json_dir = dirname(abspath(input_json)))
-    atoms = PA._remove_covalent_leaving_atoms(
-        parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map,
-    )
     chain_sequences = PA._protein_chain_sequence_map(parsed_task.protein_specs)
 
     rng = MersenneTwister(seed)
+    atoms = PA._remove_covalent_leaving_atoms(
+        parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map;
+        rng = rng,
+    )
     bundle = PXDesign.Data.build_feature_bundle_from_atoms(
         atoms;
         task_name = task_name,

@@ -81,6 +81,8 @@ records = predict_sequence("ACDEFGHIKLMNPQRSTVWY";
 | `protenix_mini_esm_v0.5.0` | mini | 4 | 5 | 5 | no | yes |
 | `protenix_mini_ism_v0.5.0` | mini | 4 | 5 | 5 | no | yes |
 | `protenix_tiny_default_v0.5.0` | mini | 4 | 5 | 5 | yes | no |
+| `protenix_base_default_v1.0.0` | base | 10 | 200 | 5 | yes | no |
+| `protenix_base_20250630_v1.0.0` | base | 10 | 200 | 5 | yes | no |
 | `pxdesign_v0.1.0` | design | — | 200 | — | — | no |
 
 ### Discovering Models at Runtime
@@ -316,10 +318,39 @@ Online/local MSA search is not implemented — only precomputed A3M files are su
 
 ## Known Gaps
 
-1. **Online MSA search**: Not implemented. Only precomputed A3M files are supported.
-2. **Amber relax**: Not implemented.
-3. **Heteromer MSA pairing**: Simplified pairing by inferred taxonomy keys with row-index
+1. **Template features for v1.0 models**: v1.0 models have an active TemplateEmbedder
+   (`n_blocks=2`), but Julia does not yet compute template features (distogram, unit
+   vector, pseudo-beta mask, backbone frame mask). The embedder currently receives zeros.
+   v0.5 models are unaffected (templates disabled).
+2. **REPL API for complex inputs**: `fold()` only accepts a single protein sequence string.
+   Multi-chain complexes, ligands, ions, covalent bonds, and constraints require JSON
+   input via `predict_json()`. A richer REPL API is planned.
+3. **Online MSA search**: Not implemented. Only precomputed A3M files are supported.
+4. **Amber relax**: Not implemented.
+5. **Heteromer MSA pairing**: Simplified pairing by inferred taxonomy keys with row-index
    fallback. Full OpenFold species/taxonomic pairing is out of scope.
+6. **SMILES ligand conformers**: SMILES-to-3D coordinate generation produces different
+   3D coordinates than Python's RDKit pipeline (RDKit's internal C++ RNG is not seeded
+   by Python's `random.seed()`). This causes `ref_pos` and `frame_atom_index` to differ
+   for SMILES ligands. All other features (atom names, bonds, ref_mask, restype) match.
+   CCD ligands are unaffected. This is an inherent difference that does not affect model
+   behavior (the model is trained with random conformer augmentation).
+7. **Modified residue tokenization**: Non-standard amino acids (PTMs like SEP, MSE) and
+   modified nucleic acid bases (6OG, PSU, etc.) are tokenized differently from Python.
+   Python queries CCD `_chem_comp.type` to classify components as "PEPTIDE LINKING" (1
+   protein token) vs ligand (per-atom tokens). Julia does not yet implement this CCD
+   mol_type lookup, causing wrong token counts, MSA shape mismatches, and restype errors
+   for inputs with modified residues.
+8. **Multi-chain MSA parity**: Parity has not yet been verified for inputs with separate
+   precomputed MSAs per chain (e.g., different A3M files for chain A and chain B in a
+   heterodimer). Single-chain MSA and homomer MSA are verified.
+
+### Covalent Bond Support
+
+Covalent bonds are supported for **Protenix prediction models** (protenix_base, protenix_mini)
+via the `covalent_bonds` field in JSON input. PXDesign design models (`pxdesign_v0.1.0`)
+do not use covalent bonds — they are a binder-design model family that takes YAML input
+specifying a target structure and hotspot residues.
 
 ## Testing
 

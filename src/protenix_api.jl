@@ -6,7 +6,8 @@ using Flux: gpu, cpu
 
 import ..Device: feats_to_device, feats_to_cpu, device_ref
 import ..Data: AtomRecord, build_feature_bundle_from_atoms, load_structure_atoms
-import ..Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS, STD_RESIDUES_PROTENIX
+import ..Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS, STD_RESIDUES_PROTENIX, DNA_STD_RESIDUES, RNA_STD_RESIDUES_NATURAL, STD_RESIDUES_WITH_GAP
+import ..Data.Design: PROT_THREE_TO_ONE
 import ..Data.Features
 import ..JSONLite: parse_json, write_json
 import ..Model: load_safetensors_weights
@@ -281,6 +282,11 @@ const _CCD_COMPONENT_CACHE = Dict{
 # Per-component bond connectivity (atom_name1, atom_name2) for leaving-group graph traversal.
 const _CCD_BOND_CACHE = Dict{String, Vector{Tuple{String, String}}}()
 
+# Per-component CCD _chem_comp.type (e.g., "L-PEPTIDE LINKING", "NON-POLYMER").
+const _CCD_TYPE_CACHE = Dict{String, String}()
+# Per-component CCD _chem_comp.one_letter_code (e.g., "S" for SEP → serine).
+const _CCD_ONE_LETTER_CACHE = Dict{String, String}()
+
 const _HHBLITS_AA_TO_ID = Dict{Char, Int}(
     'A' => 0,
     'B' => 2,
@@ -405,6 +411,74 @@ function _chain_msa_block(
         deletion_value = Float32.(deletion_value),
         deletion_mean = Float32.(deletion_mean),
         profile = Float32.(profile),
+    )
+end
+
+"""
+    _broadcast_msa_block_to_tokens(block, token_res_ids) → ChainMSABlock
+
+Broadcast a ChainMSABlock from sequence-level (N_residues columns) to token-level
+(N_tokens columns) using per-token residue IDs. This matches Python Protenix's
+`expand_msa_features()` which broadcasts MSA features when modified residues
+create multiple per-atom tokens for a single sequence position.
+
+All tokens sharing the same res_id receive identical MSA feature values
+(same MSA column, same profile row, same deletion statistics).
+"""
+function _broadcast_msa_block_to_tokens(block::ChainMSABlock, token_res_ids::Vector{Int})::ChainMSABlock
+    seq_len = size(block.msa, 2)
+    n_tokens = length(token_res_ids)
+    seq_len == n_tokens && return block
+
+    # Map unique sorted res_ids to 1-based MSA column indices.
+    unique_rids = sort(unique(token_res_ids))
+    length(unique_rids) == seq_len || error(
+        "MSA broadcast: expected $seq_len unique residue IDs for sequence-level MSA, got $(length(unique_rids))",
+    )
+    rid_to_col = Dict(rid => i for (i, rid) in enumerate(unique_rids))
+    col_map = [rid_to_col[rid] for rid in token_res_ids]
+
+    n_rows = size(block.msa, 1)
+    new_msa = Matrix{Int}(undef, n_rows, n_tokens)
+    new_has_del = Matrix{Float32}(undef, n_rows, n_tokens)
+    new_del_val = Matrix{Float32}(undef, n_rows, n_tokens)
+    @inbounds for j in 1:n_tokens
+        c = col_map[j]
+        for r in 1:n_rows
+            new_msa[r, j] = block.msa[r, c]
+            new_has_del[r, j] = block.has_deletion[r, c]
+            new_del_val[r, j] = block.deletion_value[r, c]
+        end
+    end
+
+    new_del_mean = Float32[block.deletion_mean[col_map[j]] for j in 1:n_tokens]
+    n_classes = size(block.profile, 2)
+    new_profile = Matrix{Float32}(undef, n_tokens, n_classes)
+    @inbounds for j in 1:n_tokens
+        c = col_map[j]
+        for k in 1:n_classes
+            new_profile[j, k] = block.profile[c, k]
+        end
+    end
+
+    return _chain_msa_block(new_msa, new_has_del, new_del_val, new_del_mean, new_profile)
+end
+
+"""
+    _broadcast_msa_features_to_tokens(features, token_res_ids) → ChainMSAFeatures
+
+Broadcast all MSA blocks (combined, non_pairing, pairing) from sequence-level
+to token-level using per-token residue IDs.
+"""
+function _broadcast_msa_features_to_tokens(features::ChainMSAFeatures, token_res_ids::Vector{Int})::ChainMSAFeatures
+    new_combined = _broadcast_msa_block_to_tokens(features.combined, token_res_ids)
+    new_non_pairing = _broadcast_msa_block_to_tokens(features.non_pairing, token_res_ids)
+    new_pairing = features.pairing === nothing ? nothing : _broadcast_msa_block_to_tokens(features.pairing, token_res_ids)
+    return (
+        combined = new_combined,
+        non_pairing = new_non_pairing,
+        pairing = new_pairing,
+        pairing_keys = features.pairing_keys,
     )
 end
 
@@ -683,7 +757,10 @@ function _ensure_ccd_component_entries!(codes::Set{String})
     for c in codes
         uc = uppercase(strip(c))
         isempty(uc) && continue
-        haskey(_CCD_COMPONENT_CACHE, uc) || push!(needed, uc)
+        # Also re-scan if CCD metadata (type, one_letter_code) is missing.
+        if !haskey(_CCD_COMPONENT_CACHE, uc) || !haskey(_CCD_TYPE_CACHE, uc)
+            push!(needed, uc)
+        end
     end
     isempty(needed) && return
 
@@ -720,6 +797,27 @@ function _ensure_ccd_component_entries!(codes::Set{String})
                 continue
             end
             active || continue
+
+            # ─── Non-loop _chem_comp.* key-value entries (type, one_letter_code) ───
+            if startswith(s, "_chem_comp.type ")
+                toks = _split_cif_tokens(s)
+                if length(toks) >= 2
+                    val = String(toks[2])
+                    if val != "?" && val != "."
+                        _CCD_TYPE_CACHE[current_code] = val
+                    end
+                end
+                continue
+            elseif startswith(s, "_chem_comp.one_letter_code ")
+                toks = _split_cif_tokens(s)
+                if length(toks) >= 2
+                    val = String(toks[2])
+                    if val != "?" && val != "."
+                        _CCD_ONE_LETTER_CACHE[current_code] = val
+                    end
+                end
+                continue
+            end
 
             if s == "loop_"
                 headers = String[]
@@ -814,9 +912,11 @@ function _ensure_ccd_component_entries!(codes::Set{String})
                                 (atom_name = atom_name, element = element, x = Float32(x), y = Float32(y), z = Float32(z), charge = charge, has_coord = has_coord, leaving = is_leaving),
                             )
                         end
-                        _CCD_COMPONENT_CACHE[current_code] = atoms
+                        if !haskey(_CCD_COMPONENT_CACHE, current_code)
+                            _CCD_COMPONENT_CACHE[current_code] = atoms
+                            push!(pending_bonds, current_code)
+                        end
                         delete!(needed, current_code)
-                        push!(pending_bonds, current_code)
                     end
 
                 # ─── _chem_comp_bond table ───
@@ -869,6 +969,99 @@ function _ccd_component_atoms(code::AbstractString)
         uc,
         NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord, :leaving), Tuple{String, String, Float32, Float32, Float32, Float32, Bool, Bool}}[],
     )
+end
+
+"""
+    _ccd_component_type(code) → String
+
+Return the CCD `_chem_comp.type` for a component (e.g., "L-PEPTIDE LINKING", "NON-POLYMER").
+Returns "" if the component is not found or the type was not parsed.
+"""
+function _ccd_component_type(code::AbstractString)::String
+    uc = uppercase(strip(String(code)))
+    isempty(uc) && return ""
+    _ensure_ccd_component_entries!(Set([uc]))
+    return get(_CCD_TYPE_CACHE, uc, "")
+end
+
+"""
+    _ccd_one_letter_code(code) → String
+
+Return the CCD `_chem_comp.one_letter_code` for a component (e.g., "S" for SEP → serine).
+Returns "" if not found or missing.
+"""
+function _ccd_one_letter_code(code::AbstractString)::String
+    uc = uppercase(strip(String(code)))
+    isempty(uc) && return ""
+    _ensure_ccd_component_entries!(Set([uc]))
+    return get(_CCD_ONE_LETTER_CACHE, uc, "")
+end
+
+"""
+    _ccd_mol_type(code) → String
+
+Classify a CCD component as "protein", "dna", "rna", or "ligand" based on its
+`_chem_comp.type` field, matching Python Protenix's `get_mol_type()`.
+
+Rules (from http://mmcif.rcsb.org/dictionaries/mmcif_pdbx_v50.dic/Items/_chem_comp.type.html):
+- Contains "PEPTIDE" and is NOT "PEPTIDE-LIKE" → "protein"
+- Contains "DNA" → "dna"
+- Contains "RNA" → "rna"
+- Otherwise (or not found) → "ligand"
+"""
+function _ccd_mol_type(code::AbstractString)::String
+    comp_type = uppercase(_ccd_component_type(code))
+    isempty(comp_type) && return "ligand"
+    if occursin("PEPTIDE", comp_type) && comp_type != "PEPTIDE-LIKE"
+        return "protein"
+    elseif occursin("DNA", comp_type)
+        return "dna"
+    elseif occursin("RNA", comp_type)
+        return "rna"
+    end
+    return "ligand"
+end
+
+"""
+    _ccd_canonical_resname(mol_type, res_name) → String
+
+Map a CCD component to its canonical standard residue name using the CCD
+`one_letter_code` field. This matches Python Protenix's `add_cano_seq_resname()`.
+
+For modified residues (SEP, TPO, etc.), the CCD one_letter_code provides the
+parent amino acid (e.g., SEP → "S" → "SER").
+"""
+function _ccd_canonical_resname(mol_type::String, res_name::String)::String
+    if mol_type == "protein"
+        # First try standard lookup
+        one_letter = get(PROT_THREE_TO_ONE, res_name, nothing)
+        if one_letter !== nothing && one_letter != "X"
+            return get(PROT_STD_RESIDUES_ONE_TO_THREE, one_letter, "UNK")
+        end
+        # Fallback: CCD one_letter_code for modified residues
+        ccd_ol = _ccd_one_letter_code(res_name)
+        if !isempty(ccd_ol) && length(ccd_ol) == 1
+            return get(PROT_STD_RESIDUES_ONE_TO_THREE, ccd_ol, "UNK")
+        end
+        return "UNK"
+    elseif mol_type == "dna"
+        haskey(DNA_STD_RESIDUES, res_name) && return res_name
+        ccd_ol = _ccd_one_letter_code(res_name)
+        if !isempty(ccd_ol) && length(ccd_ol) == 1
+            dna_name = "D" * ccd_ol
+            return haskey(DNA_STD_RESIDUES, dna_name) ? dna_name : "DN"
+        end
+        return "DN"
+    elseif mol_type == "rna"
+        haskey(RNA_STD_RESIDUES_NATURAL, res_name) && return res_name
+        ccd_ol = _ccd_one_letter_code(res_name)
+        if !isempty(ccd_ol) && length(ccd_ol) == 1
+            return haskey(RNA_STD_RESIDUES_NATURAL, ccd_ol) ? ccd_ol : "N"
+        end
+        return "N"
+    else
+        return "UNK"
+    end
 end
 
 # Maps central atom name → Vector{Vector{String}} of leaving groups for a CCD component.
@@ -938,13 +1131,164 @@ function _ccd_central_to_leaving_groups(code::AbstractString)::Union{Nothing, Di
     return result
 end
 
+"""
+    _apply_mse_to_met(atoms) → Vector{AtomRecord}
+
+Convert MSE (selenomethionine) residues to MET (methionine), matching Python
+Protenix's `mse_to_met()`. This must be called before tokenization so that
+MSE residues are treated as standard MET (1 token) rather than per-atom modified.
+
+Conversions: res_name MSE → MET, atom SE → SD, element SE → S.
+"""
+function _apply_mse_to_met(atoms::Vector{AtomRecord})::Vector{AtomRecord}
+    result = similar(atoms)
+    for (i, a) in enumerate(atoms)
+        if a.res_name == "MSE"
+            atom_name = a.atom_name == "SE" ? "SD" : a.atom_name
+            element = uppercase(a.element) == "SE" ? "S" : a.element
+            result[i] = AtomRecord(
+                atom_name, "MET", a.mol_type, element, a.chain_id, a.res_id,
+                a.mol_type == "protein" ? (atom_name == "CA") : a.centre_atom_mask,
+                a.x, a.y, a.z, a.is_resolved,
+            )
+        else
+            result[i] = a
+        end
+    end
+    return result
+end
+
+"""
+    _apply_ccd_mol_type_override(atoms) → Vector{AtomRecord}
+
+Override mol_type for ALL atoms based on CCD `_chem_comp.type` classification.
+This matches Python Protenix's `add_token_mol_type()`, which overrides per-residue.
+
+Examples:
+- Ligand 4HT (CCD "L-PEPTIDE LINKING") → mol_type "protein", centre=CA
+- DNA base 5MC (CCD "RNA LINKING") → mol_type "rna" (even in a DNA chain)
+- Standard ALA (CCD "L-PEPTIDE LINKING") → mol_type "protein" (no change)
+"""
+function _apply_ccd_mol_type_override(atoms::Vector{AtomRecord})::Vector{AtomRecord}
+    result = similar(atoms)
+    for (i, a) in enumerate(atoms)
+        ccd_mt = _ccd_mol_type(a.res_name)
+        if ccd_mt != a.mol_type && ccd_mt != "ligand"
+            # CCD classifies this residue differently than the entity type.
+            # Override mol_type and adjust centre atom mask accordingly.
+            # Guard: never override TO "ligand" (only override to polymer types).
+            centre = ccd_mt == "protein" ? (a.atom_name == "CA") : (a.atom_name == "C1'")
+            result[i] = AtomRecord(
+                a.atom_name, a.res_name, ccd_mt, a.element, a.chain_id, a.res_id,
+                centre, a.x, a.y, a.z, a.is_resolved,
+            )
+        else
+            result[i] = a
+        end
+    end
+    return result
+end
+
+"""
+    _fix_restype_for_modified_residues!(feat, atoms, tokens)
+
+Post-process the `restype` feature to use CCD one_letter_code for mapping modified
+residues to their parent amino acid. This matches Python Protenix's `add_cano_seq_resname()`.
+
+For standard residues, restype is already correct. For modified residues (SEP, TPO, etc.),
+the CCD one_letter_code provides the parent amino acid (SEP → "S" → SER, restype index 15).
+"""
+function _fix_restype_for_modified_residues!(
+    feat::Dict{String, Any},
+    atoms::Vector{AtomRecord},
+    tokens,
+)
+    centre_idx = Features.centre_atom_indices(tokens)
+    restype = feat["restype"]
+    n_classes = size(restype, 2)
+    changed = false
+    for (ti, ai) in enumerate(centre_idx)
+        a = atoms[ai]
+        canonical = _ccd_canonical_resname(a.mol_type, a.res_name)
+        # Look up the standard residue index
+        restype_id = get(STD_RESIDUES_WITH_GAP, canonical, nothing)
+        restype_id === nothing && continue
+        # Check if current restype matches
+        current_max = 0
+        current_id = 0
+        for k in 1:n_classes
+            if restype[ti, k] > current_max
+                current_max = restype[ti, k]
+                current_id = k - 1  # 0-indexed
+            end
+        end
+        if current_id != restype_id
+            restype[ti, :] .= 0
+            restype[ti, restype_id + 1] = 1  # 0-indexed → 1-indexed
+            changed = true
+        end
+    end
+    if changed
+        # Also update profile (first 32 columns of restype) and MSA query row
+        feat["restype"] = restype
+    end
+end
+
+@doc """
+    _fix_entity_and_sym_ids!(feat, atoms, tokens, entity_chain_ids)
+
+Fix entity_id and sym_id features to match Python Protenix's `unique_chain_and_add_ids()`.
+
+Julia's default sets `entity_id = asym_id` (each chain gets a unique entity), but Python
+groups chains by their entity (same sequence → same entity_id). sym_id tracks which copy
+of an entity a chain is.
+
+Example for homodimer + ligand:
+- Python: chain A → entity_id=0, sym_id=0; chain A' → entity_id=0, sym_id=1; ligand → entity_id=1, sym_id=0
+- Julia default: chain A → entity_id=0; chain A' → entity_id=1; ligand → entity_id=2 (all sym_id=0)
+"""
+function _fix_entity_and_sym_ids!(
+    feat::Dict{String, Any},
+    atoms::Vector{AtomRecord},
+    tokens,
+    entity_chain_ids::Vector{Vector{String}},
+)
+    centre_idx = Features.centre_atom_indices(tokens)
+    n_token = length(tokens)
+
+    # Build chain_id → (entity_idx, sym_idx) mapping from entity_chain_ids
+    # entity_chain_ids[i] = [chain_id_1, chain_id_2, ...] for entity i
+    chain_to_entity = Dict{String, Int}()  # chain_id → 0-based entity index
+    chain_to_sym = Dict{String, Int}()     # chain_id → 0-based sym index within entity
+    for (eidx, chain_ids) in enumerate(entity_chain_ids)
+        for (sidx, cid) in enumerate(chain_ids)
+            chain_to_entity[cid] = eidx - 1  # 0-based
+            chain_to_sym[cid] = sidx - 1     # 0-based
+        end
+    end
+
+    entity_id = feat["entity_id"]
+    sym_id = feat["sym_id"]
+    for (ti, ai) in enumerate(centre_idx)
+        cid = atoms[ai].chain_id
+        if haskey(chain_to_entity, cid)
+            entity_id[ti] = chain_to_entity[cid]
+            sym_id[ti] = chain_to_sym[cid]
+        end
+    end
+    feat["entity_id"] = entity_id
+    feat["sym_id"] = sym_id
+end
+
 # Remove leaving atoms from a flat atom vector based on covalent bond definitions.
 # Mirrors Python's add_covalent_bonds → remove_leaving_atoms flow.
+# Uses rng for random group selection to match Python's random.sample behavior.
 function _remove_covalent_leaving_atoms(
     atoms::Vector{AtomRecord},
     task::AbstractDict{<:Any, <:Any},
     entity_chain_ids::Vector{Vector{String}},
-    entity_atom_map::Vector{Dict{Int, String}},
+    entity_atom_map::Vector{Dict{Int, String}};
+    rng::AbstractRNG = Random.default_rng(),
 )::Vector{AtomRecord}
     haskey(task, "covalent_bonds") || return atoms
     bonds_any = task["covalent_bonds"]
@@ -1032,12 +1376,19 @@ function _remove_covalent_leaving_atoms(
         groups === nothing && continue
 
         n_remove = min(b_count, length(groups))
-        rng = get(chain_res_ranges, (a.chain_id, a.res_id), 0:0)
-        isempty(rng) && continue
+        res_range = get(chain_res_ranges, (a.chain_id, a.res_id), 0:0)
+        isempty(res_range) && continue
 
-        for gi in 1:n_remove
+        # Random selection of leaving groups to match Python's random.sample(leaving_groups, b_count)
+        if n_remove < length(groups)
+            selected_indices = sort(shuffle(rng, collect(1:length(groups)))[1:n_remove])
+        else
+            selected_indices = collect(1:length(groups))
+        end
+
+        for gi in selected_indices
             for leaving_name in groups[gi]
-                for k in rng
+                for k in res_range
                     if uppercase(atoms[k].atom_name) == uppercase(leaving_name)
                         push!(remove_set, k)
                         break
@@ -1048,6 +1399,110 @@ function _remove_covalent_leaving_atoms(
     end
 
     isempty(remove_set) && return atoms
+    return [atoms[i] for i in 1:length(atoms) if !(i in remove_set)]
+end
+
+# Remove leaving atoms from disconnected polymer residues.
+# Mirrors Python's _remove_non_std_ccd_leaving_atoms: for adjacent residues in the same
+# chain that lack the expected inter-residue bond (C-N for protein, O3'-P for nucleic),
+# remove ALL leaving atoms from both residues.
+function _remove_non_std_polymer_leaving_atoms(atoms::Vector{AtomRecord})::Vector{AtomRecord}
+    isempty(atoms) && return atoms
+
+    # Group atoms into residues: (chain_id, res_id) → range of indices
+    residues = Tuple{String, Int, UnitRange{Int}}[]  # (chain_id, res_id, index_range)
+    i = 1
+    while i <= length(atoms)
+        cid = atoms[i].chain_id
+        rid = atoms[i].res_id
+        j = i
+        while j < length(atoms) && atoms[j + 1].chain_id == cid && atoms[j + 1].res_id == rid
+            j += 1
+        end
+        push!(residues, (cid, rid, i:j))
+        i = j + 1
+    end
+
+    length(residues) < 2 && return atoms
+
+    # Check connectivity between adjacent residues
+    # connected[k] = true means residues[k] and residues[k+1] are bonded
+    connected = falses(length(residues) - 1)
+    for k in 1:(length(residues) - 1)
+        cid1, rid1, rng1 = residues[k]
+        cid2, rid2, rng2 = residues[k + 1]
+
+        # Must be same chain and consecutive res_ids
+        cid1 == cid2 || continue
+        abs(rid2 - rid1) <= 1 || continue
+
+        # Determine mol_type from atoms
+        mt1 = atoms[first(rng1)].mol_type
+        mt2 = atoms[first(rng2)].mol_type
+
+        # Check for connecting atoms based on mol_type
+        if mt1 == "protein" && mt2 == "protein"
+            has_c = any(uppercase(atoms[idx].atom_name) == "C" for idx in rng1)
+            has_n = any(uppercase(atoms[idx].atom_name) == "N" for idx in rng2)
+            connected[k] = has_c && has_n
+        elseif (mt1 == "dna" || mt1 == "rna") && (mt2 == "dna" || mt2 == "rna")
+            has_o3p = any(uppercase(atoms[idx].atom_name) == "O3'" for idx in rng1)
+            has_p = any(uppercase(atoms[idx].atom_name) == "P" for idx in rng2)
+            connected[k] = has_o3p && has_p
+        else
+            # Different or incompatible types — not a polymer bond
+            connected[k] = true  # treat as "not disconnected"
+        end
+    end
+
+    # Find residues involved in disconnections
+    disconnected_residue_indices = Set{Int}()
+    for k in 1:(length(residues) - 1)
+        connected[k] && continue
+        # Only flag if they're in the same chain with consecutive res_ids
+        cid1, rid1, _ = residues[k]
+        cid2, rid2, _ = residues[k + 1]
+        cid1 == cid2 || continue
+        abs(rid2 - rid1) <= 1 || continue
+        push!(disconnected_residue_indices, k)
+        push!(disconnected_residue_indices, k + 1)
+    end
+
+    isempty(disconnected_residue_indices) && return atoms
+
+    # For each disconnected residue, determine which atoms to keep (non-leaving)
+    remove_set = Set{Int}()
+    n_res = length(residues)
+    for res_k in disconnected_residue_indices
+        _, rid, rng = residues[res_k]
+        res_name = uppercase(atoms[first(rng)].res_name)
+        mol_type = atoms[first(rng)].mol_type
+
+        # Get CCD staying atom names (non-leaving, non-hydrogen)
+        comp_atoms = _ccd_component_atoms(res_name)
+        staying_names = Set{String}()
+        for ca in comp_atoms
+            ca.leaving && continue
+            push!(staying_names, uppercase(ca.atom_name))
+        end
+
+        # Special cases matching Python: first nucleic keeps OP3, last protein keeps OXT
+        if res_k == 1 && (mol_type == "dna" || mol_type == "rna")
+            push!(staying_names, "OP3")
+        end
+        if res_k == n_res && mol_type == "protein"
+            push!(staying_names, "OXT")
+        end
+
+        for idx in rng
+            if uppercase(atoms[idx].atom_name) ∉ staying_names
+                push!(remove_set, idx)
+            end
+        end
+    end
+
+    isempty(remove_set) && return atoms
+    @warn "Removed $(length(remove_set)) leaving atoms from disconnected polymer residues"
     return [atoms[i] for i in 1:length(atoms) if !(i in remove_set)]
 end
 
@@ -1220,7 +1675,7 @@ function _extract_smiles_atommap(body::AbstractString)
     return parse(Int, raw)
 end
 
-function _build_ligand_atoms_from_smiles(smiles::AbstractString; chain_id::String, is_resolved::Bool = false)
+function _build_ligand_atoms_from_smiles(smiles::AbstractString; chain_id::String, is_resolved::Bool = true)
     s = strip(String(smiles))
     isempty(s) && error("SMILES ligand string cannot be empty")
 
@@ -1726,6 +2181,9 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     end
 
     isempty(atoms) && error("No supported sequence entities found in infer task")
+    # Remove leaving atoms from disconnected polymer residues (matches Python's
+    # _remove_non_std_ccd_leaving_atoms called per-chain during build_polymer_chain).
+    atoms = _remove_non_std_polymer_leaving_atoms(atoms)
     return TaskEntityParseResult(atoms, protein_specs, rna_specs, entity_chain_ids, entity_atom_map)
 end
 
@@ -1770,6 +2228,139 @@ function _sequence_to_protenix_indices(sequence::AbstractString)
     end
     return idx
 end
+
+# ── MSA file format utilities ─────────────────────────────────────────────────
+
+"""
+    _infer_alignment_type(path) → Symbol
+
+Infer MSA alignment type from file extension.
+- `.a3m` → `:a3m` (lowercase = insertions, uppercase + dash = match states)
+- `.fasta`, `.fa`, `.fas`, `.faa` → `:fasta` (no case semantics, all chars are match states)
+- Unknown → `:a3m` (conservative default)
+"""
+function _infer_alignment_type(path::AbstractString)::Symbol
+    ext = lowercase(splitext(path)[2])
+    ext == ".a3m" && return :a3m
+    ext in (".fasta", ".fa", ".fas", ".faa") && return :fasta
+    return :a3m
+end
+
+"""
+    _find_msa_file(dir, stem) → Union{String, Nothing}
+
+Search for an MSA file in `dir` with the given stem and any supported extension.
+Tries `.a3m` first, then `.fasta`, `.fa`, `.fas`.  Returns `nothing` if not found.
+"""
+function _find_msa_file(dir::AbstractString, stem::AbstractString)
+    for ext in (".a3m", ".fasta", ".fa", ".fas")
+        path = joinpath(dir, stem * ext)
+        isfile(path) && return path
+    end
+    return nothing
+end
+
+"""
+    _aligned_and_deletions_from_fasta(sequences) → (aligned, deletion_matrix)
+
+Process raw FASTA-format MSA sequences.  In FASTA alignments there are no case
+semantics — every character is a match state.  Lowercase is uppercased, `.` is
+converted to `-` (gap).  The deletion matrix is all zeros.
+"""
+function _aligned_and_deletions_from_fasta(sequences::Vector{String})
+    aligned = String[]
+    deletion_matrix = Vector{Vector{Float32}}()
+    for raw in sequences
+        aln = uppercase(replace(raw, '.' => '-'))
+        isempty(aln) && continue
+        push!(aligned, aln)
+        push!(deletion_matrix, zeros(Float32, length(aln)))
+    end
+    return aligned, deletion_matrix
+end
+
+"""
+    _parse_and_align_msa(path; alignment_type=:infer, seq_limit=-1)
+        → (aligned, deletion_matrix, descriptions)
+
+Unified MSA parser that handles both a3m and fasta formats.
+
+- `:a3m` — lowercase = insertions (counted in deletion matrix, stripped from aligned
+  sequences).  After stripping, all rows have the same length as the query (row 0).
+- `:fasta` — no case semantics; all characters are match states; deletion matrix is
+  all zeros.
+- `:infer` (default) — detect from file extension.
+"""
+function _parse_and_align_msa(path::AbstractString; alignment_type::Symbol = :infer, seq_limit::Int = -1)
+    isfile(path) || error("MSA file not found: $path")
+    if alignment_type == :infer
+        alignment_type = _infer_alignment_type(path)
+    end
+    alignment_type in (:a3m, :fasta) || error(
+        "Unknown alignment_type=$(repr(alignment_type)); expected :a3m, :fasta, or :infer",
+    )
+
+    seqs, descs = _parse_a3m(path; seq_limit = seq_limit)  # FASTA header format is compatible
+
+    if alignment_type == :a3m
+        aln, del = _aligned_and_deletions_from_a3m(seqs)
+    else
+        aln, del = _aligned_and_deletions_from_fasta(seqs)
+    end
+
+    return aln, del, descs
+end
+
+"""
+    _check_msa_query_match(aligned_query, input_sequence, msa_path)
+
+Compare the MSA query (row 0, gaps removed) against the input chain sequence.
+Logs a warning with quantified mismatch details if they don't correspond.
+
+Small mismatches (≤5 AAs) can occur legitimately from:
+- Non-standard amino acids mapped to X vs their parent (e.g. MSE → M in MSA, X in input)
+- Expression tags or cloning artifacts in the MSA search query
+- Point mutations between MSA source and modeling target
+
+Large mismatches almost certainly mean the wrong MSA was provided for this chain.
+"""
+function _check_msa_query_match(
+    aligned_query::AbstractString,
+    input_sequence::AbstractString,
+    msa_path::AbstractString,
+)
+    ungapped = filter(c -> c != '-', uppercase(aligned_query))
+    input_up = uppercase(strip(input_sequence))
+
+    ungapped == input_up && return  # exact match
+
+    ulen = length(ungapped)
+    ilen = length(input_up)
+
+    if ulen == ilen
+        n_mis = count(i -> ungapped[i] != input_up[i], 1:ulen)
+        if n_mis <= 5
+            @warn("MSA query has $n_mis/$ulen AA mismatches vs input sequence " *
+                  "(possibly non-standard residues or expression-tag differences)",
+                  msa_path)
+        else
+            pct = round(100.0 * n_mis / ulen; digits = 1)
+            @warn("MSA query has $n_mis/$ulen AA mismatches ($pct%) vs input sequence " *
+                  "— likely wrong MSA for this chain",
+                  msa_path)
+        end
+    else
+        overlap = min(ulen, ilen)
+        n_mis = overlap > 0 ? count(i -> ungapped[i] != input_up[i], 1:overlap) : 0
+        pct = overlap > 0 ? round(100.0 * n_mis / overlap; digits = 1) : 100.0
+        @warn("MSA query length ($ulen) ≠ input sequence length ($ilen); " *
+              "$n_mis/$overlap mismatches in overlap ($pct%) — " *
+              "MSA may not correspond to this chain",
+              msa_path)
+    end
+end
+
+# ── Original a3m parser ───────────────────────────────────────────────────────
 
 function _parse_a3m(path::AbstractString; seq_limit::Int = -1)
     isfile(path) || error("MSA file not found: $path")
@@ -1999,25 +2590,39 @@ function _chain_msa_features(
     msa_dir = isabspath(msa_dir_raw) ? msa_dir_raw : normpath(joinpath(json_dir, msa_dir_raw))
     isdir(msa_dir) || error("The provided precomputed_msa_dir does not exist: $msa_dir")
 
-    # Read non_pairing.a3m sequences
-    non_pair_path = joinpath(msa_dir, "non_pairing.a3m")
+    # Find and read non-pairing MSA (supports .a3m, .fasta, .fa, .fas)
+    non_pair_path = _find_msa_file(msa_dir, "non_pairing")
     np_seqs = String[]
-    if isfile(non_pair_path)
+    np_atype = :a3m
+    if non_pair_path !== nothing
         np_seqs, _ = _parse_a3m(non_pair_path; seq_limit = -1)
+        np_atype = _infer_alignment_type(non_pair_path)
     end
 
-    # When msa_pair_as_unpair (v1.0 default), merge pairing.a3m into the unpaired set.
+    # When msa_pair_as_unpair (v1.0 default), merge pairing MSA into the unpaired set.
     # Python: u_a3m = RawMsa.from_a3m(seq, ctype, p_a3m + u_a3m, dedup=True).to_a3m()
     if msa_pair_as_unpair
-        pair_path = joinpath(msa_dir, "pairing.a3m")
-        if isfile(pair_path)
+        pair_path = _find_msa_file(msa_dir, "pairing")
+        if pair_path !== nothing
             p_seqs, _ = _parse_a3m(pair_path; seq_limit = -1)
             np_seqs = vcat(p_seqs, np_seqs)  # paired first, then unpaired
+            # If pairing file has different format, use the pairing format for all
+            # (pairing sequences are prepended, so row 0 alignment type matters)
+            np_atype = _infer_alignment_type(pair_path)
         end
     end
 
     non_pairing = if !isempty(np_seqs)
-        aln, del = _aligned_and_deletions_from_a3m(np_seqs)
+        if np_atype == :fasta
+            aln, del = _aligned_and_deletions_from_fasta(np_seqs)
+        else
+            aln, del = _aligned_and_deletions_from_a3m(np_seqs)
+        end
+        # Validate MSA query vs input sequence
+        if !isempty(aln)
+            _check_msa_query_match(aln[1], sequence,
+                something(non_pair_path, joinpath(msa_dir, "non_pairing.*")))
+        end
         _build_chain_msa_features(sequence, aln, del)
     else
         _query_only_features()
@@ -2026,10 +2631,21 @@ function _chain_msa_features(
     pairing = nothing
     pairing_keys = nothing
     if require_pairing
-        pair_path = joinpath(msa_dir, "pairing.a3m")
-        isfile(pair_path) || error("No pairing-MSA found at $pair_path for multi-chain assembly.")
+        pair_path = _find_msa_file(msa_dir, "pairing")
+        pair_path !== nothing && isfile(pair_path) || error(
+            "No pairing-MSA found in $msa_dir (tried pairing.a3m, pairing.fasta, etc.) for multi-chain assembly.",
+        )
         seqs, desc = _parse_a3m(pair_path; seq_limit = -1)
-        aln, del = _aligned_and_deletions_from_a3m(seqs)
+        pair_atype = _infer_alignment_type(pair_path)
+        if pair_atype == :fasta
+            aln, del = _aligned_and_deletions_from_fasta(seqs)
+        else
+            aln, del = _aligned_and_deletions_from_a3m(seqs)
+        end
+        # Validate pairing MSA query vs input sequence
+        if !isempty(aln)
+            _check_msa_query_match(aln[1], sequence, pair_path)
+        end
         row_keys = [_pairing_key_from_description(d, i) for (i, d) in enumerate(desc)]
         aln_d, del_d, keys_d = _dedup_aligned_deletion_rows(aln, del; row_keys = row_keys)
         pairing = _build_chain_msa_features(sequence, aln_d, del_d; dedup_rows = false)
@@ -2149,11 +2765,15 @@ function _rna_chain_msa_features(
 
     # Resolve MSA text: inline takes priority over file path.
     msa_text = spec.unpaired_msa
+    msa_source_path = nothing  # for query-match checking
+    rna_atype = :a3m           # default for inline text
     if msa_text === nothing && spec.unpaired_msa_path !== nothing
         path_raw = spec.unpaired_msa_path
         path = isabspath(path_raw) ? path_raw : normpath(joinpath(json_dir, path_raw))
         isfile(path) || error("RNA MSA file not found: $path")
         msa_text = read(path, String)
+        msa_source_path = path
+        rna_atype = _infer_alignment_type(path)
     end
 
     if msa_text === nothing || isempty(strip(msa_text))
@@ -2167,7 +2787,16 @@ function _rna_chain_msa_features(
         return (combined = base, non_pairing = base, pairing = nothing, pairing_keys = nothing)
     end
 
-    aln, del = _aligned_and_deletions_from_a3m(seqs)
+    if rna_atype == :fasta
+        aln, del = _aligned_and_deletions_from_fasta(seqs)
+    else
+        aln, del = _aligned_and_deletions_from_a3m(seqs)
+    end
+    # Validate MSA query vs input sequence
+    if !isempty(aln)
+        _check_msa_query_match(aln[1], spec.sequence,
+            something(msa_source_path, "<inline RNA MSA>"))
+    end
     non_pairing = _build_rna_chain_msa_features(spec.sequence, aln, del)
 
     # RNA has no paired MSA.
@@ -2214,7 +2843,15 @@ function _inject_task_msa_features!(
     local_prot_specs = chain_specs === nothing ? _extract_protein_chain_specs(task) : chain_specs
     local_rna_specs = rna_chain_specs === nothing ? _extract_rna_chain_specs(task; json_dir = json_dir) : rna_chain_specs
 
-    isempty(local_prot_specs) && isempty(local_rna_specs) && return feat
+    # Python v1.0 FeatureAssemblyLine includes DNA as a standard polymer chain type
+    # in MSA assembly.  Julia doesn't process DNA MSA separately, but we must avoid
+    # early-returning when DNA exists so that the 2-row (paired+unpaired) MSA shape
+    # matches the Python reference.
+    has_dna_chains = any(
+        haskey(_as_string_dict(e), "dnaSequence")
+        for e in get(task, "sequences", [])
+    )
+    isempty(local_prot_specs) && isempty(local_rna_specs) && !has_dna_chains && return feat
 
     restype = Float32.(feat["restype"])
     n_tok = size(restype, 1)
@@ -2223,6 +2860,9 @@ function _inject_task_msa_features!(
         _, idx = findmax(@view restype[i, :])
         restype_idx[i] = idx - 1
     end
+
+    # Pre-compute residue indices for MSA broadcast (used for modified residues).
+    residue_idx = Int.(feat["residue_index"])
 
     # --- Protein MSA features ---
     prot_token_cols = Vector{Vector{Int}}()
@@ -2247,6 +2887,18 @@ function _inject_task_msa_features!(
                 require_pairing = !is_homomer_or_monomer,
                 msa_pair_as_unpair = msa_pair_as_unpair,
             )
+        end
+
+        # Broadcast MSA from sequence-level to token-level for chains with modified
+        # residues that create multiple per-atom tokens per sequence position.
+        # Matches Python Protenix's expand_msa_features() / map_to_standard().
+        residue_idx = Int.(feat["residue_index"])
+        for (i, cols) in enumerate(prot_token_cols)
+            seq_len = size(prot_features[i].combined.msa, 2)
+            if seq_len != length(cols)
+                token_rids = residue_idx[cols]
+                prot_features[i] = _broadcast_msa_features_to_tokens(prot_features[i], token_rids)
+            end
         end
 
         for (i, cols) in enumerate(prot_token_cols)
@@ -2297,6 +2949,15 @@ function _inject_task_msa_features!(
             rna_features[i] = _rna_chain_msa_features(rspec, json_dir)
         end
 
+        # Broadcast RNA MSA from sequence-level to token-level for modified bases.
+        for (i, cols) in enumerate(rna_token_cols)
+            seq_len = size(rna_features[i].combined.msa, 2)
+            if seq_len != length(cols)
+                token_rids = residue_idx[cols]
+                rna_features[i] = _broadcast_msa_features_to_tokens(rna_features[i], token_rids)
+            end
+        end
+
         for (i, cols) in enumerate(rna_token_cols)
             size(rna_features[i].combined.msa, 2) == length(cols) || error(
                 "RNA MSA/token length mismatch on chain $(local_rna_specs[i].chain_id): MSA has $(size(rna_features[i].combined.msa, 2)) columns, tokens have $(length(cols)).",
@@ -2326,12 +2987,25 @@ function _inject_task_msa_features!(
         rna_rows = isempty(rna_features) ? 0 : sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in rna_features)
         paired_rows + nonpair_extra_rows + rna_rows
     elseif is_prot_homomer_or_monomer || isempty(prot_features)
-        # Homomer/monomer: Python always creates a paired MSA with at least the query
-        # sequence for each protein chain, then prepends it during assembly.
-        prot_paired_query_rows = length(prot_features)
-        prot_rows = isempty(prot_features) ? 0 : prot_paired_query_rows + sum(size(cf.combined.msa, 1) for cf in prot_features)
-        rna_rows = isempty(rna_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in rna_features)
-        prot_rows + rna_rows
+        # Python v1.0 FeatureAssemblyLine merges all polymer chains into a shared
+        # MSA: chains contribute columns (concatenated), not extra rows.  The final
+        # MSA = concat(paired_rows, unpaired_rows).  Without precomputed MSA each
+        # chain produces 1 paired + 1 unpaired query row → total always 2 rows.
+        max_unpaired = 0
+        if !isempty(prot_features)
+            max_unpaired = max(max_unpaired, maximum(size(cf.combined.msa, 1) for cf in prot_features))
+        end
+        if !isempty(rna_features)
+            max_unpaired = max(max_unpaired, maximum(size(cf.combined.msa, 1) for cf in rna_features))
+        end
+        # DNA chains don't have separate MSA features in Julia but Python v1.0 treats
+        # them as standard polymers that contribute at least 1 query row.
+        if has_dna_chains && max_unpaired == 0
+            max_unpaired = 1
+        end
+        # Python always prepends 1 paired query row for any polymer input.
+        max_paired = max_unpaired > 0 ? 1 : 0
+        max_paired + max_unpaired
     else
         # Heteromer without pairing data: Python's cleanup_unpaired_features removes
         # the unpaired query row (since it duplicates the paired query) for each chain.
@@ -2406,37 +3080,45 @@ function _inject_task_msa_features!(
         end
         row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch (expected $total_rows, got $(row-1))")
     elseif is_prot_homomer_or_monomer || isempty(prot_features)
-        row_start = 1
-        # Homomer/monomer: prepend a paired query-only row (query with zero deletions),
-        # matching the Python FeatureAssemblyLine which always adds a paired MSA with
-        # at least the query sequence.
+        # Python v1.0 FeatureAssemblyLine layout:
+        #   Row 1 = paired query (already correct from restype_idx initialization,
+        #           zero deletions from the zeros initialization)
+        #   Rows 2..max_unpaired+1 = unpaired MSA (merged columns, shared rows)
+        # All chains share the same row space; their columns are interleaved.
+        # Chains with fewer unpaired rows than max_unpaired have their remaining
+        # columns stay as query residue types (from the restype_idx initialization).
+        # Row 1 = paired query: set explicitly from chain MSA query rather than
+        # relying on restype_idx initialization, because modified residues may
+        # have MSA indices that differ from raw restype (e.g. DHA → ALA mapping).
         for (cf, cols) in zip(prot_features, prot_token_cols)
-            # Query row (paired): same as first row of non_pairing (query), zero deletions.
-            msa[row_start, cols] .= cf.combined.msa[1, :]
-            # has_deletion and deletion_value stay zero (already initialized)
-            row_start += 1
-            # Unpaired rows
+            msa[1, cols] .= cf.combined.msa[1, :]
+        end
+        for (cf, cols) in zip(rna_features, rna_token_cols)
+            msa[1, cols] .= cf.combined.msa[1, :]
+        end
+        # Rows 2..max_unpaired+1 = unpaired MSA (merged columns, shared rows).
+        unpaired_start = 2
+        for (cf, cols) in zip(prot_features, prot_token_cols)
             n_row = size(cf.combined.msa, 1)
-            row_stop = row_start + n_row - 1
-            rows = row_start:row_stop
-            msa[rows, cols] .= cf.combined.msa
-            has_deletion[rows, cols] .= cf.combined.has_deletion
-            deletion_value[rows, cols] .= cf.combined.deletion_value
+            for r in 1:n_row
+                target_row = unpaired_start + r - 1
+                msa[target_row, cols] .= cf.combined.msa[r, :]
+                has_deletion[target_row, cols] .= cf.combined.has_deletion[r, :]
+                deletion_value[target_row, cols] .= cf.combined.deletion_value[r, :]
+            end
             profile[cols, :] .= cf.combined.profile
             deletion_mean[cols] .= cf.combined.deletion_mean
-            row_start = row_stop + 1
         end
-        # RNA chains: no extra paired query row
         for (cf, cols) in zip(rna_features, rna_token_cols)
             n_row = size(cf.combined.msa, 1)
-            row_stop = row_start + n_row - 1
-            rows = row_start:row_stop
-            msa[rows, cols] .= cf.combined.msa
-            has_deletion[rows, cols] .= cf.combined.has_deletion
-            deletion_value[rows, cols] .= cf.combined.deletion_value
+            for r in 1:n_row
+                target_row = unpaired_start + r - 1
+                msa[target_row, cols] .= cf.combined.msa[r, :]
+                has_deletion[target_row, cols] .= cf.combined.has_deletion[r, :]
+                deletion_value[target_row, cols] .= cf.combined.deletion_value[r, :]
+            end
             profile[cols, :] .= cf.combined.profile
             deletion_mean[cols] .= cf.combined.deletion_mean
-            row_start = row_stop + 1
         end
     else
         # Heteromer without pairing data: Row 1 is the shared query (already
@@ -2466,6 +3148,33 @@ function _inject_task_msa_features!(
             profile[cols, :] .= cf.combined.profile
             deletion_mean[cols] .= cf.combined.deletion_mean
             row_start = row_stop + 1
+        end
+    end
+
+    # Python v1.0 FeatureAssemblyLine assigns "X" (UNK, index 20) as the MSA query
+    # for non-polymer columns (ligands, ions, reclassified entities).  Julia's
+    # initialization uses restype_idx which may differ after CCD corrections
+    # (e.g. 4HT → W=17 instead of UNK=20).  Fix uncovered non-DNA columns.
+    covered = falses(n_tok)
+    for cols in prot_token_cols
+        covered[cols] .= true
+    end
+    for cols in rna_token_cols
+        covered[cols] .= true
+    end
+    unk_idx = 20  # STD_RESIDUES_WITH_GAP["UNK"]
+    for i in 1:n_tok
+        covered[i] && continue
+        # DNA tokens (indices 26-30) keep their correct base-level restype_idx.
+        26 <= restype_idx[i] <= 30 && continue
+        # Non-polymer, non-DNA token: set MSA to UNK (matching Python "X" sequence)
+        for r in 1:total_rows
+            msa[r, i] = unk_idx
+        end
+        # Profile: UNK one-hot (all zeros except position 20, which is index 21 in 1-based)
+        profile[i, :] .= 0f0
+        if size(profile, 2) >= 21
+            profile[i, 21] = 1f0
         end
     end
 
@@ -3569,16 +4278,21 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
             task = _as_string_dict(task_any)
             task_name = haskey(task, "name") ? String(task["name"]) : "$(_default_task_name(json_path))_$(task_idx - 1)"
             parsed_task = _parse_task_entities(task; json_dir = dirname(abspath(json_path)))
-            atoms = _remove_covalent_leaving_atoms(
-                parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map,
-            )
             chain_sequences = _protein_chain_sequence_map(parsed_task.protein_specs)
 
             for seed in opts.seeds
                 rng = MersenneTwister(seed)
+                atoms = _remove_covalent_leaving_atoms(
+                    parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map;
+                    rng = rng,
+                )
+                atoms = _apply_mse_to_met(atoms)
+                atoms = _apply_ccd_mol_type_override(atoms)
                 bundle = build_feature_bundle_from_atoms(atoms; task_name = task_name, rng = rng)
                 token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
                 _normalize_protenix_feature_dict!(bundle["input_feature_dict"])
+                _fix_restype_for_modified_residues!(bundle["input_feature_dict"], bundle["atoms"], bundle["tokens"])
+                _fix_entity_and_sym_ids!(bundle["input_feature_dict"], bundle["atoms"], bundle["tokens"], parsed_task.entity_chain_ids)
                 _inject_task_msa_features!(
                     bundle["input_feature_dict"],
                     task,

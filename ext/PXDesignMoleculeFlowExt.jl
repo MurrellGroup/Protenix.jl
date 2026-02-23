@@ -39,7 +39,10 @@ function PXDesign.ProtenixAPI._smiles_to_atoms_and_bonds(smiles::String, chain_i
     mol = MoleculeFlow.mol_from_smiles(smiles)
     mol.valid || error("Invalid SMILES: $smiles")
 
-    confs = MoleculeFlow.generate_3d_conformers(mol, 1; random_seed=1)
+    # Match Python Protenix: bare AllChem.EmbedMolecule without MMFF optimization.
+    # Coordinates will differ from Python (RDKit's internal RNG is not seeded by
+    # Python's random.seed), but atom ordering and naming will match.
+    confs = MoleculeFlow.generate_3d_conformers(mol, 1; optimize=false, random_seed=1)
     isempty(confs) && error("Failed to generate 3D conformer for SMILES: $smiles")
     mol_conf = confs[1].molecule
 
@@ -62,7 +65,7 @@ function PXDesign.ProtenixAPI._smiles_to_atoms_and_bonds(smiles::String, chain_i
             atom_records,
             AtomRecord(
                 atom_name, "UNL", "ligand", sym, chain_id, 1, true,
-                coords[i, 1], coords[i, 2], coords[i, 3], false,
+                coords[i, 1], coords[i, 2], coords[i, 3], true,
             ),
         )
     end
