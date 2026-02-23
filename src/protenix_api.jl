@@ -192,6 +192,24 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
         false,
         true,
     ),
+    "protenix_base_default_v1.0.0" => ProtenixModelSpec(
+        "protenix_base_default_v1.0.0",
+        :base,
+        10,
+        200,
+        5,
+        true,
+        false,
+    ),
+    "protenix_base_20250630_v1.0.0" => ProtenixModelSpec(
+        "protenix_base_20250630_v1.0.0",
+        :base,
+        10,
+        200,
+        5,
+        true,
+        false,
+    ),
 )
 
 const _AA3_TO_1 = let
@@ -2866,11 +2884,11 @@ function _resolve_predict_runtime(opts::ProtenixPredictOptions)
         use_msa = opts.use_msa,
     )
     mkpath(opts.out_dir)
-    isempty(opts.weights_path) || error(
-        "Local weights_path is disabled. Use HuggingFace model weights via " *
-        "PXDESIGN_WEIGHTS_REPO_ID/PXDESIGN_WEIGHTS_REVISION (and PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY for offline mode).",
-    )
-    weights_ref = default_weights_path(opts.model_name)
+    weights_ref = if isempty(opts.weights_path)
+        default_weights_path(opts.model_name)
+    else
+        String(opts.weights_path)
+    end
     loaded = _load_model(opts.model_name, weights_ref; strict = opts.strict)
     if opts.gpu
         loaded = (model = gpu(loaded.model), family = loaded.family)

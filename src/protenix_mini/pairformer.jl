@@ -77,17 +77,18 @@ function PairformerBlock(
     c_hidden_mul::Int = 128,
     c_hidden_pair_att::Int = 32,
     no_heads_pair::Int = 4,
+    transition_n::Int = 4,
     rng::AbstractRNG = Random.default_rng(),
 )
     apb = c_s > 0 ? PairAttentionNoS(c_s, c_z; n_heads = n_heads, rng = rng) : nothing
-    st = c_s > 0 ? TransitionBlock(c_s; n = 4, rng = rng) : nothing
+    st = c_s > 0 ? TransitionBlock(c_s; n = transition_n, rng = rng) : nothing
     return PairformerBlock(
         c_s,
         TriangleMultiplication(c_z, c_hidden_mul; outgoing = true, rng = rng),
         TriangleMultiplication(c_z, c_hidden_mul; outgoing = false, rng = rng),
         TriangleAttention(c_z, c_hidden_pair_att * no_heads_pair, no_heads_pair; starting = true, rng = rng),
         TriangleAttention(c_z, c_hidden_pair_att * no_heads_pair, no_heads_pair; starting = false, rng = rng),
-        TransitionBlock(c_z; n = 4, rng = rng),
+        TransitionBlock(c_z; n = transition_n, rng = rng),
         apb,
         st,
     )
@@ -131,12 +132,13 @@ function PairformerStack(
     c_s::Int;
     n_blocks::Int,
     n_heads::Int = 16,
+    transition_n::Int = 4,
     rng::AbstractRNG = Random.default_rng(),
 )
     n_blocks >= 0 || error("n_blocks must be >= 0")
     blocks = PairformerBlock[]
     for _ in 1:n_blocks
-        push!(blocks, PairformerBlock(c_z, c_s; n_heads = n_heads, rng = rng))
+        push!(blocks, PairformerBlock(c_z, c_s; n_heads = n_heads, transition_n = transition_n, rng = rng))
     end
     return PairformerStack(blocks)
 end
@@ -485,10 +487,90 @@ function TemplateEmbedder(
         LayerNorm(c_z),
         LinearNoBias(c_z, c; rng = rng),                          # c_z → c
         LinearNoBias(39 + 1 + 3 + 1 + 32 + 32, c; rng = rng),   # 108 → c
-        PairformerStack(c, 0; n_blocks = n_blocks, n_heads = 4, rng = rng),
+        PairformerStack(c, 0; n_blocks = n_blocks, n_heads = 4, transition_n = 2, rng = rng),
         LayerNorm(c),
         LinearNoBias(c, c_z; rng = rng),                          # c → c_z
     )
+end
+
+function _template_embedder_core(
+    m::TemplateEmbedder,
+    z::AbstractArray{<:Real,3},
+    template_restype::AbstractMatrix{<:Integer},
+    template_distogram::AbstractArray{<:Real},
+    template_unit_vector::AbstractArray{<:Real},
+    template_pseudo_beta_mask::AbstractArray{<:Real},
+    template_backbone_frame_mask::AbstractArray{<:Real},
+    asym_id::AbstractVector{<:Integer};
+    pair_mask::Union{Nothing, AbstractMatrix{<:Real}} = nothing,
+)
+    # Features-first: z (c_z, N, N)
+    T = Float32
+    n_token = size(z, 2)
+
+    # Build multichain mask: same asymmetric unit → 1, different → 0
+    multichain_mask = T.(reshape(asym_id, n_token, 1) .== reshape(asym_id, 1, n_token))
+    pair_mask_plane = pair_mask === nothing ? ones(T, n_token, n_token) : T.(pair_mask)
+
+    z_ln = m.layernorm_z(z)
+    z_proj = m.linear_no_bias_z(z_ln)    # (c, N, N)
+
+    # template_restype: (N_template, N_token)
+    num_templates = size(template_restype, 1)
+    u = fill!(similar(z, T, (m.c, n_token, n_token)), zero(T))
+
+    for template_id in 1:num_templates
+        # Distogram: expect features-first (39, N, N) per template
+        dgram = T.(selectdim(template_distogram, 1, template_id))
+        if ndims(dgram) == 3 && size(dgram, 1) != 39
+            dgram = permutedims(dgram, (3, 1, 2))  # (N,N,39) → (39,N,N)
+        end
+
+        pb_mask_2d = T.(selectdim(template_pseudo_beta_mask, 1, template_id))
+        aatype = Int.(selectdim(template_restype, 1, template_id))
+        unit_vec = T.(selectdim(template_unit_vector, 1, template_id))
+        if ndims(unit_vec) == 3 && size(unit_vec, 1) != 3
+            unit_vec = permutedims(unit_vec, (3, 1, 2))  # (N,N,3) → (3,N,N)
+        end
+        bb_mask_2d = T.(selectdim(template_backbone_frame_mask, 1, template_id))
+
+        # Apply masks
+        mask_3d = reshape(multichain_mask .* pair_mask_plane, 1, n_token, n_token)
+        dgram = dgram .* mask_3d
+        pb_mask_2d = pb_mask_2d .* multichain_mask .* pair_mask_plane
+        unit_vec = unit_vec .* mask_3d
+        bb_mask_2d = bb_mask_2d .* multichain_mask .* pair_mask_plane
+
+        # One-hot aatype → (32, N)
+        aatype_oh = zeros(T, 32, n_token)
+        for j in 1:n_token
+            idx = aatype[j]
+            if 0 <= idx < 32
+                aatype_oh[idx + 1, j] = one(T)
+            end
+        end
+        aatype_i = repeat(reshape(aatype_oh, 32, n_token, 1), 1, 1, n_token)
+        aatype_j = repeat(reshape(aatype_oh, 32, 1, n_token), 1, n_token, 1)
+
+        # Concatenate template features: (108, N, N) features-first
+        at = cat(
+            dgram,                                                    # (39, N, N)
+            reshape(pb_mask_2d, 1, n_token, n_token),                # (1, N, N)
+            aatype_i,                                                 # (32, N, N)
+            aatype_j,                                                 # (32, N, N)
+            unit_vec,                                                 # (3, N, N)
+            reshape(bb_mask_2d, 1, n_token, n_token);                # (1, N, N)
+            dims = 1,
+        )
+
+        v = z_proj .+ m.linear_no_bias_a(at)   # (c, N, N)
+        _, v = m.pairformer_stack(nothing, v)
+        u .+= m.layernorm_v(v)
+    end
+
+    u ./= (T(1e-7) + T(num_templates))
+    u = m.linear_no_bias_u(max.(u, zero(T)))   # (c_z, N, N), ReLU before final projection
+    return u
 end
 
 function (m::TemplateEmbedder)(
@@ -499,7 +581,8 @@ function (m::TemplateEmbedder)(
     if m.n_blocks < 1 || feat.template_restype === nothing
         return fill!(similar(z, Float32, size(z)), 0f0)
     end
-    # Mirrors Python implementation: template branch currently disabled.
+    # Template features from ProtenixFeatures not yet wired for full template embedding.
+    # Return zeros when template features haven't been fully prepared.
     return fill!(similar(z, Float32, size(z)), 0f0)
 end
 
@@ -511,8 +594,25 @@ function (m::TemplateEmbedder)(
     if m.n_blocks < 1 || !haskey(input_feature_dict, "template_restype")
         return fill!(similar(z, Float32, size(z)), 0f0)
     end
-    # Mirrors Python implementation: template branch currently disabled.
-    return fill!(similar(z, Float32, size(z)), 0f0)
+    # Check for v1-style template features needed by the actual embedder
+    required_keys = ("template_distogram", "template_unit_vector",
+                     "template_pseudo_beta_mask", "template_backbone_frame_mask")
+    has_all = all(k -> haskey(input_feature_dict, k), required_keys)
+    if !has_all
+        return fill!(similar(z, Float32, size(z)), 0f0)
+    end
+    asym_id = haskey(input_feature_dict, "asym_id") ? Int.(input_feature_dict["asym_id"]) :
+              ones(Int, size(z, 2))
+    return _template_embedder_core(
+        m, z,
+        Int.(input_feature_dict["template_restype"]),
+        input_feature_dict["template_distogram"],
+        input_feature_dict["template_unit_vector"],
+        input_feature_dict["template_pseudo_beta_mask"],
+        input_feature_dict["template_backbone_frame_mask"],
+        asym_id;
+        pair_mask = pair_mask,
+    )
 end
 
 # ─── NoisyStructureEmbedder ──────────────────────────────────────────────────

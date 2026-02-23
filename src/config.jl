@@ -93,6 +93,8 @@ function default_urls()
         "protenix_base_constraint_v0.5.0" => "https://af3-dev.tos-cn-beijing.volces.com/release_model/protenix_base_constraint_v0.5.0.pt",
         "protenix_mini_default_v0.5.0" => "https://pxdesign.tos-cn-beijing.volces.com/release_model/protenix_mini_default_v0.5.0.pt",
         "protenix_mini_tmpl_v0.5.0" => "https://pxdesign.tos-cn-beijing.volces.com/release_model/protenix_mini_tmpl_v0.5.0.pt",
+        "protenix_base_default_v1.0.0" => "https://protenix.tos-cn-beijing.volces.com/checkpoint/protenix_base_default_v1.0.0.pt",
+        "protenix_base_20250630_v1.0.0" => "https://protenix.tos-cn-beijing.volces.com/checkpoint/protenix_base_20250630_v1.0.0.pt",
         "ccd_components_file" => "https://pxdesign.tos-cn-beijing.volces.com/release_data/components.v20240608.cif",
         "ccd_components_rdkit_mol_file" => "https://pxdesign.tos-cn-beijing.volces.com/release_data/components.v20240608.cif.rdkit_mol.pkl",
         "pdb_cluster_file" => "https://pxdesign.tos-cn-beijing.volces.com/release_data/clusters-by-entity-40.txt",

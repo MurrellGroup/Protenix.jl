@@ -84,6 +84,7 @@ function ProtenixMiniModel(
     constraint_substructure_hidden_dim::Int = 128,
     constraint_substructure_n_layers::Int = 1,
     constraint_substructure_n_heads::Int = 4,
+    template_blocks::Int = 0,
     rng::AbstractRNG = Random.default_rng(),
 )
     input_embedder = InputFeatureEmbedder(
@@ -95,7 +96,7 @@ function ProtenixMiniModel(
         rng = rng,
     )
     relpos = RelativePositionEncoding(32, 2, c_z; rng = rng)
-    template_embedder = TemplateEmbedder(c_z; n_blocks = 0, c = 64, rng = rng)
+    template_embedder = TemplateEmbedder(c_z; n_blocks = template_blocks, c = 64, rng = rng)
     noisy = nothing
     msa = MSAModule(c_z, c_s_inputs; n_blocks = msa_blocks, rng = rng)
     constraint = constraint_enable ? ConstraintEmbedder(

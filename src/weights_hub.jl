@@ -55,6 +55,16 @@ const _WEIGHT_LAYOUTS = Dict{String, NamedTuple{(:layout, :filename, :index_file
         filename = "weights_safetensors_protenix_mini_ism_v0.5.0/protenix_mini_ism_v0.5.0.safetensors",
         index_filename = "",
     ),
+    "protenix_base_default_v1.0.0" => (
+        layout = :sharded,
+        filename = "",
+        index_filename = "weights_safetensors_protenix_base_default_v1.0.0/protenix_base_default_v1.0.0.safetensors.index.json",
+    ),
+    "protenix_base_20250630_v1.0.0" => (
+        layout = :sharded,
+        filename = "",
+        index_filename = "weights_safetensors_protenix_base_20250630_v1.0.0/protenix_base_20250630_v1.0.0.safetensors.index.json",
+    ),
 )
 
 function _env_bool(key::AbstractString, default::Bool = false)
