@@ -275,8 +275,11 @@ const _RNA_BASE_ATOMS = Dict{String, Vector{String}}(
 
 const _CCD_COMPONENT_CACHE = Dict{
     String,
-    Vector{NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord), Tuple{String, String, Float32, Float32, Float32, Float32, Bool}}},
+    Vector{NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord, :leaving), Tuple{String, String, Float32, Float32, Float32, Float32, Bool, Bool}}},
 }()
+
+# Per-component bond connectivity (atom_name1, atom_name2) for leaving-group graph traversal.
+const _CCD_BOND_CACHE = Dict{String, Vector{Tuple{String, String}}}()
 
 const _HHBLITS_AA_TO_ID = Dict{Char, Int}(
     'A' => 0,
@@ -690,6 +693,8 @@ function _ensure_ccd_component_entries!(codes::Set{String})
     current_code = ""
     active = false
     pending = nothing
+    # Components whose atoms are cached but bonds haven't been parsed yet.
+    pending_bonds = Set{String}()
 
     open(ccd_path, "r") do io
         while true
@@ -705,8 +710,13 @@ function _ensure_ccd_component_entries!(codes::Set{String})
             isempty(s) && continue
 
             if startswith(s, "data_")
+                # Leaving the previous block: if it was pending bonds but had none, clear it.
+                if !isempty(current_code) && current_code in pending_bonds
+                    delete!(pending_bonds, current_code)
+                end
+                isempty(needed) && isempty(pending_bonds) && return
                 current_code = uppercase(String(s[6:end]))
-                active = current_code in needed
+                active = current_code in needed || current_code in pending_bonds
                 continue
             end
             active || continue
@@ -719,91 +729,131 @@ function _ensure_ccd_component_entries!(codes::Set{String})
                     push!(headers, h)
                 end
                 isempty(headers) && continue
-                all(startswith(h, "_chem_comp_atom.") for h in headers) || continue
 
-                findidx(name) = findfirst(==(name), headers)
-                idx_atom = findidx("_chem_comp_atom.atom_id")
-                idx_type = findidx("_chem_comp_atom.type_symbol")
-                idx_charge = findidx("_chem_comp_atom.charge")
-                idx_x = findidx("_chem_comp_atom.model_Cartn_x")
-                idx_y = findidx("_chem_comp_atom.model_Cartn_y")
-                idx_z = findidx("_chem_comp_atom.model_Cartn_z")
-                idx_xi = findidx("_chem_comp_atom.pdbx_model_Cartn_x_ideal")
-                idx_yi = findidx("_chem_comp_atom.pdbx_model_Cartn_y_ideal")
-                idx_zi = findidx("_chem_comp_atom.pdbx_model_Cartn_z_ideal")
-                if any(
-                    x -> x === nothing,
-                    (idx_atom, idx_type, idx_charge, idx_x, idx_y, idx_z, idx_xi, idx_yi, idx_zi),
-                )
-                    continue
-                end
-                idx_atom = idx_atom::Int
-                idx_type = idx_type::Int
-                idx_charge = idx_charge::Int
-                idx_x = idx_x::Int
-                idx_y = idx_y::Int
-                idx_z = idx_z::Int
-                idx_xi = idx_xi::Int
-                idx_yi = idx_yi::Int
-                idx_zi = idx_zi::Int
-
-                rows = Vector{Vector{String}}()
-                while true
-                    row_line = if pending === nothing
-                        eof(io) ? nothing : readline(io)
-                    else
-                        x = pending
-                        pending = nothing
-                        x
-                    end
-                    row_line === nothing && break
-                    rs = strip(row_line)
-                    if isempty(rs)
+                # ─── _chem_comp_atom table ───
+                if all(startswith(h, "_chem_comp_atom.") for h in headers)
+                    findidx(name) = findfirst(==(name), headers)
+                    idx_atom = findidx("_chem_comp_atom.atom_id")
+                    idx_type = findidx("_chem_comp_atom.type_symbol")
+                    idx_charge = findidx("_chem_comp_atom.charge")
+                    idx_x = findidx("_chem_comp_atom.model_Cartn_x")
+                    idx_y = findidx("_chem_comp_atom.model_Cartn_y")
+                    idx_z = findidx("_chem_comp_atom.model_Cartn_z")
+                    idx_xi = findidx("_chem_comp_atom.pdbx_model_Cartn_x_ideal")
+                    idx_yi = findidx("_chem_comp_atom.pdbx_model_Cartn_y_ideal")
+                    idx_zi = findidx("_chem_comp_atom.pdbx_model_Cartn_z_ideal")
+                    idx_leaving = findidx("_chem_comp_atom.pdbx_leaving_atom_flag")
+                    if any(
+                        x -> x === nothing,
+                        (idx_atom, idx_type, idx_charge, idx_x, idx_y, idx_z, idx_xi, idx_yi, idx_zi),
+                    )
                         continue
                     end
-                    if rs == "#" || rs == "loop_" || startswith(rs, "_") || startswith(rs, "data_")
-                        pending = row_line
-                        break
-                    end
-                    cols = _split_cif_tokens(row_line)
-                    length(cols) < length(headers) && continue
-                    push!(rows, cols)
-                end
+                    idx_atom = idx_atom::Int
+                    idx_type = idx_type::Int
+                    idx_charge = idx_charge::Int
+                    idx_x = idx_x::Int
+                    idx_y = idx_y::Int
+                    idx_z = idx_z::Int
+                    idx_xi = idx_xi::Int
+                    idx_yi = idx_yi::Int
+                    idx_zi = idx_zi::Int
 
-                if !isempty(rows)
-                    atoms = NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord), Tuple{String, String, Float32, Float32, Float32, Float32, Bool}}[]
-                    for r in rows
-                        atom_name = String(r[idx_atom])
-                        element = uppercase(strip(String(r[idx_type])))
-                        isempty(element) && (element = _infer_element_from_atom_name(atom_name))
-                        element in ("H", "D", "T") && continue
-                        q = _try_parse_i(r[idx_charge])
-                        charge = q === nothing ? 0f0 : Float32(q)
-
-                        x = _try_parse_f32(r[idx_x])
-                        y = _try_parse_f32(r[idx_y])
-                        z = _try_parse_f32(r[idx_z])
-                        if x === nothing || y === nothing || z === nothing
-                            x = _try_parse_f32(r[idx_xi])
-                            y = _try_parse_f32(r[idx_yi])
-                            z = _try_parse_f32(r[idx_zi])
-                        end
-                        if x === nothing || y === nothing || z === nothing
-                            x = 0f0
-                            y = 0f0
-                            z = 0f0
-                            has_coord = false
+                    rows = Vector{Vector{String}}()
+                    while true
+                        row_line = if pending === nothing
+                            eof(io) ? nothing : readline(io)
                         else
-                            has_coord = true
+                            x = pending
+                            pending = nothing
+                            x
                         end
-                        push!(
-                            atoms,
-                            (atom_name = atom_name, element = element, x = Float32(x), y = Float32(y), z = Float32(z), charge = charge, has_coord = has_coord),
-                        )
+                        row_line === nothing && break
+                        rs = strip(row_line)
+                        if isempty(rs)
+                            continue
+                        end
+                        if rs == "#" || rs == "loop_" || startswith(rs, "_") || startswith(rs, "data_")
+                            pending = row_line
+                            break
+                        end
+                        cols = _split_cif_tokens(row_line)
+                        length(cols) < length(headers) && continue
+                        push!(rows, cols)
                     end
-                    _CCD_COMPONENT_CACHE[current_code] = atoms
-                    delete!(needed, current_code)
-                    isempty(needed) && return
+
+                    if !isempty(rows)
+                        atoms = NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord, :leaving), Tuple{String, String, Float32, Float32, Float32, Float32, Bool, Bool}}[]
+                        for r in rows
+                            atom_name = String(r[idx_atom])
+                            element = uppercase(strip(String(r[idx_type])))
+                            isempty(element) && (element = _infer_element_from_atom_name(atom_name))
+                            element in ("H", "D", "T") && continue
+                            q = _try_parse_i(r[idx_charge])
+                            charge = q === nothing ? 0f0 : Float32(q)
+                            is_leaving = idx_leaving !== nothing && uppercase(strip(r[idx_leaving])) == "Y"
+
+                            x = _try_parse_f32(r[idx_x])
+                            y = _try_parse_f32(r[idx_y])
+                            z = _try_parse_f32(r[idx_z])
+                            if x === nothing || y === nothing || z === nothing
+                                x = _try_parse_f32(r[idx_xi])
+                                y = _try_parse_f32(r[idx_yi])
+                                z = _try_parse_f32(r[idx_zi])
+                            end
+                            if x === nothing || y === nothing || z === nothing
+                                x = 0f0
+                                y = 0f0
+                                z = 0f0
+                                has_coord = false
+                            else
+                                has_coord = true
+                            end
+                            push!(
+                                atoms,
+                                (atom_name = atom_name, element = element, x = Float32(x), y = Float32(y), z = Float32(z), charge = charge, has_coord = has_coord, leaving = is_leaving),
+                            )
+                        end
+                        _CCD_COMPONENT_CACHE[current_code] = atoms
+                        delete!(needed, current_code)
+                        push!(pending_bonds, current_code)
+                    end
+
+                # ─── _chem_comp_bond table ───
+                elseif all(startswith(h, "_chem_comp_bond.") for h in headers)
+                    findidx_b(name) = findfirst(==(name), headers)
+                    idx_a1 = findidx_b("_chem_comp_bond.atom_id_1")
+                    idx_a2 = findidx_b("_chem_comp_bond.atom_id_2")
+                    if idx_a1 === nothing || idx_a2 === nothing
+                        continue
+                    end
+                    idx_a1 = idx_a1::Int
+                    idx_a2 = idx_a2::Int
+
+                    bond_pairs = Tuple{String, String}[]
+                    while true
+                        row_line = if pending === nothing
+                            eof(io) ? nothing : readline(io)
+                        else
+                            x = pending
+                            pending = nothing
+                            x
+                        end
+                        row_line === nothing && break
+                        rs = strip(row_line)
+                        isempty(rs) && continue
+                        if rs == "#" || rs == "loop_" || startswith(rs, "_") || startswith(rs, "data_")
+                            pending = row_line
+                            break
+                        end
+                        cols = _split_cif_tokens(row_line)
+                        length(cols) < length(headers) && continue
+                        push!(bond_pairs, (String(cols[idx_a1]), String(cols[idx_a2])))
+                    end
+                    if !isempty(bond_pairs)
+                        _CCD_BOND_CACHE[current_code] = bond_pairs
+                    end
+                    delete!(pending_bonds, current_code)
                 end
             end
         end
@@ -812,13 +862,193 @@ end
 
 function _ccd_component_atoms(code::AbstractString)
     uc = uppercase(strip(String(code)))
-    isempty(uc) && return NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord), Tuple{String, String, Float32, Float32, Float32, Float32, Bool}}[]
+    isempty(uc) && return NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord, :leaving), Tuple{String, String, Float32, Float32, Float32, Float32, Bool, Bool}}[]
     _ensure_ccd_component_entries!(Set([uc]))
     return get(
         _CCD_COMPONENT_CACHE,
         uc,
-        NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord), Tuple{String, String, Float32, Float32, Float32, Float32, Bool}}[],
+        NamedTuple{(:atom_name, :element, :x, :y, :z, :charge, :has_coord, :leaving), Tuple{String, String, Float32, Float32, Float32, Float32, Bool, Bool}}[],
     )
+end
+
+# Maps central atom name → Vector{Vector{String}} of leaving groups for a CCD component.
+# Returns nothing if any leaving group is bonded to multiple central atoms (ambiguous).
+function _ccd_central_to_leaving_groups(code::AbstractString)::Union{Nothing, Dict{String, Vector{Vector{String}}}}
+    uc = uppercase(strip(String(code)))
+    atoms = _ccd_component_atoms(uc)
+    isempty(atoms) && return Dict{String, Vector{Vector{String}}}()
+    bonds_raw = get(_CCD_BOND_CACHE, uc, Tuple{String, String}[])
+    isempty(bonds_raw) && return Dict{String, Vector{Vector{String}}}()
+
+    # Build name→index and leaving flag
+    name_to_idx = Dict{String, Int}()
+    for (i, a) in enumerate(atoms)
+        name_to_idx[a.atom_name] = i
+    end
+    is_leaving = [a.leaving for a in atoms]
+    n = length(atoms)
+
+    # Build adjacency (among non-H atoms already in the cache)
+    adj = [Int[] for _ in 1:n]
+    for (a1, a2) in bonds_raw
+        i = get(name_to_idx, a1, 0)
+        j = get(name_to_idx, a2, 0)
+        (i == 0 || j == 0) && continue
+        push!(adj[i], j)
+        push!(adj[j], i)
+    end
+
+    # Mutable copy of adjacency for bond-removal during traversal
+    adj_mut = [Set{Int}(a) for a in adj]
+    result = Dict{String, Vector{Vector{String}}}()
+
+    for c_idx in 1:n
+        is_leaving[c_idx] && continue  # only central atoms
+        for l_idx in adj[c_idx]
+            is_leaving[l_idx] || continue  # only leaving neighbours
+            # Remove the central↔leaving bond
+            delete!(adj_mut[c_idx], l_idx)
+            delete!(adj_mut[l_idx], c_idx)
+            # BFS to find connected component of leaving atom
+            group = Int[l_idx]
+            visited = Set{Int}([l_idx])
+            queue = Int[l_idx]
+            while !isempty(queue)
+                cur = popfirst!(queue)
+                for nb in adj_mut[cur]
+                    nb in visited && continue
+                    push!(visited, nb)
+                    push!(group, nb)
+                    push!(queue, nb)
+                end
+            end
+            # All atoms in the group must be leaving; otherwise ambiguous
+            if !all(is_leaving[g] for g in group)
+                return nothing
+            end
+            group_names = [atoms[g].atom_name for g in group]
+            cname = atoms[c_idx].atom_name
+            if haskey(result, cname)
+                push!(result[cname], group_names)
+            else
+                result[cname] = [group_names]
+            end
+        end
+    end
+    return result
+end
+
+# Remove leaving atoms from a flat atom vector based on covalent bond definitions.
+# Mirrors Python's add_covalent_bonds → remove_leaving_atoms flow.
+function _remove_covalent_leaving_atoms(
+    atoms::Vector{AtomRecord},
+    task::AbstractDict{<:Any, <:Any},
+    entity_chain_ids::Vector{Vector{String}},
+    entity_atom_map::Vector{Dict{Int, String}},
+)::Vector{AtomRecord}
+    haskey(task, "covalent_bonds") || return atoms
+    bonds_any = task["covalent_bonds"]
+    bonds_any isa AbstractVector || return atoms
+    isempty(bonds_any) && return atoms
+
+    # Build atom lookup: (chain_id, res_id, atom_name) → [atom_indices...]
+    atom_lookup = Dict{Tuple{String, Int, String}, Vector{Int}}()
+    for (atom_idx, atom) in enumerate(atoms)
+        key = (atom.chain_id, atom.res_id, uppercase(atom.atom_name))
+        if haskey(atom_lookup, key)
+            push!(atom_lookup[key], atom_idx)
+        else
+            atom_lookup[key] = [atom_idx]
+        end
+    end
+
+    # Count bonds per atom index (how many inter-residue covalent bonds each atom participates in)
+    bond_count = Dict{Int, Int}()
+    for (bond_i, bond_any) in enumerate(bonds_any)
+        bond_any isa AbstractDict || continue
+        bond = _as_string_dict(bond_any)
+
+        entity1_any = _bond_field(bond, "left", 1, "entity")
+        entity2_any = _bond_field(bond, "right", 2, "entity")
+        position1_any = _bond_field(bond, "left", 1, "position")
+        position2_any = _bond_field(bond, "right", 2, "position")
+        atom1_any = _bond_field(bond, "left", 1, "atom")
+        atom2_any = _bond_field(bond, "right", 2, "atom")
+        copy1_any = _bond_field(bond, "left", 1, "copy")
+        copy2_any = _bond_field(bond, "right", 2, "copy")
+
+        (entity1_any === nothing || entity2_any === nothing) && continue
+        (position1_any === nothing || position2_any === nothing) && continue
+        (atom1_any === nothing || atom2_any === nothing) && continue
+
+        entity1 = entity1_any isa Integer ? Int(entity1_any) : parse(Int, strip(String(entity1_any)))
+        entity2 = entity2_any isa Integer ? Int(entity2_any) : parse(Int, strip(String(entity2_any)))
+        position1 = position1_any isa Integer ? Int(position1_any) : parse(Int, strip(String(position1_any)))
+        position2 = position2_any isa Integer ? Int(position2_any) : parse(Int, strip(String(position2_any)))
+        ctx = "covalent_bonds[$bond_i]"
+        atom1 = _resolve_bond_atom_name(atom1_any, entity1, entity_atom_map, "$ctx side1")
+        atom2 = _resolve_bond_atom_name(atom2_any, entity2, entity_atom_map, "$ctx side2")
+
+        chains1 = _resolve_bond_chains(entity_chain_ids, entity1, copy1_any, "$ctx side1")
+        chains2 = _resolve_bond_chains(entity_chain_ids, entity2, copy2_any, "$ctx side2")
+        length(chains1) == length(chains2) || continue
+
+        atoms1 = _resolve_bond_atoms(atom_lookup, chains1, position1, atom1, "$ctx side1")
+        atoms2 = _resolve_bond_atoms(atom_lookup, chains2, position2, atom2, "$ctx side2")
+        length(atoms1) == length(atoms2) || continue
+
+        for (a1, a2) in zip(atoms1, atoms2)
+            bond_count[a1] = get(bond_count, a1, 0) + 1
+            bond_count[a2] = get(bond_count, a2, 0) + 1
+        end
+    end
+
+    isempty(bond_count) && return atoms
+
+    # Build residue start indices: for each (chain_id, res_id), the range of atom indices
+    chain_res_ranges = Dict{Tuple{String, Int}, UnitRange{Int}}()
+    i = 1
+    while i <= length(atoms)
+        cid = atoms[i].chain_id
+        rid = atoms[i].res_id
+        j = i
+        while j < length(atoms) && atoms[j + 1].chain_id == cid && atoms[j + 1].res_id == rid
+            j += 1
+        end
+        chain_res_ranges[(cid, rid)] = i:j
+        i = j + 1
+    end
+
+    # Determine which atom indices to remove
+    remove_set = Set{Int}()
+    for (centre_idx, b_count) in bond_count
+        a = atoms[centre_idx]
+        res_name = uppercase(a.res_name)
+        centre_name = uppercase(a.atom_name)
+
+        leaving_groups = _ccd_central_to_leaving_groups(res_name)
+        leaving_groups === nothing && continue
+        groups = get(leaving_groups, centre_name, nothing)
+        groups === nothing && continue
+
+        n_remove = min(b_count, length(groups))
+        rng = get(chain_res_ranges, (a.chain_id, a.res_id), 0:0)
+        isempty(rng) && continue
+
+        for gi in 1:n_remove
+            for leaving_name in groups[gi]
+                for k in rng
+                    if uppercase(atoms[k].atom_name) == uppercase(leaving_name)
+                        push!(remove_set, k)
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    isempty(remove_set) && return atoms
+    return [atoms[i] for i in 1:length(atoms) if !(i in remove_set)]
 end
 
 function _polymer_default_atom_names(mol_type::String, code::String)
@@ -2089,19 +2319,27 @@ function _inject_task_msa_features!(
         pairing_plan = heteromer_pairing_merge ? _pairing_row_plan(prot_features) : nothing
     end
 
+    is_prot_homomer_or_monomer = !isempty(prot_features) && length(Set(s.sequence for s in local_prot_specs)) == 1
     total_rows = if heteromer_pairing_merge
         paired_rows = pairing_plan === nothing ? minimum(size(cf.pairing.msa, 1) for cf in prot_features) : length(pairing_plan)
         nonpair_extra_rows = sum(max(size(cf.non_pairing.msa, 1) - 1, 0) for cf in prot_features)
         rna_rows = isempty(rna_features) ? 0 : sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in rna_features)
         paired_rows + nonpair_extra_rows + rna_rows
-    else
-        # Python always creates a paired MSA with at least the query sequence for each
-        # protein chain, then prepends it during assembly.  Add 1 query row per protein
-        # chain to match that behaviour.
+    elseif is_prot_homomer_or_monomer || isempty(prot_features)
+        # Homomer/monomer: Python always creates a paired MSA with at least the query
+        # sequence for each protein chain, then prepends it during assembly.
         prot_paired_query_rows = length(prot_features)
         prot_rows = isempty(prot_features) ? 0 : prot_paired_query_rows + sum(size(cf.combined.msa, 1) for cf in prot_features)
         rna_rows = isempty(rna_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in rna_features)
         prot_rows + rna_rows
+    else
+        # Heteromer without pairing data: Python's cleanup_unpaired_features removes
+        # the unpaired query row (since it duplicates the paired query) for each chain.
+        # Net result: 1 paired query row shared across all chains.  Non-query unpaired
+        # rows are stacked per-chain as in the homomer branch.
+        prot_nonquery_rows = sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in prot_features)
+        rna_rows = isempty(rna_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in rna_features)
+        1 + prot_nonquery_rows + rna_rows
     end
     total_rows > 0 || (total_rows = 1)
 
@@ -2167,9 +2405,9 @@ function _inject_task_msa_features!(
             deletion_mean[cols] .= cf.combined.deletion_mean
         end
         row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch (expected $total_rows, got $(row-1))")
-    else
+    elseif is_prot_homomer_or_monomer || isempty(prot_features)
         row_start = 1
-        # Protein chains: prepend a paired query-only row (query with zero deletions),
+        # Homomer/monomer: prepend a paired query-only row (query with zero deletions),
         # matching the Python FeatureAssemblyLine which always adds a paired MSA with
         # at least the query sequence.
         for (cf, cols) in zip(prot_features, prot_token_cols)
@@ -2189,6 +2427,35 @@ function _inject_task_msa_features!(
             row_start = row_stop + 1
         end
         # RNA chains: no extra paired query row
+        for (cf, cols) in zip(rna_features, rna_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            row_stop = row_start + n_row - 1
+            rows = row_start:row_stop
+            msa[rows, cols] .= cf.combined.msa
+            has_deletion[rows, cols] .= cf.combined.has_deletion
+            deletion_value[rows, cols] .= cf.combined.deletion_value
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+            row_start = row_stop + 1
+        end
+    else
+        # Heteromer without pairing data: Row 1 is the shared query (already
+        # initialized from restype_idx). Python's cleanup_unpaired_features
+        # removes the duplicate unpaired query, leaving only non-query rows.
+        row_start = 2  # row 1 is the query
+        for (cf, cols) in zip(prot_features, prot_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            if n_row >= 2
+                row_stop = row_start + (n_row - 2)
+                rows = row_start:row_stop
+                msa[rows, cols] .= cf.combined.msa[2:end, :]
+                has_deletion[rows, cols] .= cf.combined.has_deletion[2:end, :]
+                deletion_value[rows, cols] .= cf.combined.deletion_value[2:end, :]
+                row_start = row_stop + 1
+            end
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+        end
         for (cf, cols) in zip(rna_features, rna_token_cols)
             n_row = size(cf.combined.msa, 1)
             row_stop = row_start + n_row - 1
@@ -3302,7 +3569,9 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
             task = _as_string_dict(task_any)
             task_name = haskey(task, "name") ? String(task["name"]) : "$(_default_task_name(json_path))_$(task_idx - 1)"
             parsed_task = _parse_task_entities(task; json_dir = dirname(abspath(json_path)))
-            atoms = parsed_task.atoms
+            atoms = _remove_covalent_leaving_atoms(
+                parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map,
+            )
             chain_sequences = _protein_chain_sequence_map(parsed_task.protein_specs)
 
             for seed in opts.seeds

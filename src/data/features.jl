@@ -418,6 +418,14 @@ function _default_ccd_components_path()
 end
 
 function _default_ccd_std_ref_path()
+    # Prefer local file alongside the CCD components (matches the Protenix data root).
+    if haskey(ENV, "PROTENIX_DATA_ROOT_DIR")
+        p = joinpath(ENV["PROTENIX_DATA_ROOT_DIR"], "ref_coords_std.json")
+        isfile(p) && return p
+    end
+    project_root = normpath(joinpath(@__DIR__, "..", ".."))
+    p = joinpath(project_root, "release_data", "ccd_cache", "ref_coords_std.json")
+    isfile(p) && return p
     return hf_hub_download("MurrellLab/PXDesign.jl", "ref_coords_std.json")
 end
 
@@ -902,12 +910,14 @@ function _build_feature_dict(
 
     ref_space_uid = _compute_ref_space_uid(atoms)
 
-    # Compute basic atom features first (needed for ligand frame computation)
+    # Compute basic atom features (includes augmented ref_pos for output)
     basic_feats = _basic_atom_features(atoms, tokens, atom_to_token_idx, ref_space_uid, n_token, rng, ref_pos_augment)
-    # ref_pos from basic_feats is already augmented, but for frame computation we use it
-    # (Python also uses ref_pos after CCD lookup for frame computation)
-    ref_pos_for_frames = basic_feats["ref_pos"]  # (N_atom, 3)
-    ref_mask_for_frames = basic_feats["ref_mask"]  # (N_atom,)
+
+    # Frame computation must use UN-augmented ref_pos (matching Python which computes
+    # frames before augmentation).  Get the raw CCD reference positions separately.
+    raw_ref_pos, _, raw_ref_mask = _ccd_reference_features(atoms, ref_space_uid, rng; ref_pos_augment = false)
+    ref_pos_for_frames = raw_ref_pos   # (N_atom, 3) — no rotation
+    ref_mask_for_frames = raw_ref_mask  # (N_atom,)
 
     # Build ref_space_uid -> atom indices mapping for ligand frame computation
     uid_to_atom_indices = Dict{Int, Vector{Int}}()
