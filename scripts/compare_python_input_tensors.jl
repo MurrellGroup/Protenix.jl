@@ -229,6 +229,8 @@ function _build_julia_feature_dict(
         parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map;
         rng = rng,
     )
+    atoms = PA._apply_mse_to_met(atoms)
+    atoms = PA._apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids)
     bundle = PXDesign.Data.build_feature_bundle_from_atoms(
         atoms;
         task_name = task_name,

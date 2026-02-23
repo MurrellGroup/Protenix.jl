@@ -657,6 +657,7 @@ struct TaskEntityParseResult
     rna_specs::Vector{RNAChainSpec}
     entity_chain_ids::Vector{Vector{String}}
     entity_atom_map::Vector{Dict{Int, String}}
+    polymer_chain_ids::Set{String}   # chain IDs from proteinChain/dnaSequence/rnaSequence entities
 end
 
 function _split_cif_tokens(line::AbstractString)
@@ -1159,19 +1160,29 @@ function _apply_mse_to_met(atoms::Vector{AtomRecord})::Vector{AtomRecord}
 end
 
 """
-    _apply_ccd_mol_type_override(atoms) → Vector{AtomRecord}
+    _apply_ccd_mol_type_override(atoms, polymer_chain_ids) → Vector{AtomRecord}
 
-Override mol_type for ALL atoms based on CCD `_chem_comp.type` classification.
-This matches Python Protenix's `add_token_mol_type()`, which overrides per-residue.
+Override mol_type for atoms in **polymer entities only**, based on CCD
+`_chem_comp.type` classification. This matches Python Protenix's
+`add_token_mol_type()`, which gates the CCD lookup on whether the entity
+is in `entity_poly_type` (i.e., is a polymer). Atoms in ligand/ion entities
+are never reclassified, regardless of their CCD type.
 
 Examples:
-- Ligand 4HT (CCD "L-PEPTIDE LINKING") → mol_type "protein", centre=CA
-- DNA base 5MC (CCD "RNA LINKING") → mol_type "rna" (even in a DNA chain)
-- Standard ALA (CCD "L-PEPTIDE LINKING") → mol_type "protein" (no change)
+- Modified residue SEP in a proteinChain → CCD "L-PEPTIDE LINKING" → "protein"
+- DNA base 5MC in a dnaSequence → CCD "RNA LINKING" → "rna" (even in a DNA chain)
+- Ligand 4HT declared as ligand → NOT overridden (stays "ligand"), even though
+  CCD type = "L-PEPTIDE LINKING". Python's entity gate prevents the CCD lookup.
 """
-function _apply_ccd_mol_type_override(atoms::Vector{AtomRecord})::Vector{AtomRecord}
+function _apply_ccd_mol_type_override(atoms::Vector{AtomRecord}, polymer_chain_ids::Set{String})::Vector{AtomRecord}
     result = similar(atoms)
     for (i, a) in enumerate(atoms)
+        # Python's add_token_mol_type() only consults CCD for polymer entities.
+        # Non-polymer entities (ligand, ion) get mol_type="ligand" unconditionally.
+        if a.chain_id ∉ polymer_chain_ids
+            result[i] = a
+            continue
+        end
         ccd_mt = _ccd_mol_type(a.res_name)
         if ccd_mt != a.mol_type && ccd_mt != "ligand"
             # CCD classifies this residue differently than the entity type.
@@ -1986,6 +1997,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     rna_specs = RNAChainSpec[]
     entity_chain_ids = Vector{Vector{String}}()
     entity_atom_map = Vector{Dict{Int, String}}()
+    polymer_chain_ids = Set{String}()
     chain_idx = 1
 
     for (entity_idx, entity_any) in enumerate(sequences)
@@ -2021,6 +2033,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 chain_id = _chain_id_from_index(chain_idx)
                 chain_idx += 1
                 push!(chain_ids, chain_id)
+                push!(polymer_chain_ids, chain_id)
                 if has_mods
                     append!(atoms, _build_polymer_atoms_from_codes(ccd_codes, "protein"; chain_id = chain_id))
                 else
@@ -2051,6 +2064,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 chain_id = _chain_id_from_index(chain_idx)
                 chain_idx += 1
                 push!(chain_ids, chain_id)
+                push!(polymer_chain_ids, chain_id)
                 append!(atoms, _build_polymer_atoms_from_codes(ccd_codes, "dna"; chain_id = chain_id))
             end
         elseif haskey(entity, "rnaSequence")
@@ -2094,6 +2108,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 chain_id = _chain_id_from_index(chain_idx)
                 chain_idx += 1
                 push!(chain_ids, chain_id)
+                push!(polymer_chain_ids, chain_id)
                 append!(atoms, _build_polymer_atoms_from_codes(ccd_codes, "rna"; chain_id = chain_id))
                 push!(rna_specs, RNAChainSpec(chain_id, seq, rna_unpaired_msa, rna_unpaired_msa_path))
             end
@@ -2184,7 +2199,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     # Remove leaving atoms from disconnected polymer residues (matches Python's
     # _remove_non_std_ccd_leaving_atoms called per-chain during build_polymer_chain).
     atoms = _remove_non_std_polymer_leaving_atoms(atoms)
-    return TaskEntityParseResult(atoms, protein_specs, rna_specs, entity_chain_ids, entity_atom_map)
+    return TaskEntityParseResult(atoms, protein_specs, rna_specs, entity_chain_ids, entity_atom_map, polymer_chain_ids)
 end
 
 function _build_atoms_from_infer_task(task::AbstractDict{<:Any, <:Any})
@@ -4287,7 +4302,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     rng = rng,
                 )
                 atoms = _apply_mse_to_met(atoms)
-                atoms = _apply_ccd_mol_type_override(atoms)
+                atoms = _apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids)
                 bundle = build_feature_bundle_from_atoms(atoms; task_name = task_name, rng = rng)
                 token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
                 _normalize_protenix_feature_dict!(bundle["input_feature_dict"])
