@@ -1,0 +1,10 @@
+[{
+  "name": "rna_only_with_msa",
+  "sequences": [
+    {"rnaSequence": {
+      "sequence": "GUACGUACGUACGUAC",
+      "count": 1,
+      "unpairedMsaPath": "../msa/rna_16mer/non_pairing.a3m"
+    }}
+  ]
+}]

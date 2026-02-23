@@ -340,6 +340,20 @@ const _HHBLITS_TO_PROTENIX = let
     out
 end
 
+# RNA MSA character mapping: A→21, G→22, C→23, U→24, unknown→25, gap→31
+# Matches ProteinxV1.jl _MSA_RNA_SEQ_TO_ID exactly.
+const _MSA_RNA_SEQ_TO_ID = let d = Dict{Char, Int}()
+    for c in 'A':'Z'
+        d[c] = 25   # default unknown RNA nucleotide
+    end
+    d['-'] = 31      # gap
+    d['A'] = 21
+    d['G'] = 22
+    d['C'] = 23
+    d['U'] = 24
+    d
+end
+
 const ChainMSABlock = NamedTuple{
     (:msa, :has_deletion, :deletion_value, :deletion_mean, :profile),
     Tuple{Matrix{Int}, Matrix{Float32}, Matrix{Float32}, Vector{Float32}, Matrix{Float32}},
@@ -523,6 +537,16 @@ end
 
 const _DEFAULT_MSA_CFG = (precomputed_msa_dir = nothing, pairing_db = "uniref100")
 
+# RNA chain spec for RNA MSA support.
+# RNA chains have unpairedMsa (inline text) or unpairedMsaPath (file path).
+# No paired MSA for RNA — only non-pairing.
+struct RNAChainSpec
+    chain_id::String
+    sequence::String
+    unpaired_msa::Union{Nothing, String}        # inline A3M text
+    unpaired_msa_path::Union{Nothing, String}    # path to A3M file
+end
+
 function _parse_msa_cfg(x)
     if !(x isa AbstractDict)
         return _DEFAULT_MSA_CFG
@@ -541,6 +565,7 @@ end
 struct TaskEntityParseResult
     atoms::Vector{AtomRecord}
     protein_specs::Vector{ProteinChainSpec}
+    rna_specs::Vector{RNAChainSpec}
     entity_chain_ids::Vector{Vector{String}}
     entity_atom_map::Vector{Dict{Int, String}}
 end
@@ -1191,6 +1216,69 @@ function _extract_protein_chain_specs(task::AbstractDict{<:Any, <:Any})
     return specs
 end
 
+function _extract_rna_chain_specs(task::AbstractDict{<:Any, <:Any}; json_dir::AbstractString = ".")
+    haskey(task, "sequences") || error("Task is missing required field: sequences")
+    sequences = task["sequences"]
+    sequences isa AbstractVector || error("Task.sequences must be an array")
+
+    specs = RNAChainSpec[]
+    chain_idx = 1
+    for (i, entity_any) in enumerate(sequences)
+        entity_any isa AbstractDict || error("Task.sequences[$i] must be an object")
+        entity = _as_string_dict(entity_any)
+        if haskey(entity, "rnaSequence")
+            rna_any = entity["rnaSequence"]
+            rna_any isa AbstractDict || error("Task.sequences[$i].rnaSequence must be an object")
+            rna = _as_string_dict(rna_any)
+            haskey(rna, "sequence") || error("Task.sequences[$i].rnaSequence.sequence is required")
+            seq = _compact_sequence(String(rna["sequence"]))
+            isempty(seq) && error("Task.sequences[$i].rnaSequence.sequence must be non-empty")
+            count = Int(get(rna, "count", 1))
+            count > 0 || error("Task.sequences[$i].rnaSequence.count must be positive")
+            unpaired_msa = if haskey(rna, "unpairedMsa")
+                v = rna["unpairedMsa"]; v === nothing ? nothing : String(v)
+            else
+                nothing
+            end
+            unpaired_msa_path = if haskey(rna, "unpairedMsaPath")
+                v = rna["unpairedMsaPath"]
+                if v === nothing; nothing
+                else
+                    raw = String(v)
+                    isabspath(raw) ? raw : normpath(joinpath(json_dir, raw))
+                end
+            else
+                nothing
+            end
+            for _ in 1:count
+                chain_id = _chain_id_from_index(chain_idx)
+                chain_idx += 1
+                push!(specs, RNAChainSpec(chain_id, seq, unpaired_msa, unpaired_msa_path))
+            end
+            continue
+        end
+
+        local count::Int
+        if haskey(entity, "proteinChain")
+            count = Int(get(_as_string_dict(entity["proteinChain"]), "count", 1))
+        elseif haskey(entity, "dnaSequence")
+            count = Int(get(_as_string_dict(entity["dnaSequence"]), "count", 1))
+        elseif haskey(entity, "ligand")
+            count = Int(get(_as_string_dict(entity["ligand"]), "count", 1))
+        elseif haskey(entity, "condition_ligand")
+            count = Int(get(_as_string_dict(entity["condition_ligand"]), "count", 1))
+        elseif haskey(entity, "ion")
+            count = Int(get(_as_string_dict(entity["ion"]), "count", 1))
+        else
+            keys_str = join(string.(collect(keys(entity))), ", ")
+            error("Unsupported sequence entry keys at sequences[$i]: [$keys_str]")
+        end
+        count > 0 || error("Task.sequences[$i].count must be positive")
+        chain_idx += count
+    end
+    return specs
+end
+
 function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::AbstractString = ".")
     haskey(task, "sequences") || error("Task is missing required field: sequences")
     sequences = task["sequences"]
@@ -1198,6 +1286,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
 
     atoms = AtomRecord[]
     protein_specs = ProteinChainSpec[]
+    rna_specs = RNAChainSpec[]
     entity_chain_ids = Vector{Vector{String}}()
     entity_atom_map = Vector{Dict{Int, String}}()
     chain_idx = 1
@@ -1286,11 +1375,30 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                     "Task.sequences[$entity_idx].rnaSequence",
                 )
             end
+            # Extract RNA MSA fields (v1 feature: unpairedMsa / unpairedMsaPath).
+            rna_unpaired_msa = if haskey(rna, "unpairedMsa")
+                v = rna["unpairedMsa"]
+                v === nothing ? nothing : String(v)
+            else
+                nothing
+            end
+            rna_unpaired_msa_path = if haskey(rna, "unpairedMsaPath")
+                v = rna["unpairedMsaPath"]
+                if v === nothing
+                    nothing
+                else
+                    raw = String(v)
+                    isabspath(raw) ? raw : normpath(joinpath(json_dir, raw))
+                end
+            else
+                nothing
+            end
             for _ in 1:count
                 chain_id = _chain_id_from_index(chain_idx)
                 chain_idx += 1
                 push!(chain_ids, chain_id)
                 append!(atoms, _build_polymer_atoms_from_codes(ccd_codes, "rna"; chain_id = chain_id))
+                push!(rna_specs, RNAChainSpec(chain_id, seq, rna_unpaired_msa, rna_unpaired_msa_path))
             end
         elseif haskey(entity, "ligand") || haskey(entity, "condition_ligand")
             lig_key = haskey(entity, "ligand") ? "ligand" : "condition_ligand"
@@ -1376,7 +1484,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     end
 
     isempty(atoms) && error("No supported sequence entities found in infer task")
-    return TaskEntityParseResult(atoms, protein_specs, entity_chain_ids, entity_atom_map)
+    return TaskEntityParseResult(atoms, protein_specs, rna_specs, entity_chain_ids, entity_atom_map)
 end
 
 function _build_atoms_from_infer_task(task::AbstractDict{<:Any, <:Any})
@@ -1690,17 +1798,164 @@ function _chain_msa_features(
     return (combined = combined, non_pairing = non_pairing, pairing = pairing, pairing_keys = pairing_keys)
 end
 
+# ---------- RNA MSA feature building ----------
+
+function _rna_sequence_to_protenix_indices(sequence::AbstractString)
+    seq = uppercase(strip(sequence))
+    idx = Int[]
+    for c in seq
+        isspace(c) && continue
+        push!(idx, get(_MSA_RNA_SEQ_TO_ID, c, 25))  # 25 = unknown RNA
+    end
+    return idx
+end
+
+function _rna_msa_idx(c::Char)
+    c == '.' && return _MSA_RNA_SEQ_TO_ID['-']
+    return get(_MSA_RNA_SEQ_TO_ID, uppercase(c), 25)
+end
+
+function _build_rna_chain_msa_features(
+    sequence::AbstractString,
+    aligned::Vector{String},
+    deletion_matrix::Vector{Vector{Float32}},
+    ;
+    dedup_rows::Bool = true,
+)::ChainMSABlock
+    if isempty(aligned)
+        query = uppercase(strip(sequence))
+        push!(aligned, query)
+        push!(deletion_matrix, zeros(Float32, length(query)))
+    end
+
+    dedup_aligned = aligned
+    dedup_del = deletion_matrix
+    if dedup_rows
+        dedup_aligned, dedup_del, _ = _dedup_aligned_deletion_rows(aligned, deletion_matrix)
+    end
+
+    n_row = length(dedup_aligned)
+    n_col = length(dedup_aligned[1])
+    n_row > 0 || error("RNA MSA has zero rows after deduplication.")
+    all(length(s) == n_col for s in dedup_aligned) || error("RNA MSA rows must have uniform length.")
+    all(length(d) == n_col for d in dedup_del) || error("RNA deletion rows must have uniform length.")
+
+    # Convert directly to Protenix indices using RNA char map (no HHblits intermediate).
+    msa = Matrix{Int}(undef, n_row, n_col)
+    deletion_mat = Matrix{Float32}(undef, n_row, n_col)
+    for i in 1:n_row
+        seq = dedup_aligned[i]
+        del = dedup_del[i]
+        for j in 1:n_col
+            msa[i, j] = _rna_msa_idx(seq[j])
+            deletion_mat[i, j] = del[j]
+        end
+    end
+
+    # Build 32-class profile directly from Protenix indices.
+    profile = zeros(Float32, n_col, 32)
+    @inbounds for i in 1:n_row, j in 1:n_col
+        idx = msa[i, j] + 1
+        if 1 <= idx <= 32
+            profile[j, idx] += 1f0
+        end
+    end
+    profile ./= Float32(n_row)
+
+    has_deletion = clamp.(deletion_mat, 0f0, 1f0)
+    deletion_value = (2f0 / Float32(pi)) .* atan.(deletion_mat ./ 3f0)
+    deletion_mean = vec(mean(deletion_mat; dims = 1))
+
+    return _chain_msa_block(msa, has_deletion, deletion_value, deletion_mean, profile)
+end
+
+function _rna_chain_msa_features(
+    spec::RNAChainSpec,
+    json_dir::AbstractString,
+)::ChainMSAFeatures
+    # Build query-only features for RNA.
+    function _rna_query_only_features()
+        query_idx = _rna_sequence_to_protenix_indices(spec.sequence)
+        profile = zeros(Float32, length(query_idx), 32)
+        for (i, x) in enumerate(query_idx)
+            profile[i, x + 1] = 1f0
+        end
+        return _chain_msa_block(
+            permutedims(query_idx),
+            zeros(Float32, 1, length(query_idx)),
+            zeros(Float32, 1, length(query_idx)),
+            zeros(Float32, length(query_idx)),
+            profile,
+        )
+    end
+
+    # Resolve MSA text: inline takes priority over file path.
+    msa_text = spec.unpaired_msa
+    if msa_text === nothing && spec.unpaired_msa_path !== nothing
+        path_raw = spec.unpaired_msa_path
+        path = isabspath(path_raw) ? path_raw : normpath(joinpath(json_dir, path_raw))
+        isfile(path) || error("RNA MSA file not found: $path")
+        msa_text = read(path, String)
+    end
+
+    if msa_text === nothing || isempty(strip(msa_text))
+        base = _rna_query_only_features()
+        return (combined = base, non_pairing = base, pairing = nothing, pairing_keys = nothing)
+    end
+
+    seqs, _ = _parse_a3m_from_text(msa_text)
+    if isempty(seqs)
+        base = _rna_query_only_features()
+        return (combined = base, non_pairing = base, pairing = nothing, pairing_keys = nothing)
+    end
+
+    aln, del = _aligned_and_deletions_from_a3m(seqs)
+    non_pairing = _build_rna_chain_msa_features(spec.sequence, aln, del)
+
+    # RNA has no paired MSA.
+    return (combined = non_pairing, non_pairing = non_pairing, pairing = nothing, pairing_keys = nothing)
+end
+
+# Parse A3M from an inline text string (same logic as _parse_a3m but from text).
+function _parse_a3m_from_text(text::AbstractString; seq_limit::Int = -1)
+    sequences = String[]
+    descriptions = String[]
+    idx = 0
+    for line in split(text, '\n')
+        ln = strip(line)
+        isempty(ln) && continue
+        startswith(ln, "#") && continue
+        if startswith(ln, ">")
+            if seq_limit > 0 && length(sequences) > seq_limit
+                break
+            end
+            idx += 1
+            push!(descriptions, String(ln[2:end]))
+            push!(sequences, "")
+            continue
+        end
+        idx > 0 || continue
+        sequences[idx] *= ln
+    end
+    return sequences, descriptions
+end
+
 function _inject_task_msa_features!(
     feat::Dict{String, Any},
     task::AbstractDict{<:Any, <:Any},
     json_path::AbstractString;
     use_msa::Bool,
     chain_specs::Union{Nothing, Vector{ProteinChainSpec}} = nothing,
+    rna_chain_specs::Union{Nothing, Vector{RNAChainSpec}} = nothing,
     token_chain_ids::Union{Nothing, Vector{String}} = nothing,
 )
     use_msa || return feat
-    local_specs = chain_specs === nothing ? _extract_protein_chain_specs(task) : chain_specs
-    isempty(local_specs) && return feat
+    json_dir = dirname(abspath(json_path))
+
+    local_prot_specs = chain_specs === nothing ? _extract_protein_chain_specs(task) : chain_specs
+    local_rna_specs = rna_chain_specs === nothing ? _extract_rna_chain_specs(task; json_dir = json_dir) : rna_chain_specs
+
+    isempty(local_prot_specs) && isempty(local_rna_specs) && return feat
 
     restype = Float32.(feat["restype"])
     n_tok = size(restype, 1)
@@ -1710,41 +1965,109 @@ function _inject_task_msa_features!(
         restype_idx[i] = idx - 1
     end
 
-    chain_token_cols = if token_chain_ids === nothing
-        asym = Int.(feat["asym_id"])
-        [findall(==(i - 1), asym) for i in 1:length(local_specs)]
-    else
-        [findall(==(spec.chain_id), token_chain_ids) for spec in local_specs]
-    end
-    all(!isempty(cols) for cols in chain_token_cols) || error("Failed to map task chains to token columns.")
+    # --- Protein MSA features ---
+    prot_token_cols = Vector{Vector{Int}}()
+    prot_features = Vector{ChainMSAFeatures}()
+    if !isempty(local_prot_specs)
+        prot_token_cols = if token_chain_ids === nothing
+            asym = Int.(feat["asym_id"])
+            [findall(==(i - 1), asym) for i in 1:length(local_prot_specs)]
+        else
+            [findall(==(spec.chain_id), token_chain_ids) for spec in local_prot_specs]
+        end
+        all(!isempty(cols) for cols in prot_token_cols) || error("Failed to map protein chains to token columns.")
 
-    chain_sequences = [s.sequence for s in local_specs]
-    is_homomer_or_monomer = length(Set(chain_sequences)) == 1
-    json_dir = dirname(abspath(json_path))
-    chain_features = Vector{ChainMSAFeatures}(undef, length(local_specs))
-    for (i, spec) in enumerate(local_specs)
-        chain_features[i] = _chain_msa_features(
-            spec.sequence,
-            spec.msa_cfg,
-            json_dir;
-            require_pairing = !is_homomer_or_monomer,
-        )
+        chain_sequences = [s.sequence for s in local_prot_specs]
+        is_homomer_or_monomer = length(Set(chain_sequences)) == 1
+        prot_features = Vector{ChainMSAFeatures}(undef, length(local_prot_specs))
+        for (i, spec) in enumerate(local_prot_specs)
+            prot_features[i] = _chain_msa_features(
+                spec.sequence,
+                spec.msa_cfg,
+                json_dir;
+                require_pairing = !is_homomer_or_monomer,
+            )
+        end
+
+        for (i, cols) in enumerate(prot_token_cols)
+            size(prot_features[i].combined.msa, 2) == length(cols) || error(
+                "MSA/token length mismatch on protein chain $(local_prot_specs[i].chain_id): MSA has $(size(prot_features[i].combined.msa, 2)) columns, tokens have $(length(cols)).",
+            )
+        end
     end
 
-    for (i, cols) in enumerate(chain_token_cols)
-        size(chain_features[i].combined.msa, 2) == length(cols) || error(
-            "MSA/token length mismatch on chain $(local_specs[i].chain_id): MSA has $(size(chain_features[i].combined.msa, 2)) columns, tokens have $(length(cols)).",
-        )
+    # --- RNA MSA features ---
+    rna_token_cols = Vector{Vector{Int}}()
+    rna_features = Vector{ChainMSAFeatures}()
+    if !isempty(local_rna_specs)
+        rna_token_cols = if token_chain_ids !== nothing
+            [findall(==(rspec.chain_id), token_chain_ids) for rspec in local_rna_specs]
+        else
+            # Map RNA chain_id → asym_id (0-indexed) → token columns.
+            asym = Int.(feat["asym_id"])
+            all_chain_ids = String[]
+            task_seqs = task["sequences"]
+            cidx = 1
+            for entity_any in task_seqs
+                entity = _as_string_dict(entity_any)
+                cnt = 1
+                for k in ("proteinChain", "dnaSequence", "rnaSequence", "ligand", "condition_ligand", "ion")
+                    if haskey(entity, k)
+                        cnt = Int(get(_as_string_dict(entity[k]), "count", 1))
+                        break
+                    end
+                end
+                for _ in 1:cnt
+                    push!(all_chain_ids, _chain_id_from_index(cidx))
+                    cidx += 1
+                end
+            end
+            result = Vector{Vector{Int}}()
+            for rspec in local_rna_specs
+                aidx = findfirst(==(rspec.chain_id), all_chain_ids)
+                aidx === nothing && error("Cannot find asym_id for RNA chain $(rspec.chain_id)")
+                push!(result, findall(==(aidx - 1), asym))
+            end
+            result
+        end
+        all(!isempty(cols) for cols in rna_token_cols) || error("Failed to map RNA chains to token columns.")
+
+        rna_features = Vector{ChainMSAFeatures}(undef, length(local_rna_specs))
+        for (i, rspec) in enumerate(local_rna_specs)
+            rna_features[i] = _rna_chain_msa_features(rspec, json_dir)
+        end
+
+        for (i, cols) in enumerate(rna_token_cols)
+            size(rna_features[i].combined.msa, 2) == length(cols) || error(
+                "RNA MSA/token length mismatch on chain $(local_rna_specs[i].chain_id): MSA has $(size(rna_features[i].combined.msa, 2)) columns, tokens have $(length(cols)).",
+            )
+        end
     end
 
-    heteromer_pairing_merge = !is_homomer_or_monomer && all(cf -> cf.pairing !== nothing, chain_features)
-    pairing_plan = heteromer_pairing_merge ? _pairing_row_plan(chain_features) : nothing
+    # --- Assemble unified MSA matrix ---
+    # Combine protein and RNA features/columns into unified lists.
+    all_features = vcat(prot_features, rna_features)
+    all_token_cols = vcat(prot_token_cols, rna_token_cols)
+
+    # Protein-only pairing logic (RNA never participates in cross-species pairing).
+    heteromer_pairing_merge = false
+    pairing_plan = nothing
+    if !isempty(prot_features)
+        chain_sequences = [s.sequence for s in local_prot_specs]
+        is_prot_homomer = length(Set(chain_sequences)) == 1
+        heteromer_pairing_merge = !is_prot_homomer && all(cf -> cf.pairing !== nothing, prot_features)
+        pairing_plan = heteromer_pairing_merge ? _pairing_row_plan(prot_features) : nothing
+    end
+
     total_rows = if heteromer_pairing_merge
-        paired_rows = pairing_plan === nothing ? minimum(size(cf.pairing.msa, 1) for cf in chain_features) : length(pairing_plan)
-        nonpair_extra_rows = sum(max(size(cf.non_pairing.msa, 1) - 1, 0) for cf in chain_features)
-        paired_rows + nonpair_extra_rows
+        paired_rows = pairing_plan === nothing ? minimum(size(cf.pairing.msa, 1) for cf in prot_features) : length(pairing_plan)
+        nonpair_extra_rows = sum(max(size(cf.non_pairing.msa, 1) - 1, 0) for cf in prot_features)
+        rna_rows = isempty(rna_features) ? 0 : sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in rna_features)
+        paired_rows + nonpair_extra_rows + rna_rows
     else
-        sum(size(cf.combined.msa, 1) for cf in chain_features)
+        prot_rows = isempty(prot_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in prot_features)
+        rna_rows = isempty(rna_features) ? 0 : sum(size(cf.combined.msa, 1) for cf in rna_features)
+        prot_rows + rna_rows
     end
     total_rows > 0 || (total_rows = 1)
 
@@ -1757,10 +2080,10 @@ function _inject_task_msa_features!(
     if heteromer_pairing_merge
         row = 1
         if pairing_plan === nothing
-            paired_rows = minimum(size(cf.pairing.msa, 1) for cf in chain_features)
+            paired_rows = minimum(size(cf.pairing.msa, 1) for cf in prot_features)
             # Fallback mode: pair by row index when taxonomic keys are unavailable.
             for r in 1:paired_rows
-                for (cf, cols) in zip(chain_features, chain_token_cols)
+                for (cf, cols) in zip(prot_features, prot_token_cols)
                     msa[row, cols] .= cf.pairing.msa[r, :]
                     has_deletion[row, cols] .= cf.pairing.has_deletion[r, :]
                     deletion_value[row, cols] .= cf.pairing.deletion_value[r, :]
@@ -1770,9 +2093,9 @@ function _inject_task_msa_features!(
         else
             # Preferred mode: pair rows by inferred species/taxonomic keys.
             for row_indices in pairing_plan
-                for i in eachindex(chain_features)
-                    cf = chain_features[i]
-                    cols = chain_token_cols[i]
+                for i in eachindex(prot_features)
+                    cf = prot_features[i]
+                    cols = prot_token_cols[i]
                     r = row_indices[i]
                     msa[row, cols] .= cf.pairing.msa[r, :]
                     has_deletion[row, cols] .= cf.pairing.has_deletion[r, :]
@@ -1782,8 +2105,8 @@ function _inject_task_msa_features!(
             end
         end
 
-        # Append non-pairing rows chain-wise (excluding duplicate query row).
-        for (cf, cols) in zip(chain_features, chain_token_cols)
+        # Append protein non-pairing rows (excluding duplicate query row).
+        for (cf, cols) in zip(prot_features, prot_token_cols)
             n_row = size(cf.non_pairing.msa, 1)
             if n_row >= 2
                 rows = row:(row + (n_row - 2))
@@ -1795,10 +2118,24 @@ function _inject_task_msa_features!(
             profile[cols, :] .= cf.non_pairing.profile
             deletion_mean[cols] .= cf.non_pairing.deletion_mean
         end
-        row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch")
+
+        # Append RNA non-pairing rows (excluding duplicate query row).
+        for (cf, cols) in zip(rna_features, rna_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            if n_row >= 2
+                rows = row:(row + (n_row - 2))
+                msa[rows, cols] .= cf.combined.msa[2:end, :]
+                has_deletion[rows, cols] .= cf.combined.has_deletion[2:end, :]
+                deletion_value[rows, cols] .= cf.combined.deletion_value[2:end, :]
+                row += n_row - 1
+            end
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+        end
+        row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch (expected $total_rows, got $(row-1))")
     else
         row_start = 1
-        for (cf, cols) in zip(chain_features, chain_token_cols)
+        for (cf, cols) in zip(all_features, all_token_cols)
             n_row = size(cf.combined.msa, 1)
             row_stop = row_start + n_row - 1
             rows = row_start:row_stop
@@ -2925,6 +3262,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     json_path;
                     use_msa = params.use_msa,
                     chain_specs = parsed_task.protein_specs,
+                    rna_chain_specs = parsed_task.rna_specs,
                     token_chain_ids = token_chain_ids,
                 )
                 _inject_task_covalent_token_bonds!(

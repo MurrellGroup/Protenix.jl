@@ -1,0 +1,11 @@
+[{
+  "name": "rna_with_msa_file",
+  "sequences": [
+    {"proteinChain": {"sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH", "count": 1}},
+    {"rnaSequence": {
+      "sequence": "GUACGUACGUACGUAC",
+      "count": 1,
+      "unpairedMsaPath": "../msa/rna_16mer/non_pairing.a3m"
+    }}
+  ]
+}]
