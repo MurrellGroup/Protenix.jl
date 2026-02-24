@@ -288,11 +288,17 @@ to support `.fasta` format in addition to `.a3m`, and
 `_aligned_and_deletions_from_fasta()` for FASTA alignments with no case
 semantics.
 
-**Status**: **Diagnosed.** The crash is correct behavior (better than Python's
-silent garbage). The mismatch warning now quantifies the problem. The broadcast
-crash itself still needs a fix to handle the MSA-longer-than-input case
-gracefully (column selection instead of broadcast, or error with the specific
-mismatch details). This is separate from the test input being wrong.
+**Status**: **FIXED (Fix 17).** The broadcast function now truncates the MSA
+to match the sequence length when the MSA has more columns than the input
+sequence, matching Python's implicit behavior (sparse join discards unreachable
+columns). A warning is emitted noting the mismatch. Input 36 now runs
+successfully:
+- mini v0.5: bond_viol=5 clashes=41 score=1.86
+- base v1.0: bond_viol=0 clashes=45 score=1.38
+
+Note: the test data is still wrong (MSA from a different protein), but the
+code no longer crashes. The MSA features are garbage (same as Python), but the
+structure prediction still produces reasonable results.
 
 ## Keys Present in Only One Side
 
@@ -560,6 +566,22 @@ on the modified CCD code gave wrong results (5BU → U → DU → DN=unknown).
 Also verified: s071, s078, s080, s085, s098 (all DNA cases) still pass.
 s073-s076, s099 (RNA cases) unaffected.
 
+### Fix 17: MSA broadcast truncation for mismatched MSA (2026-02-24)
+
+**Bug**: When a precomputed MSA has more columns than the input sequence
+(e.g., MSA from a 203-residue protein paired with a 51-residue input),
+`_broadcast_msa_block_to_tokens` crashed with "expected 203 unique residue
+IDs, got 51".
+
+**Fix**: Added MSA truncation logic: when `n_unique < seq_len`, truncate the
+MSA block to use only the first `n_unique` columns (positional mapping),
+matching Python's implicit behavior where the sparse join discards unreachable
+columns. A warning is emitted noting the mismatch.
+
+**Results**: Input 36 (protein_rna_dual_msa) now runs successfully:
+- mini v0.5: bond_viol=5 clashes=41 score=1.86
+- base v1.0: bond_viol=0 clashes=45 score=1.38
+
 ## Remaining Failure Analysis (17 cases)
 
 ### Breakdown
@@ -710,13 +732,9 @@ confirmed to have zero impact on v1.0 inference:
 
 ## Known Geometry Gaps
 
-1. **Input 36 (protein_rna_dual_msa)**: Crashes with "MSA broadcast: expected
-   203 unique residue IDs for sequence-level MSA, got 51". Root cause: test
-   data mismatch — the 50-residue hemoglobin sequence is paired with a
-   precomputed MSA directory from PDB 7R6R (203-residue RNA-binding protein).
-   The MSA has 203 columns but the protein only has 50 tokens. Python handles
-   this silently but produces **garbage features** (positional mismatch).
-   Julia's crash is correct behavior (better than silent garbage).
+1. **Input 36 (protein_rna_dual_msa)**: **FIXED by Fix 17.** Previously
+   crashed with MSA length mismatch. Now truncates and warns. Note: test data
+   is still wrong (MSA from different protein), but code handles it gracefully.
 
 2. **DNA mod atoms (s072, s077)**: is_dna/is_rna classification at atom level
    differs from Python for 5MC and 5BU modified bases. **ACCEPTED** — these
@@ -733,7 +751,7 @@ confirmed to have zero impact on v1.0 inference:
 
 | Test Set | Passed | Failed | Total | Failures |
 |----------|--------|--------|-------|----------|
-| Clean targets | 82 | 3 | 85 | Input 36 dual MSA bug (3 runs) |
+| Clean targets | 82 | 3 | 85 | Input 36 dual MSA bug (3 runs) — **FIXED by Fix 17** |
 | Stress test | 297 | 3 | 300 | s037 morphine SMILES conformer (3 runs) |
 | RBD+glycan+MSA | 3 | 0 | 3 | — |
 | **Total** | **382** | **6** | **388** | |
@@ -819,9 +837,17 @@ Fixes 14-16 do not regress the affected cases.
    The DNA MSA features have minimal impact on mixed protein-DNA structures where
    the protein chain dominates the MSA.
 
-4. **v1.0 results** (from separate run, local weights): s072 and s077 both produce
-   valid structures with 0 bond violations (see v1.0 DNA Modification Structure
-   Checks section above).
+4. **v1.0 results** (all 5 cases, local weights, 200 steps, seed 101):
+
+| Case | v1.0 bond_viol | v1.0 clashes | v1.0 score |
+|------|---------------|-------------|------------|
+| s014 4HT | 0 | 1 | 1.002 |
+| s025 ASA | 0 | 0 | 0.000 |
+| s072 5MC | 0 | 61 | 8.847 |
+| s077 5BU | 0 | 39 | 1.801 |
+| s098 DNA-only | 0 | 3 | 0.000 |
+
+   All v1.0 predictions produce valid structures with 0 bond violations.
 
 ---
 
