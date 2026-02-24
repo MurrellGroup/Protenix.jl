@@ -820,7 +820,14 @@ function _ensure_ccd_component_entries!(codes::Set{String})
     isempty(needed) && return
 
     ccd_path = _default_ccd_components_path()
-    isempty(ccd_path) && return
+    if isempty(ccd_path)
+        error(
+            "CCD components file not found. PXDesign requires the CCD dictionary " *
+            "(components.v20240608.cif or components.cif) for correct residue classification. " *
+            "Set ENV[\"PROTENIX_DATA_ROOT_DIR\"] to a directory containing the file, or place it " *
+            "in release_data/ccd_cache/ relative to the PXDesign.jl package root."
+        )
+    end
 
     current_code = ""
     active = false

@@ -434,7 +434,7 @@ function _load_ccd_std_ref_cache!()
     _CCD_STD_REF_CACHE_LOADED[] = true
     p = _default_ccd_std_ref_path()
     raw = parse_json(read(p, String))
-    raw isa AbstractDict || return
+    raw isa AbstractDict || error("CCD standard reference file at '$p' did not parse as a JSON object")
     for (code_any, entry_any) in raw
         code = uppercase(String(code_any))
         entry_any isa AbstractDict || continue
@@ -680,7 +680,14 @@ function _ensure_ccd_bond_entries!(codes::Set{String})
     end
     isempty(missing) && return
     ccd_path = _default_ccd_components_path()
-    isempty(ccd_path) && return
+    if isempty(ccd_path)
+        error(
+            "CCD components file not found. PXDesign requires the CCD dictionary " *
+            "(components.v20240608.cif or components.cif) for correct bond and reference data. " *
+            "Set ENV[\"PROTENIX_DATA_ROOT_DIR\"] to a directory containing the file, or place it " *
+            "in release_data/ccd_cache/ relative to the PXDesign.jl package root."
+        )
+    end
     _scan_ccd_for_bonds!(missing, ccd_path)
 end
 
@@ -692,7 +699,14 @@ function _ensure_ccd_ref_entries!(codes::Set{String})
     end
     isempty(missing) && return
     ccd_path = _default_ccd_components_path()
-    isempty(ccd_path) && return
+    if isempty(ccd_path)
+        error(
+            "CCD components file not found. PXDesign requires the CCD dictionary " *
+            "(components.v20240608.cif or components.cif) for correct reference coordinates. " *
+            "Set ENV[\"PROTENIX_DATA_ROOT_DIR\"] to a directory containing the file, or place it " *
+            "in release_data/ccd_cache/ relative to the PXDesign.jl package root."
+        )
+    end
     _scan_ccd_for_codes!(missing, ccd_path)
 end
 
