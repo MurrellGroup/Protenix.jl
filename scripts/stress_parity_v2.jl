@@ -258,9 +258,9 @@ function main()
         flush(stdout)
     end
 
-    println("\n" * "=" * 60)
+    println("\n" * "=" ^ 60)
     println("STRESS PARITY SUMMARY (Fixes 1-18, v1.0 model)")
-    println("=" * 60)
+    println("=" ^ 60)
     println("  Perfect match: $n_perfect")
     println("  ref_pos only:  $n_refpos")
     println("  Failed:        $n_fail")
@@ -274,7 +274,7 @@ function main()
             println("  $f")
         end
     end
-    println("=" * 60)
+    println("=" ^ 60)
     println("Done.")
 end
 

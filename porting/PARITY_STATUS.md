@@ -44,27 +44,38 @@ numpy/torch RNG). This is expected and does not affect model behavior since
 
 ```
 Perfect match:  0
-ref_pos only:   82  (PASS — only ref_pos differs)
-Failed:         17
+ref_pos only:   80  (PASS — only ref_pos differs)
+Failed:         19
 Errors:          0
 Skipped:         1  (s037_smi_morphine — Python also fails)
 Total:         100
 ```
 
 **Progress**: Improved from 52 ref_pos/47 failed → 80 ref_pos/19 failed after
-Fixes 1-13, then → 82 ref_pos/17 failed after Fixes 14-18. Of the 17 remaining
-failures:
-- 15 accepted SMILES conformer differences (ref_pos, frame_atom_index)
+Fixes 1-13, staying at 80/19 through Fixes 14-18 (individual cases moved between
+categories as fixes were applied, but the total remained stable).
+
+Of the 19 remaining failures:
+- 15 accepted SMILES conformer differences (frame_atom_index, occasionally has_frame)
+- 2 accepted is_dna/is_rna mismatches (s072, s077 — unused features, Python bug)
 - 2 accepted Python quirks: ion MSA (s079, s090 — numpy -1 indexing)
-- (s072/s077 is_dna/is_rna mismatches are ACCEPTED — unused features, Python bug)
+
+**Note**: Previous documentation showed "82/17" which was from an intermediate
+parity script that used the pre-Fix 14 ungated CCD override. The definitive count
+from `scripts/stress_parity_v2.jl` (with all Fixes 1-18 properly applied) is 80/19.
 
 ## Detailed Failure Categories
 
 ### Category 1: SMILES Conformer Coordinates (15 cases) — ACCEPTED
 
-**Cases**: s026-s031, s034-s036, s038-s040, s087, s095-s096
+**Cases**: s026-s031 (benzene, caffeine, aspirin, ibuprofen, glucose, cholesterol),
+s034-s036 (pyridine, indole, naphthalene), s038-s040 (penicillin_g, metformin,
+dopamine), s087 (long_smi), s095-s096 (smi_ring, smi_sulfonamide)
 
-**Failing keys**: `ref_pos`, `frame_atom_index`, occasionally `has_frame`
+**Note**: s032 (ethanol), s033 (acetone), s088 (tiny_smi), s097 (smi_amino_acid)
+PASS despite being SMILES inputs — their conformers happen to match closely enough.
+
+**Failing keys**: `frame_atom_index`, occasionally `has_frame` (s038)
 
 **Root cause**: RDKit's internal C++ random number generator is NOT seeded by
 Python's `random.seed()` or `seed_everything()`. Therefore:
@@ -632,22 +643,23 @@ regress structural quality for any model family.
 
 | Category | Count | Cases | Key Issues | Status |
 |----------|-------|-------|------------|--------|
-| SMILES conformer coords | 15 | s026-s031, s034-s036, s038-s040, s087, s095-s097 | ref_pos, frame_atom_index | Accepted |
-| Ion MSA (Python quirk) | 2 | s079, s090 | numpy -1 indexing | Accepted |
+| SMILES conformer coords | 15 | s026-s031, s034-s036, s038-s040, s087, s095-s096 | frame_atom_index (± has_frame) | Accepted |
 | DNA mod is_dna/is_rna | 2 | s072, s077 | is_dna, is_rna | Accepted (unused features, Python bug) |
+| Ion MSA (Python quirk) | 2 | s079, s090 | msa, profile (numpy -1 indexing) | Accepted |
 
 ### Classification
 
-- **Accepted (17+2)**: 15 SMILES (inherent RDKit RNG) + 2 ion (Python numpy quirk)
-  + 2 DNA mod is_dna/is_rna (unused features, Python sorting bug)
+- **Accepted (19)**: 15 SMILES (inherent RDKit RNG) + 2 DNA mod is_dna/is_rna
+  (unused features, Python sorting bug) + 2 ion (Python numpy quirk)
 - **Actionable (0)**: All fixable issues have been resolved.
 
 ### Conclusion
 
 **Input feature parity is COMPLETE.** Every feature that affects model predictions
 matches Python within tolerance:
-- 82/100 stress inputs: ref_pos only (rigid-equivalent match, different RNG)
-- 17/100 stress inputs: accepted differences (SMILES RNG, ion MSA Python quirk)
+- 80/100 stress inputs: ref_pos only (rigid-equivalent match, different RNG)
+- 19/100 stress inputs: accepted differences (15 SMILES RNG, 2 DNA is_dna/is_rna
+  unused features, 2 ion MSA Python quirk)
 - 1/100 stress inputs: skipped (Python also fails)
 - 10/10 clean targets: ref_pos only
 - ALL Python-only features confirmed to have **zero impact** on v1.0 inference:
@@ -787,66 +799,75 @@ confirmed to have zero impact on v1.0 inference:
    features are unused by the model, and Python reference has a known bug
    (picks least frequent mol_type instead of most frequent).
 
-## run_20260223 Full Rerun Results
+## run_20260224 Full Rerun Results (Fixes 1-18)
 
-**Results directory**: `clean_targets/run_20260223/`
-**Completed**: 2026-02-23 23:10 (2h 24min runtime)
+**Results directory**: `clean_targets/run_20260224/`
+**Completed**: 2026-02-24 05:41 (~2h 10min runtime)
 **Script**: `clean_targets/scripts/run_full_rerun.jl`
+**Code version**: All Fixes 1-18 applied (final parity-complete codebase)
 
 ### Pass/Fail Summary
 
 | Test Set | Passed | Failed | Total | Failures |
 |----------|--------|--------|-------|----------|
-| Clean targets | 82 | 3 | 85 | Input 36 dual MSA bug (3 runs) — **FIXED by Fix 17** |
-| Stress test | 297 | 3 | 300 | s037 morphine SMILES conformer (3 runs) |
+| Clean targets | 82 | 0 | 82 | — |
+| Stress test | 297 | 3 | 300 | s037 morphine SMILES conformer (3 models) |
 | RBD+glycan+MSA | 3 | 0 | 3 | — |
-| **Total** | **382** | **6** | **388** | |
+| **Total** | **382** | **3** | **385** | |
+
+**Improvement over run_20260223 (Fixes 1-13)**: Clean targets went from 82/3
+(input 36 failing) to 82/0 (input 36 fixed by Fix 17). Stress and RBD unchanged.
+
+### Structure Check Summary
+
+| Test Set | CIFs | Min Score | Median Score | Max Score | Mean Score |
+|----------|-------|-----------|-------------|-----------|------------|
+| Clean | 85 | 0.000 | 0.714 | 9.308 | 0.891 |
+| Stress | 297 | 0.000 | 1.225 | 23.589 | 1.838 |
+| RBD | 3 | 0.720 | 0.943 | 1.103 | 0.922 |
 
 ### Structure Check Comparison vs Reference
 
 | Test Set | Matched | Regressions | Improvements | Unchanged | New (no ref) |
 |----------|---------|-------------|-------------|-----------|--------------|
-| Clean | 38 | 20 | 10 | 8 | 44 |
-| Stress | 198 | 79 | 61 | 58 | 99 |
+| Clean | 38 | 19 | 9 | 10 | 47 |
+| Stress | 198 | 79 | 54 | 65 | 99 |
 | RBD | 0 | 0 | 0 | 0 | 3 |
 
-**Regression analysis** (see `comparison_report.txt` for full details):
+**Key observations** (see `comparison_report.txt` for full details):
 
-1. **CCD reclassification bug (s014_4HT, s025_ASA)**: FIXED by Fix 14.
-   Caused by ungated CCD mol_type override reclassifying ligand entities.
-   Clashscore dropped from 487→13 (s014 mini) and 147→0 (s025 mini).
+1. **Overall quality similar to run_20260223**: The numbers are very close to
+   the previous run (Fixes 1-13). Fixes 14-18 primarily affected input feature
+   correctness, not model output quality.
 
-2. **Input 09 (protein_dna_ligand)**: Worst remaining regression (mini:
-   severe 707→1832). Caused by Fix 11 (entity_id/sym_id). The fix is
-   correct (matches Python's `unique_chain_and_add_ids()`), but the model
-   produces worse structures with the correct pair features for this 8-chain
-   homodimeric complex. The old output was "accidentally good" with wrong
-   entity_id features. Cannot be fixed without reverting the correct fix.
+2. **Input 09 (protein_dna_ligand)**: Known regression from Fix 11 (correct
+   entity_id/sym_id). The model produces worse structures with correct features
+   for this 8-chain complex. Cannot fix without reverting the correct fix.
 
-3. **Normal diffusion variance**: ~53% of stress regressions (42/79) are
-   SMALL (Δ≤1 severe_clashes or Δ≤1 bond_violations). These are expected
-   noise from changed input features (same seed but different feature tensors
-   → different diffusion trajectory). Confirmed by GPU nondeterminism: base
-   model results vary between runs with identical features.
+3. **Normal diffusion variance**: Most regressions are small (Δ≤1 severe or
+   Δ≤1 bond violations) — expected noise from changed features driving
+   different diffusion trajectories.
 
-4. **PTM cases**: Net positive. s044_mse (both models), s053_dha,
-   s089_multi_ptm show dramatic improvements. s041_sep, s055_tys regress
-   moderately. The regressions are from correct feature changes (Fix 10
-   restype mapping, Fix 7 MSA broadcast).
+4. **Fix 14 effect (s014, s025)**: CCD reclassification gate restored correct
+   structure quality. No more 487-clashscore explosions.
 
-5. **DNA/RNA mod minis**: s075_1ma (+18 severe), s077_5bu (+5 bond_viol),
-   s072_5mc (+5 severe) — all on mini model. Features are verified correct
-   (input parity: ref_pos only). These regressions are from correct feature
-   changes causing different diffusion trajectories.
+5. **Fix 16 effect (s098 DNA-only)**: Mini model improved dramatically
+   (score 28→1.2 in targeted verification).
 
 ### Key Output Files
 
-- `run_20260223/cifs_clean/` — 82 CIFs with `{input}__{model}__seed101__sample_0.cif` naming
-- `run_20260223/cifs_stress/` — 297 CIFs
-- `run_20260223/cifs_rbd/` — 3 CIFs
-- `run_20260223/structure_checks/{clean,stress,rbd}/` — Per-CIF structure check reports
-- `run_20260223/comparison_report.txt` — Full regression/improvement details
-- `run_20260223/run_log.txt` — Complete run log
+- `run_20260224/cifs_clean/` — 85 CIFs with `{input}__{model}__seed101__sample_0.cif` naming
+- `run_20260224/cifs_stress/` — 297 CIFs
+- `run_20260224/cifs_rbd/` — 3 CIFs
+- `run_20260224/structure_checks/{clean,stress,rbd}/` — Per-CIF structure check reports
+- `run_20260224/comparison_report.txt` — Full regression/improvement details
+- `run_20260224/run_log.txt` — Complete run log
+
+### Previous Run (run_20260223, Fixes 1-13)
+
+Available at `clean_targets/run_20260223/` for comparison. Key differences from
+run_20260224: Input 36 fails (3 runs), CCD reclassification not entity-gated (Fix 14),
+no DNA MSA features (Fix 16), no v1.0 entity override (Fix 18).
 
 ## Post-Fix 14/16 Targeted Verification (2026-02-24)
 
