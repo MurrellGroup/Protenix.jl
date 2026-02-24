@@ -4,12 +4,58 @@ This document tracks the degree of parity between Julia PXDesign.jl and Python
 Protenix v1.0 for input feature tensor generation. It is updated as bugs are
 fixed and new differences are discovered.
 
+---
+
+## CRITICAL: v1.0 Parity Results Are SUSPECT (2026-02-24)
+
+**All v1.0 parity results documented below were generated against a STALE Python
+reference.** The `.external/Protenix` checkout is from **2025-12-10** (commit
+`d18aa1d`), which predates the Protenix v1.0 release on **2026-02-05** by almost
+two months.
+
+**Known issues with the stale reference:**
+
+1. **TemplateEmbedder disabled**: The old code has `return 0` hardcoded in
+   `TemplateEmbedder.forward()` (pairformer.py:980-983). The v1.0 weights have
+   **2 trained template pairformer blocks** that should be active. The v1.0
+   release notes explicitly state "Supported Template/RNA MSA features". Our
+   Julia code also returns zeros for templates, matching the stale Python but
+   NOT the released v1.0 behavior.
+
+2. **RNA MSA features**: The v1.0 release notes mention "RNA MSA features" as
+   a new capability. The stale Python reference may not include this. Need to
+   verify what changed and whether new test cases are needed.
+
+3. **"Improved training dynamics" and "inference-time model performance
+   enhancements"**: Unknown what code changes these entail. Could affect input
+   feature processing, model architecture, or post-processing.
+
+**What IS still valid:**
+- v0.5 model parity (all v0.5 models predate the v1.0 release)
+- PXDesign (pxdesign_v0.1.0) parity (design model is separate)
+- protenix_mini_* model parity (these are v0.5-era models)
+- The Julia code fixes (Fixes 1-19, D1-D4) that don't specifically target v1.0
+
+**Action required:**
+1. Update `.external/Protenix` to the v1.0 release code
+2. Regenerate ALL Python v1.0 feature dumps using the updated code
+3. Re-run all v1.0 parity checks against the new dumps
+4. Enable TemplateEmbedder in Julia for v1.0 models
+5. Investigate and implement RNA MSA feature support
+6. Create template-specific test cases for v1.0
+
+**Sections marked with [SUSPECT-v1.0] below need re-validation.**
+
+---
+
 ## Test Methodology
 
 Parity is measured by comparing the `input_feature_dict` produced by Julia
 against Python reference dumps for identical JSON inputs and seeds. The Python
-dumps were generated from the official Protenix v1.0 inference pipeline
-(`protenix_base_default_v1.0.0`, seed 101).
+dumps were generated from the official Protenix inference pipeline.
+
+**WARNING**: v1.0 dumps were generated from the stale 2025-12-10 checkout,
+not the actual v1.0 release. See critical note above.
 
 Three test sets are used:
 
@@ -25,13 +71,13 @@ Feature keys are compared as follows:
 - **Shape mismatch**: different tensor dimensions → fail
 - Keys present in only one side are noted but don't count toward pass/fail
 
-## Current Status (2026-02-24) — PARITY COMPLETE
+## Current Status (2026-02-24) — [SUSPECT-v1.0] PARITY INCOMPLETE
 
 ### Clean Targets
 
 | Model | Cases | Result |
 |-------|-------|--------|
-| protenix_base_default_v1.0.0 | 8/8 | **PASS** (ref_pos only) |
+| protenix_base_default_v1.0.0 | 8/8 | **[SUSPECT-v1.0]** PASS (ref_pos only) — against stale Python |
 | protenix_base_default_v0.5.0 | 2/2 | **PASS** (ref_pos only) |
 
 All 10 clean target cases match Python to within tolerance on every feature
@@ -361,14 +407,13 @@ affect the pass/fail comparison but are noted for completeness.
 | `prot_*_num_alignments` | MSA alignment counts | None | Not consumed by model |
 | `rna_*_num_alignments` | RNA MSA alignment counts | None | Not consumed by model |
 
-**Note on template features**: The TemplateEmbedder in Python Protenix v1.0 is
-unconditionally disabled (`return 0` at line 983 of `pairformer.py`), regardless
-of whether template features are present. The Julia implementation mirrors this
-(returns zeros when `n_blocks < 1` or derived features missing). Template features
-have **zero impact** on model output in v1.0. Julia already stores the raw template
-features (`template_restype`, `template_all_atom_mask`, `template_all_atom_positions`)
-for forward-compatibility; derived features are not computed since the embedder
-is disabled.
+**Note on template features**: **[SUSPECT-v1.0] THIS IS WRONG.** The claim that
+TemplateEmbedder is disabled was based on the STALE 2025-12-10 Python checkout.
+The v1.0 weights contain 2 trained template pairformer blocks, and the v1.0
+release notes explicitly state "Supported Template/RNA MSA features". The
+TemplateEmbedder is almost certainly ACTIVE in the released v1.0 code. Both
+Julia and the stale Python return zeros, producing incorrect v1.0 output.
+Template features DO impact model output in v1.0.
 
 **Note on bond_mask**: Only used in `BondLoss.forward()` during training
 (line 1647 of `loss.py`). PXDesign does inference only.
@@ -720,11 +765,11 @@ matches Python within tolerance:
   unused features)
 - 1/100 stress inputs: skipped (Python also fails)
 - 10/10 clean targets: ref_pos only
-- ALL Python-only features confirmed to have **zero impact** on v1.0 inference:
-  - Template features: TemplateEmbedder unconditionally disabled (`return 0`)
-  - bond_mask: training loss only
-  - modified_res_mask: post-inference metric only
-  - All other missing keys: not consumed by model forward pass
+- [SUSPECT-v1.0] Python-only features need re-evaluation against updated v1.0 code:
+  - Template features: **WRONG** — TemplateEmbedder IS active in released v1.0
+  - RNA MSA features: **UNKNOWN** — v1.0 release mentions new RNA MSA support
+  - bond_mask: training loss only (likely still valid)
+  - modified_res_mask: post-inference metric only (likely still valid)
 
 ---
 
@@ -795,12 +840,14 @@ Generated from `clean_targets/stress_outputs/` (100 inputs × 2 v0.5 models)
 plus v1 stress outputs. Reports in
 `clean_targets/structure_check_reference/stress/`.
 
-## v1.0 Output Status (2026-02-24)
+## v1.0 Output Status (2026-02-24) — [SUSPECT-v1.0]
 
-**protenix_base_default_v1.0.0**: Input feature parity confirmed (8/8 clean
-targets, 80/100 stress — see above). Output quality assessment via
-`clean_targets/run_20260223/` full rerun. Weights loaded from local
-safetensors (`weights_safetensors_protenix_base_default_v1.0.0/`).
+**protenix_base_default_v1.0.0**: [SUSPECT-v1.0] Input feature parity was
+confirmed against STALE Python reference (2025-12-10, pre-v1.0-release).
+TemplateEmbedder is disabled in both Julia and stale Python — the v1.0 weights
+have 2 trained template blocks that should be active. All v1.0 outputs were
+generated WITHOUT template embedding and need to be re-run. Weights loaded from
+local safetensors (`weights_safetensors_protenix_base_default_v1.0.0/`).
 
 **protenix_base_20250630_v1.0.0**: Weights available locally. Output quality
 assessment via RBD test set in `run_20260223/`.
@@ -831,12 +878,11 @@ produce structurally valid outputs.
 
 ### v1.0 Known Output Gaps
 
-**None that affect model predictions.** All Python-only features have been
-confirmed to have zero impact on v1.0 inference:
+**[SUSPECT-v1.0] WRONG — based on stale Python reference.** Re-evaluation needed:
 
-1. **Template features**: TemplateEmbedder is **disabled** in Protenix v1.0
-   (`return 0` unconditionally in `pairformer.py:983`). Even with all 7
-   template features present, the output is always 0. No impact.
+1. **Template features**: **ACTIVE in released v1.0.** The stale Python checkout
+   has `return 0` but the v1.0 weights have 2 trained template blocks. This is
+   a MAJOR gap — templates are NOT working in Julia for v1.0.
 
 2. **bond_mask**: Training-only loss feature (`BondLoss.forward()`). Not
    consumed during inference. No impact.
