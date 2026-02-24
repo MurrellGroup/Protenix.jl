@@ -1,11 +1,12 @@
 #!/usr/bin/env julia
-# Full 100-case stress input parity check — updated for Fixes 1-18.
+# Full 100-case stress input parity check — updated for Fixes 1-19.
 #
 # Compares Julia PXDesign input features against Python Protenix v1.0 dumps.
 # Uses the same pipeline as predict_json(), including all fixes:
 #   Fix 14: entity-gated CCD mol_type override (polymer_chain_ids)
 #   Fix 16: DNA chain MSA features (dna_chain_specs)
 #   Fix 18: v1.0 CCD override for all entities (all_entities)
+#   Fix 19: ion MSA inherits last non-ion column (numpy -1 indexing)
 #
 # Usage:
 #   julia --project=/home/claudey/FixingKAFA/ka_run_env \
@@ -111,7 +112,8 @@ function build_julia_features(json_path::String, case::String, model_name::Strin
         chain_specs=parsed_task.protein_specs,
         rna_chain_specs=parsed_task.rna_specs,
         dna_chain_specs=parsed_task.dna_specs,
-        token_chain_ids=token_chain_ids)
+        token_chain_ids=token_chain_ids,
+        ion_chain_ids=parsed_task.ion_chain_ids)
 
     PA._inject_task_covalent_token_bonds!(feat, bundle["atoms"], task,
         parsed_task.entity_chain_ids, parsed_task.entity_atom_map)

@@ -694,6 +694,7 @@ struct TaskEntityParseResult
     entity_chain_ids::Vector{Vector{String}}
     entity_atom_map::Vector{Dict{Int, String}}
     polymer_chain_ids::Set{String}   # chain IDs from proteinChain/dnaSequence/rnaSequence entities
+    ion_chain_ids::Set{String}       # chain IDs from ion entities (Fix 19)
 end
 
 function _split_cif_tokens(line::AbstractString)
@@ -2046,6 +2047,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     entity_chain_ids = Vector{Vector{String}}()
     entity_atom_map = Vector{Dict{Int, String}}()
     polymer_chain_ids = Set{String}()
+    ion_chain_ids = Set{String}()
     chain_idx = 1
 
     for (entity_idx, entity_any) in enumerate(sequences)
@@ -2233,6 +2235,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 chain_id = _chain_id_from_index(chain_idx)
                 chain_idx += 1
                 push!(chain_ids, chain_id)
+                push!(ion_chain_ids, chain_id)
                 append!(atoms, _build_ligand_atoms_from_codes([ion_code]; chain_id = chain_id))
             end
         else
@@ -2248,7 +2251,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     # Remove leaving atoms from disconnected polymer residues (matches Python's
     # _remove_non_std_ccd_leaving_atoms called per-chain during build_polymer_chain).
     atoms = _remove_non_std_polymer_leaving_atoms(atoms)
-    return TaskEntityParseResult(atoms, protein_specs, rna_specs, dna_specs, entity_chain_ids, entity_atom_map, polymer_chain_ids)
+    return TaskEntityParseResult(atoms, protein_specs, rna_specs, dna_specs, entity_chain_ids, entity_atom_map, polymer_chain_ids, ion_chain_ids)
 end
 
 function _build_atoms_from_infer_task(task::AbstractDict{<:Any, <:Any})
@@ -2901,6 +2904,7 @@ function _inject_task_msa_features!(
     rna_chain_specs::Union{Nothing, Vector{RNAChainSpec}} = nothing,
     dna_chain_specs::Union{Nothing, Vector{DNAChainSpec}} = nothing,
     token_chain_ids::Union{Nothing, Vector{String}} = nothing,
+    ion_chain_ids::Union{Nothing, Set{String}} = nothing,
 )
     use_msa || return feat
     json_dir = dirname(abspath(json_path))
@@ -3334,10 +3338,22 @@ function _inject_task_msa_features!(
         end
     end
 
-    # Python v1.0 FeatureAssemblyLine assigns "X" (UNK, index 20) as the MSA query
-    # for non-polymer columns (ligands, ions, reclassified entities).  Julia's
-    # initialization uses restype_idx which may differ after CCD corrections
-    # (e.g. 4HT → W=17 instead of UNK=20).  Fix uncovered non-DNA columns.
+    # Fix 19: Match Python v1.0 numpy -1 column indexing for uncovered tokens.
+    #
+    # Python v1.0's FeatureAssemblyLine.assemble() builds an MSA with columns for
+    # polymer chains only.  map_to_standard() maps each token to a column index;
+    # tokens not found in the polymer metadata (ions, unhandled ligands) get index
+    # -1.  The final reindexing `merged["msa"][:, std_idxs]` uses numpy's -1
+    # wraparound, selecting the LAST column of the polymer-only MSA — i.e., the
+    # last residue of the last polymer chain in entity order.
+    #
+    # In Julia, the MSA matrix has columns for ALL tokens.  Polymer columns are
+    # filled from chain MSA features.  Uncovered columns (ions, ligands not in any
+    # chain spec) must be set to match the last polymer column's values.
+    #
+    # Note: In v1.0's InferenceMSAFeaturizer, "ion" entities have no handler
+    # (only proteinChain/rnaSequence/dnaSequence/ligand are handled), so ions
+    # are never added to the MSA metadata and always get the -1 fallback.
     covered = falses(n_tok)
     for cols in prot_token_cols
         covered[cols] .= true
@@ -3348,19 +3364,73 @@ function _inject_task_msa_features!(
     for cols in dna_token_cols
         covered[cols] .= true
     end
-    unk_idx = 20  # STD_RESIDUES_WITH_GAP["UNK"]
-    for i in 1:n_tok
-        covered[i] && continue
-        # DNA tokens (indices 26-30) keep their correct base-level restype_idx.
-        26 <= restype_idx[i] <= 30 && continue
-        # Non-polymer, non-DNA token: set MSA to UNK (matching Python "X" sequence)
-        for r in 1:total_rows
-            msa[r, i] = unk_idx
+
+    any_uncovered = any(.!covered)
+    if any_uncovered
+        unk_idx = 20  # STD_RESIDUES_WITH_GAP["UNK"]
+
+        # Fix 19: Match Python v1.0 numpy -1 column indexing for ion tokens.
+        #
+        # In Python v1.0's InferenceMSAFeaturizer.make_msa_feature(), entities of
+        # type "proteinChain", "rnaSequence", "dnaSequence", and "ligand" are each
+        # handled explicitly.  "ion" entities have NO handler, so they are never
+        # added to the MSA metadata.  When FeatureAssemblyLine.assemble() calls
+        # map_to_standard() to build column indices (std_idxs), unmapped tokens
+        # get index -1.  The final reindexing:
+        #   merged[f] = merged[f][:, std_idxs].copy()      (line 350)
+        # uses std_idxs as a COLUMN selector.  NumPy's -1 wraps to the LAST column
+        # of the merged MSA.  The merged MSA contains columns for all HANDLED
+        # entities: polymer chains + ligands.  The last column is therefore the last
+        # token of the last handled entity (in entity order), which may be:
+        #   - a polymer residue (if the last non-ion entity is a polymer), or
+        #   - a ligand token (UNK=20, if a ligand entity comes after the polymers).
+        #
+        # Implementation: two phases.
+        # Phase 1: Set uncovered non-ion tokens (ligands) to UNK=20.
+        # Phase 2: Find the last non-ion column (now correctly filled) and copy
+        #          its values to all ion columns.
+
+        # Phase 1: Ligands and other uncovered non-ion tokens → UNK=20.
+        for i in 1:n_tok
+            covered[i] && continue
+            26 <= restype_idx[i] <= 30 && continue
+            is_ion = ion_chain_ids !== nothing &&
+                     token_chain_ids !== nothing &&
+                     token_chain_ids[i] in ion_chain_ids
+            is_ion && continue  # Handled in phase 2.
+            for r in 1:total_rows
+                msa[r, i] = unk_idx
+            end
+            profile[i, :] .= 0f0
+            if size(profile, 2) >= 21
+                profile[i, 21] = 1f0
+            end
         end
-        # Profile: UNK one-hot (all zeros except position 20, which is index 21 in 1-based)
-        profile[i, :] .= 0f0
-        if size(profile, 2) >= 21
-            profile[i, 21] = 1f0
+
+        # Phase 2: Ion tokens → inherit from last non-ion column.
+        # This is the rightmost column that isn't an ion, matching Python's -1
+        # wraparound over the merged MSA (which excludes ions).
+        has_ions = ion_chain_ids !== nothing && token_chain_ids !== nothing &&
+                   any(i -> !covered[i] && token_chain_ids[i] in ion_chain_ids, 1:n_tok)
+        if has_ions
+            last_non_ion_col = nothing
+            for i in n_tok:-1:1
+                if !(token_chain_ids[i] in ion_chain_ids)
+                    last_non_ion_col = i
+                    break
+                end
+            end
+            if last_non_ion_col !== nothing
+                for i in 1:n_tok
+                    covered[i] && continue
+                    26 <= restype_idx[i] <= 30 && continue
+                    token_chain_ids[i] in ion_chain_ids || continue
+                    for r in 1:total_rows
+                        msa[r, i] = msa[r, last_non_ion_col]
+                    end
+                    profile[i, :] .= @view profile[last_non_ion_col, :]
+                end
+            end
         end
     end
 
@@ -4490,6 +4560,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     rna_chain_specs = parsed_task.rna_specs,
                     dna_chain_specs = parsed_task.dna_specs,
                     token_chain_ids = token_chain_ids,
+                    ion_chain_ids = parsed_task.ion_chain_ids,
                 )
                 _inject_task_covalent_token_bonds!(
                     bundle["input_feature_dict"],

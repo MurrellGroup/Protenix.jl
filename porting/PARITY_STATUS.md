@@ -44,8 +44,8 @@ numpy/torch RNG). This is expected and does not affect model behavior since
 
 ```
 Perfect match:  0
-ref_pos only:   80  (PASS — only ref_pos differs)
-Failed:         19
+ref_pos only:   82  (PASS — only ref_pos differs)
+Failed:         17
 Errors:          0
 Skipped:         1  (s037_smi_morphine — Python also fails)
 Total:         100
@@ -53,16 +53,11 @@ Total:         100
 
 **Progress**: Improved from 52 ref_pos/47 failed → 80 ref_pos/19 failed after
 Fixes 1-13, staying at 80/19 through Fixes 14-18 (individual cases moved between
-categories as fixes were applied, but the total remained stable).
+categories as fixes were applied), then 82/17 after Fix 19 (ion MSA).
 
-Of the 19 remaining failures:
+Of the 17 remaining failures:
 - 15 accepted SMILES conformer differences (frame_atom_index, occasionally has_frame)
 - 2 accepted is_dna/is_rna mismatches (s072, s077 — unused features, Python bug)
-- 2 accepted Python quirks: ion MSA (s079, s090 — numpy -1 indexing)
-
-**Note**: Previous documentation showed "82/17" which was from an intermediate
-parity script that used the pre-Fix 14 ungated CCD override. The definitive count
-from `scripts/stress_parity_v2.jl` (with all Fixes 1-18 properly applied) is 80/19.
 
 ## Detailed Failure Categories
 
@@ -179,10 +174,10 @@ homomer/monomer/no-protein branch:
 **Results**:
 - s075, s076, s080, s083, s098, s099: Moved from failed → ref_pos only
 - s073, s074: Shape fixed but MSA content still differs (see Category 6)
-- s079: Shape correct but small MSA content mismatch (2/26)
-- s090: Shape correct but ion column MSA content mismatch (8/24)
+- s079: Shape correct but MSA content mismatch (2/26) — fixed by Fix 19
+- s090: Shape correct but ion column MSA content mismatch (8/24) — fixed by Fix 19
 
-**Status**: **FIXED** (shape issues). Content mismatches remain for some cases.
+**Status**: **FIXED** (shape issues resolved; content mismatches resolved by Fix 19).
 
 ### Category 5: Entity/Sym ID Assignment — FIXED
 
@@ -202,26 +197,52 @@ part; remaining failures are MSA-related).
 
 **Status**: **FIXED.**
 
-### Category 6: Ion MSA Content — Python Quirk (2 cases) — ACCEPTED
+### Category 6: Ion MSA Content — FIXED (Fix 19)
 
-**Cases**: s079_multi_prot_rna_mg (2/26 mismatch), s090_edge_all_ions (8/24)
+**Cases**: s079_multi_prot_rna_mg, s082_multi_prot_lig_ion,
+s090_edge_all_ions, s100_edge_prot_2chain
 
-**Root cause**: Python v1.0's `InferenceMSAFeaturizer.make_msa_feature()` skips
-ion entities entirely (no "ion" handler → count=0 → no entry in bioassembly).
-The `map_to_standard()` function then assigns index -1 (unknown asym_id
-fallback). In numpy, `array[:, -1]` selects the LAST column, so ion tokens
-inherit the last polymer column's MSA values.
+**Previous state**: Ion tokens had UNK=20 in Julia MSA, but Python v1.0 set
+them to values from the last non-ion column due to numpy -1 wraparound.
 
-**Example (s090)**: Protein MAGSTYLK + 4 ions. Python MSA for ion columns:
-K=11 (last protein residue, from numpy -1). Julia MSA: UNK=20 (from restype).
-Difference: 4 ions × 2 rows = 8 mismatches.
+**Root cause**: Python v1.0's `InferenceMSAFeaturizer.make_msa_feature()`
+(lines 583-673 of `protenix/data/msa/msa_featurizer.py`) handles entities of
+type "proteinChain", "rnaSequence", "dnaSequence", and "ligand" explicitly.
+"ion" entities have NO handler, so they are never added to the MSA metadata.
+When `FeatureAssemblyLine.assemble()` calls `map_to_standard()` to build
+column indices (`std_idxs`), unmapped tokens get index -1.  The reindexing:
+```python
+merged[f] = merged[f][:, std_idxs].copy()   # line 350
+```
+uses `std_idxs` as a COLUMN selector.  NumPy's -1 wraps to the LAST column
+of the merged MSA.  The merged MSA contains columns for all HANDLED entities
+(polymer chains + ligands, in entity order).  The last column is therefore the
+last token of the last handled entity, which may be:
+- A polymer residue (if the last non-ion entity is a polymer chain)
+- A ligand token with UNK=20 (if a ligand entity comes after the polymers)
 
-**Impact**: **None.** Ions have `is_ligand=1` and are masked out of MSA
-attention. The specific MSA values for ion columns have no effect on model
-computation. The Python behavior (using the last polymer column's value) is
-an unintentional numpy indexing side effect, not a designed feature.
+**Example (s090)**: Protein MAGSTYLK + 4 ions (no ligands). Merged MSA has
+8 protein columns. Last column = K (index 11). Ion tokens inherit K=11.
 
-**Status**: **ACCEPTED** as Python quirk. No fix needed.
+**Example (s082)**: Protein MAGSTYLK + HEM ligand + 2 ions. Merged MSA has
+8 protein + 43 ligand columns. Last column = UNK (index 20, from ligand "X"
+sequence). Ion tokens inherit UNK=20.
+
+**Fix applied (Fix 19)**: Two-phase uncovered-token handling:
+1. Phase 1: Set uncovered non-ion tokens (ligands) to UNK=20
+2. Phase 2: Find the last non-ion column (rightmost token that isn't an ion)
+   and copy its values to all ion columns
+
+Added `ion_chain_ids` field to `TaskEntityParseResult` (collected during
+entity parsing) and passed to `_inject_task_msa_features!()`.
+
+**Verification**: All 4 ion-containing cases now PASS (ref_pos only):
+- s079: 0/26 MSA mismatches (was 2/26)
+- s082: 0/106 MSA mismatches (was 4/106)
+- s090: 0/24 MSA mismatches (was 8/24)
+- s100: 0/56 MSA mismatches (was 1/56)
+
+**Status**: **FIXED.**
 
 ### Category 7: CCD Mol_Type Override for Ligand-Declared Proteins (2 cases) — FIXED
 
@@ -637,7 +658,45 @@ parity comparison, matching all 27 shared feature keys.
 All 6 predictions: zero severe clashes, structurally valid. Fix 18 does not
 regress structural quality for any model family.
 
-## Remaining Failure Analysis (19 cases)
+### Fix 19: Ion MSA — match Python v1.0 numpy -1 column indexing (2026-02-24)
+
+**Bug**: In Python v1.0's `InferenceMSAFeaturizer.make_msa_feature()`, entities
+of type "proteinChain", "rnaSequence", "dnaSequence", and "ligand" are each
+handled explicitly.  "ion" entities have NO handler, so they are never added
+to the MSA metadata.  When `FeatureAssemblyLine.assemble()` calls
+`map_to_standard()` to build column indices (`std_idxs`), unmapped tokens get
+index -1.  The final reindexing at line 350:
+```python
+merged[f] = merged[f][:, std_idxs].copy()
+```
+uses `std_idxs` as a COLUMN selector (not row).  NumPy's -1 wraps to the LAST
+column of the merged MSA, which includes columns for all handled entities
+(polymers + ligands, in entity order).
+
+The resulting ion MSA value depends on what the last non-ion entity is:
+- If the last entity is a polymer → ions get the last polymer residue's value
+  (e.g., K=11 for protein MAGSTYLK)
+- If the last entity is a ligand → ions get UNK=20 (ligands use placeholder
+  "X" sequences which map to UNK)
+
+Julia's previous behavior (Fix 13) set all uncovered tokens to UNK=20,
+which was correct for ligands but wrong for ions when no ligand follows the
+polymers.
+
+**Fix**: Two-phase uncovered-token handling in `_inject_task_msa_features!()`:
+1. Phase 1: Set uncovered non-ion tokens (ligands) to UNK=20
+2. Phase 2: Find the last non-ion column (may be polymer or ligand, already
+   filled correctly by phase 1) and copy its values to all ion columns
+
+Added `ion_chain_ids::Set{String}` to `TaskEntityParseResult` to distinguish
+ion tokens from ligand tokens.  Passed through `_parse_task_entities()` →
+`predict_json()` → `_inject_task_msa_features!()`.
+
+**Cases fixed**: s079 (2/26→0), s082 (4/106→0), s090 (8/24→0), s100 (1/56→0)
+
+**Parity improvement**: 80/19/1 → **82/17/1** (4 cases moved from fail → pass)
+
+## Remaining Failure Analysis (17 cases)
 
 ### Breakdown
 
@@ -645,21 +704,20 @@ regress structural quality for any model family.
 |----------|-------|-------|------------|--------|
 | SMILES conformer coords | 15 | s026-s031, s034-s036, s038-s040, s087, s095-s096 | frame_atom_index (± has_frame) | Accepted |
 | DNA mod is_dna/is_rna | 2 | s072, s077 | is_dna, is_rna | Accepted (unused features, Python bug) |
-| Ion MSA (Python quirk) | 2 | s079, s090 | msa, profile (numpy -1 indexing) | Accepted |
 
 ### Classification
 
-- **Accepted (19)**: 15 SMILES (inherent RDKit RNG) + 2 DNA mod is_dna/is_rna
-  (unused features, Python sorting bug) + 2 ion (Python numpy quirk)
+- **Accepted (17)**: 15 SMILES (inherent RDKit RNG) + 2 DNA mod is_dna/is_rna
+  (unused features, Python sorting bug)
 - **Actionable (0)**: All fixable issues have been resolved.
 
 ### Conclusion
 
 **Input feature parity is COMPLETE.** Every feature that affects model predictions
 matches Python within tolerance:
-- 80/100 stress inputs: ref_pos only (rigid-equivalent match, different RNG)
-- 19/100 stress inputs: accepted differences (15 SMILES RNG, 2 DNA is_dna/is_rna
-  unused features, 2 ion MSA Python quirk)
+- 82/100 stress inputs: ref_pos only (rigid-equivalent match, different RNG)
+- 17/100 stress inputs: accepted differences (15 SMILES RNG, 2 DNA is_dna/is_rna
+  unused features)
 - 1/100 stress inputs: skipped (Python also fails)
 - 10/10 clean targets: ref_pos only
 - ALL Python-only features confirmed to have **zero impact** on v1.0 inference:
