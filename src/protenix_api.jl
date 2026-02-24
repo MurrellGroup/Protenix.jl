@@ -3680,6 +3680,266 @@ function _inject_task_template_features!(
     return feat
 end
 
+"""
+    _inject_dummy_template_features!(feat, n_templates=1)
+
+Create dummy (zero-filled) template features matching Python Protenix v1.0.4
+behaviour when `use_template=false`. This ensures the TemplateEmbedder code path
+is exercised (all masks are zero → output is zero).
+
+The derived features (distogram, unit_vector, masks) are all zeros because the
+underlying atom positions and masks are zeros. template_restype is filled with 31
+(gap token) matching Python's make_dummy_feature().
+"""
+function _inject_dummy_template_features!(
+    feat::Dict{String, Any};
+    n_templates::Int = 1,
+)
+    n_tok = size(feat["restype"], 1)
+
+    # Raw template features: restype filled with 31 (gap), positions/masks zeros
+    if !haskey(feat, "template_restype")
+        feat["template_restype"] = fill(31, n_templates, n_tok)
+    end
+    if !haskey(feat, "template_all_atom_mask")
+        feat["template_all_atom_mask"] = zeros(Float32, n_templates, n_tok, 24)
+    end
+    if !haskey(feat, "template_all_atom_positions")
+        feat["template_all_atom_positions"] = zeros(Float32, n_templates, n_tok, 24, 3)
+    end
+
+    # Derive distogram, unit_vector, masks from raw atom data
+    _derive_template_features!(feat)
+
+    return feat
+end
+
+# ─── Template feature derivation from raw atom data ──────────────────────────
+# Matches Python Protenix v1.0.4 template_utils.py
+
+# 0-indexed pseudo-beta atom index per restype (32 entries).
+# Protein: CB=4 (GLY=CA=1), RNA: A/G→C4, C/U→C2, DNA: DA/DG→C4, DC/DT→C2.
+const _RESTYPE_PSEUDOBETA_INDEX = Int32[
+    4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,  # ALA-VAL (0-19)
+    0,                                                                 # UNK (20)
+    22, 23, 14, 14, 0,                                                 # A, G, C, U, N (21-25)
+    21, 22, 13, 13, 0,                                                 # DA, DG, DC, DT, DN (26-30)
+    0,                                                                 # gap (31)
+]
+
+# Backbone frame atom indices (C, CA, N) per restype, group 0 of rigidgroup.
+# Each row = (C_idx, CA_idx, N_idx) in dense atom format (0-indexed).
+const _RESTYPE_BACKBONE_ATOM_IDX = (
+    # Protein residues 0-19: C=2, CA=1, N=0
+    (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0),  # ALA-CYS
+    (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0),  # GLN-ILE
+    (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0),  # LEU-PRO
+    (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0), (2, 1, 0),  # SER-VAL
+    (0, 0, 0),                                                  # UNK
+    (12, 8, 6), (12, 8, 6), (12, 8, 6), (12, 8, 6), (0, 0, 0), # A, G, C, U, N
+    (12, 8, 6), (12, 8, 6), (12, 8, 6), (12, 8, 6), (0, 0, 0), # DA, DG, DC, DT, DN
+    (0, 0, 0),                                                  # gap
+)
+
+"""
+    _template_pseudo_beta(aatype, atom_positions, atom_mask)
+
+Compute pseudo-beta positions and masks from raw template atom data.
+- `aatype`: (N_res,) 0-indexed residue type indices
+- `atom_positions`: (N_res, 24, 3) dense atom positions
+- `atom_mask`: (N_res, 24) dense atom mask
+Returns: (pb_positions, pb_mask) where pb_positions is (N_res, 3) and pb_mask is (N_res,)
+"""
+function _template_pseudo_beta(
+    aatype::AbstractVector{<:Integer},
+    atom_positions::AbstractArray{<:Real,3},
+    atom_mask::AbstractMatrix{<:Real},
+)
+    n_res = length(aatype)
+    pb_pos = zeros(Float32, n_res, 3)
+    pb_mask = zeros(Float32, n_res)
+    for i in 1:n_res
+        # 0-indexed aatype → 1-indexed lookup into _RESTYPE_PSEUDOBETA_INDEX
+        at = aatype[i]
+        pb_idx = _RESTYPE_PSEUDOBETA_INDEX[clamp(at + 1, 1, 32)]
+        # 0-indexed atom index → 1-indexed array access
+        ai = pb_idx + 1
+        if ai <= size(atom_positions, 2)
+            pb_pos[i, :] .= Float32.(atom_positions[i, ai, :])
+            pb_mask[i] = Float32(atom_mask[i, ai])
+        end
+    end
+    return pb_pos, pb_mask
+end
+
+"""
+    _template_distogram(positions; min_bin=3.25, max_bin=50.75, num_bins=39)
+
+Compute distogram from positions. Input: (N_res, 3). Output: (N_res, N_res, num_bins).
+Bins are in squared Ångström space (lower_breaks² < dist² < upper_breaks²).
+"""
+function _template_distogram(
+    positions::AbstractMatrix{<:Real};
+    min_bin::Float32 = 3.25f0,
+    max_bin::Float32 = 50.75f0,
+    num_bins::Int = 39,
+)
+    lower = Float32.(range(min_bin, max_bin, length=num_bins)) .^ 2
+    upper = vcat(lower[2:end], Float32[1f8])
+    n = size(positions, 1)
+    dgram = zeros(Float32, n, n, num_bins)
+    for i in 1:n, j in 1:n
+        d2 = sum(k -> (positions[i, k] - positions[j, k])^2, 1:3)
+        for b in 1:num_bins
+            if d2 > lower[b] && d2 < upper[b]
+                dgram[i, j, b] = 1f0
+            end
+        end
+    end
+    return dgram
+end
+
+"""
+    _template_unit_vector(aatype, atom_positions, atom_mask; epsilon=1e-6)
+
+Compute template unit vectors and backbone frame mask.
+- Local frame: origin at CA, x-axis along C→CA, y-axis Gram-Schmidt of N→CA.
+- unit_vector[i,j,:] = normalized (CA_j - CA_i) in local frame of residue i.
+Returns: (unit_vector, mask_2d) where shapes are (N_res, N_res, 3) and (N_res, N_res).
+"""
+function _template_unit_vector(
+    aatype::AbstractVector{<:Integer},
+    atom_positions::AbstractArray{<:Real,3},
+    atom_mask::AbstractMatrix{<:Real};
+    epsilon::Float32 = 1f-6,
+)
+    n_res = length(aatype)
+    T = Float32
+
+    # Extract backbone atom positions
+    c_pos  = zeros(T, n_res, 3)
+    ca_pos = zeros(T, n_res, 3)
+    n_pos  = zeros(T, n_res, 3)
+    mask   = ones(T, n_res)
+
+    for i in 1:n_res
+        at = aatype[i]
+        bb = _RESTYPE_BACKBONE_ATOM_IDX[clamp(at + 1, 1, 32)]
+        c_idx, ca_idx, n_idx = bb[1] + 1, bb[2] + 1, bb[3] + 1  # 1-indexed
+
+        c_pos[i, :]  .= T.(atom_positions[i, c_idx, :])
+        ca_pos[i, :] .= T.(atom_positions[i, ca_idx, :])
+        n_pos[i, :]  .= T.(atom_positions[i, n_idx, :])
+
+        c_m  = T(atom_mask[i, c_idx])
+        ca_m = T(atom_mask[i, ca_idx])
+        n_m  = T(atom_mask[i, n_idx])
+        mask[i] = c_m * ca_m * n_m
+    end
+
+    # Build local frames
+    v1 = c_pos .- ca_pos   # (n_res, 3)
+    v2 = n_pos .- ca_pos
+
+    # Normalize v1 → e1
+    e1_norm = sqrt.(sum(v1 .^ 2, dims=2) .+ epsilon)
+    e1 = v1 ./ e1_norm
+
+    # Gram-Schmidt: e2 = orthogonalize v2 against e1
+    proj = sum(v2 .* e1, dims=2)
+    e2_raw = v2 .- proj .* e1
+    e2_norm = sqrt.(sum(e2_raw .^ 2, dims=2) .+ epsilon)
+    e2 = e2_raw ./ e2_norm
+
+    # e3 = e1 × e2
+    e3 = hcat(
+        e1[:, 2] .* e2[:, 3] .- e1[:, 3] .* e2[:, 2],
+        e1[:, 3] .* e2[:, 1] .- e1[:, 1] .* e2[:, 3],
+        e1[:, 1] .* e2[:, 2] .- e1[:, 2] .* e2[:, 1],
+    )
+
+    # Compute unit vectors: diff[i,j] = CA[j] - CA[i], then project into local frame
+    unit_vector = zeros(T, n_res, n_res, 3)
+    for i in 1:n_res, j in 1:n_res
+        dx = ca_pos[j, 1] - ca_pos[i, 1]
+        dy = ca_pos[j, 2] - ca_pos[i, 2]
+        dz = ca_pos[j, 3] - ca_pos[i, 3]
+        ux = e1[i, 1] * dx + e1[i, 2] * dy + e1[i, 3] * dz
+        uy = e2[i, 1] * dx + e2[i, 2] * dy + e2[i, 3] * dz
+        uz = e3[i, 1] * dx + e3[i, 2] * dy + e3[i, 3] * dz
+        uv_norm = sqrt(ux^2 + uy^2 + uz^2) + epsilon
+        unit_vector[i, j, 1] = ux / uv_norm
+        unit_vector[i, j, 2] = uy / uv_norm
+        unit_vector[i, j, 3] = uz / uv_norm
+    end
+
+    # 2D mask
+    mask_2d = mask * mask'
+
+    return unit_vector, mask_2d
+end
+
+"""
+    _derive_template_features!(feat)
+
+Derive template embedding features (distogram, unit_vector, pseudo_beta_mask,
+backbone_frame_mask) from raw template features (template_restype,
+template_all_atom_positions, template_all_atom_mask).
+
+Matches Python Protenix v1.0.4 `Templates.as_protenix_dict()`.
+All arrays use Python/features-last layout: (N_tmpl, N_tok, ...).
+"""
+function _derive_template_features!(feat::Dict{String, Any})
+    haskey(feat, "template_restype") || return feat
+    haskey(feat, "template_all_atom_positions") || return feat
+    haskey(feat, "template_all_atom_mask") || return feat
+
+    restype = feat["template_restype"]      # (N_tmpl, N_tok)
+    positions = feat["template_all_atom_positions"]  # (N_tmpl, N_tok, 24, 3)
+    masks = feat["template_all_atom_mask"]  # (N_tmpl, N_tok, 24)
+
+    n_tmpl = size(restype, 1)
+    n_tok = size(restype, 2)
+
+    dgrams = zeros(Float32, n_tmpl, n_tok, n_tok, 39)
+    pb_masks_2d = zeros(Float32, n_tmpl, n_tok, n_tok)
+    unit_vecs = zeros(Float32, n_tmpl, n_tok, n_tok, 3)
+    bb_masks_2d = zeros(Float32, n_tmpl, n_tok, n_tok)
+
+    for t in 1:n_tmpl
+        aatype_t = Int.(restype[t, :])
+        pos_t = positions[t, :, :, :]    # (N_tok, 24, 3)
+        mask_t = masks[t, :, :]          # (N_tok, 24)
+
+        # Pseudo-beta positions and mask
+        pb_pos, pb_mask = _template_pseudo_beta(aatype_t, pos_t, mask_t)
+        pb_mask_2d = pb_mask * pb_mask'   # (N_tok, N_tok)
+
+        # Distogram from pseudo-beta positions
+        dgram = _template_distogram(pb_pos)  # (N_tok, N_tok, 39)
+
+        # Unit vectors and backbone frame mask
+        uv, bb_mask = _template_unit_vector(aatype_t, pos_t, mask_t)
+
+        # Apply masks (matching Python: dgram * pb_mask_2d[..., None])
+        for i in 1:n_tok, j in 1:n_tok
+            dgram[i, j, :] .*= pb_mask_2d[i, j]
+            uv[i, j, :] .*= bb_mask[i, j]
+        end
+
+        dgrams[t, :, :, :] .= dgram
+        pb_masks_2d[t, :, :] .= pb_mask_2d
+        unit_vecs[t, :, :, :] .= uv
+        bb_masks_2d[t, :, :] .= bb_mask
+    end
+
+    feat["template_distogram"] = dgrams
+    feat["template_pseudo_beta_mask"] = pb_masks_2d
+    feat["template_unit_vector"] = unit_vecs
+    feat["template_backbone_frame_mask"] = bb_masks_2d
+    return feat
+end
+
 function _inject_task_esm_token_embedding!(
     feat::Dict{String, Any},
     task::AbstractDict{<:Any, <:Any},
@@ -4570,6 +4830,11 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     parsed_task.entity_atom_map,
                 )
                 _inject_task_template_features!(bundle["input_feature_dict"], task)
+                # For v1.0 models, always ensure template derived features exist
+                # (Python v1.0.4 always runs the template assembly pipeline, even with dummy data)
+                if _is_v1_model(opts.model_name)
+                    _inject_dummy_template_features!(bundle["input_feature_dict"])
+                end
                 _inject_task_esm_token_embedding!(bundle["input_feature_dict"], task)
                 _inject_auto_esm_token_embedding!(
                     bundle["input_feature_dict"],

@@ -581,9 +581,21 @@ function (m::TemplateEmbedder)(
     if m.n_blocks < 1 || feat.template_restype === nothing
         return fill!(similar(z, Float32, size(z)), 0f0)
     end
-    # Template features from ProtenixFeatures not yet wired for full template embedding.
-    # Return zeros when template features haven't been fully prepared.
-    return fill!(similar(z, Float32, size(z)), 0f0)
+    # Check for derived template features needed by the actual embedder
+    if feat.template_distogram === nothing || feat.template_unit_vector === nothing ||
+       feat.template_pseudo_beta_mask === nothing || feat.template_backbone_frame_mask === nothing
+        return fill!(similar(z, Float32, size(z)), 0f0)
+    end
+    return _template_embedder_core(
+        m, z,
+        feat.template_restype,
+        feat.template_distogram,
+        feat.template_unit_vector,
+        feat.template_pseudo_beta_mask,
+        feat.template_backbone_frame_mask,
+        feat.asym_id;
+        pair_mask = pair_mask,
+    )
 end
 
 function (m::TemplateEmbedder)(
