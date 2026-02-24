@@ -241,6 +241,17 @@ const MODEL_SPECS = Dict{String, ProtenixModelSpec}(
     ),
 )
 
+# Short aliases → canonical model names.
+# "protenix_v1" resolves to the latest v1.0 model (20250630), not the original default.
+const _MODEL_ALIASES = Dict{String, String}(
+    "protenix_v1" => "protenix_base_20250630_v1.0.0",
+)
+
+function _resolve_model_alias(model_name::AbstractString)
+    key = lowercase(strip(String(model_name)))
+    return get(_MODEL_ALIASES, key, key)
+end
+
 const _AA3_TO_1 = let
     out = Dict{String, String}()
     for (aa1, aa3) in PROT_STD_RESIDUES_ONE_TO_THREE
@@ -521,10 +532,11 @@ function _broadcast_msa_features_to_tokens(features::ChainMSAFeatures, token_res
 end
 
 function resolve_model_spec(model_name::AbstractString)
-    key = String(model_name)
+    key = _resolve_model_alias(model_name)
     haskey(MODEL_SPECS, key) && return MODEL_SPECS[key]
     supported = join(sort(collect(keys(MODEL_SPECS))), ", ")
-    error("Unsupported model_name '$key'. Supported models: $supported")
+    aliases = join(sort(collect(keys(_MODEL_ALIASES))), ", ")
+    error("Unsupported model_name '$model_name'. Supported models: $supported. Aliases: $aliases")
 end
 
 """
@@ -6178,13 +6190,14 @@ function load_protenix(
     gpu::Bool = false,
     strict::Bool = true,
 )
-    params = recommended_params(model_name; use_default_params = true)
-    weights_ref = default_weights_path(model_name)
-    loaded = _load_model(model_name, weights_ref; strict = strict)
+    resolved = _resolve_model_alias(model_name)
+    params = recommended_params(resolved; use_default_params = true)
+    weights_ref = default_weights_path(resolved)
+    loaded = _load_model(resolved, weights_ref; strict = strict)
     if gpu
         loaded = (model = _flux_gpu(loaded.model), family = loaded.family)
     end
-    return ProtenixHandle(loaded.model, loaded.family, String(model_name), gpu, params)
+    return ProtenixHandle(loaded.model, loaded.family, resolved, gpu, params)
 end
 
 """
@@ -6683,6 +6696,7 @@ function load_pxdesign(
     gpu::Bool = false,
     strict::Bool = true,
 )
+    model_name = _resolve_model_alias(model_name)
     weights_ref = download_model_weights(model_name)
     weights = load_safetensors_weights(weights_ref)
 
