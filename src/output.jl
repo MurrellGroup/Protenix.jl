@@ -92,7 +92,7 @@ function _polymer_type(mol_type::String)
     mol_type == "protein" && return "polypeptide(L)"
     mol_type == "dna" && return "polydeoxyribonucleotide"
     mol_type == "rna" && return "polyribonucleotide"
-    return nothing
+    error("Unknown polymer mol_type: '$mol_type' (expected protein, dna, or rna)")
 end
 
 function _chain_residue_key(chain::String, chain_to_mol::Dict{String,String}, runs::Vector{ResidueRun})

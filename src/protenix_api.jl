@@ -4748,9 +4748,17 @@ Matches Python Protenix v1.0.4 `Templates.as_protenix_dict()`.
 All arrays use Python/features-last layout: (N_tmpl, N_tok, ...).
 """
 function _derive_template_features!(feat::Dict{String, Any})
-    haskey(feat, "template_restype") || return feat
-    haskey(feat, "template_all_atom_positions") || return feat
-    haskey(feat, "template_all_atom_mask") || return feat
+    has_restype = haskey(feat, "template_restype")
+    has_positions = haskey(feat, "template_all_atom_positions")
+    has_mask = haskey(feat, "template_all_atom_mask")
+    # No template features at all — nothing to derive
+    (!has_restype && !has_positions && !has_mask) && return feat
+    # Partial template features — caller bug
+    (has_restype && has_positions && has_mask) || error(
+        "Incomplete template features: template_restype=$has_restype, " *
+        "template_all_atom_positions=$has_positions, template_all_atom_mask=$has_mask " *
+        "(all three must be present or all absent)"
+    )
 
     restype = feat["template_restype"]      # (N_tmpl, N_tok)
     positions = feat["template_all_atom_positions"]  # (N_tmpl, N_tok, 24, 3)
