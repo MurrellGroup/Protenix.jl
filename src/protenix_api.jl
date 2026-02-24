@@ -432,9 +432,29 @@ function _broadcast_msa_block_to_tokens(block::ChainMSABlock, token_res_ids::Vec
 
     # Map unique sorted res_ids to 1-based MSA column indices.
     unique_rids = sort(unique(token_res_ids))
-    length(unique_rids) == seq_len || error(
-        "MSA broadcast: expected $seq_len unique residue IDs for sequence-level MSA, got $(length(unique_rids))",
-    )
+    n_unique = length(unique_rids)
+
+    if n_unique > seq_len
+        error(
+            "MSA broadcast: expected $seq_len unique residue IDs for sequence-level MSA, got $n_unique " *
+            "(more tokens than MSA columns — likely a bug)",
+        )
+    elseif n_unique < seq_len
+        # MSA has more columns than the chain has sequence positions.
+        # This happens when precomputed MSA is from a different (longer) protein.
+        # Truncate MSA to match, using positional mapping (same as Python's sparse join).
+        @warn("MSA has $seq_len columns but chain has $n_unique sequence positions; " *
+              "truncating MSA to match (precomputed MSA may not correspond to this chain)")
+        block = _chain_msa_block(
+            block.msa[:, 1:n_unique],
+            block.has_deletion[:, 1:n_unique],
+            block.deletion_value[:, 1:n_unique],
+            block.deletion_mean[1:n_unique],
+            block.profile[1:n_unique, :],
+        )
+        seq_len = n_unique
+    end
+
     rid_to_col = Dict(rid => i for (i, rid) in enumerate(unique_rids))
     col_map = [rid_to_col[rid] for rid in token_res_ids]
 
