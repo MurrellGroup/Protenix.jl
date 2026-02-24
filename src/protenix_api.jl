@@ -651,10 +651,17 @@ function _parse_msa_cfg(x)
     return (precomputed_msa_dir = precomputed_msa_dir, pairing_db = pairing_db)
 end
 
+struct DNAChainSpec
+    chain_id::String
+    sequence::String           # original one-letter DNA sequence (e.g. "ATGC")
+    ccd_codes::Vector{String}  # per-position CCD codes after modifications (e.g. ["DA", "DT", "5MC", "DC"])
+end
+
 struct TaskEntityParseResult
     atoms::Vector{AtomRecord}
     protein_specs::Vector{ProteinChainSpec}
     rna_specs::Vector{RNAChainSpec}
+    dna_specs::Vector{DNAChainSpec}
     entity_chain_ids::Vector{Vector{String}}
     entity_atom_map::Vector{Dict{Int, String}}
     polymer_chain_ids::Set{String}   # chain IDs from proteinChain/dnaSequence/rnaSequence entities
@@ -1995,6 +2002,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     atoms = AtomRecord[]
     protein_specs = ProteinChainSpec[]
     rna_specs = RNAChainSpec[]
+    dna_specs = DNAChainSpec[]
     entity_chain_ids = Vector{Vector{String}}()
     entity_atom_map = Vector{Dict{Int, String}}()
     polymer_chain_ids = Set{String}()
@@ -2066,6 +2074,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
                 push!(chain_ids, chain_id)
                 push!(polymer_chain_ids, chain_id)
                 append!(atoms, _build_polymer_atoms_from_codes(ccd_codes, "dna"; chain_id = chain_id))
+                push!(dna_specs, DNAChainSpec(chain_id, seq, copy(ccd_codes)))
             end
         elseif haskey(entity, "rnaSequence")
             rna_any = entity["rnaSequence"]
@@ -2199,7 +2208,7 @@ function _parse_task_entities(task::AbstractDict{<:Any, <:Any}; json_dir::Abstra
     # Remove leaving atoms from disconnected polymer residues (matches Python's
     # _remove_non_std_ccd_leaving_atoms called per-chain during build_polymer_chain).
     atoms = _remove_non_std_polymer_leaving_atoms(atoms)
-    return TaskEntityParseResult(atoms, protein_specs, rna_specs, entity_chain_ids, entity_atom_map, polymer_chain_ids)
+    return TaskEntityParseResult(atoms, protein_specs, rna_specs, dna_specs, entity_chain_ids, entity_atom_map, polymer_chain_ids)
 end
 
 function _build_atoms_from_infer_task(task::AbstractDict{<:Any, <:Any})
@@ -2850,6 +2859,7 @@ function _inject_task_msa_features!(
     msa_pair_as_unpair::Bool = false,
     chain_specs::Union{Nothing, Vector{ProteinChainSpec}} = nothing,
     rna_chain_specs::Union{Nothing, Vector{RNAChainSpec}} = nothing,
+    dna_chain_specs::Union{Nothing, Vector{DNAChainSpec}} = nothing,
     token_chain_ids::Union{Nothing, Vector{String}} = nothing,
 )
     use_msa || return feat
@@ -2857,12 +2867,9 @@ function _inject_task_msa_features!(
 
     local_prot_specs = chain_specs === nothing ? _extract_protein_chain_specs(task) : chain_specs
     local_rna_specs = rna_chain_specs === nothing ? _extract_rna_chain_specs(task; json_dir = json_dir) : rna_chain_specs
+    local_dna_specs = dna_chain_specs === nothing ? DNAChainSpec[] : dna_chain_specs
 
-    # Python v1.0 FeatureAssemblyLine includes DNA as a standard polymer chain type
-    # in MSA assembly.  Julia doesn't process DNA MSA separately, but we must avoid
-    # early-returning when DNA exists so that the 2-row (paired+unpaired) MSA shape
-    # matches the Python reference.
-    has_dna_chains = any(
+    has_dna_chains = !isempty(local_dna_specs) || any(
         haskey(_as_string_dict(e), "dnaSequence")
         for e in get(task, "sequences", [])
     )
@@ -2980,10 +2987,89 @@ function _inject_task_msa_features!(
         end
     end
 
+    # --- DNA chain MSA features ---
+    # Python v1.0 FeatureAssemblyLine treats DNA chains as standard polymers:
+    # each DNA chain gets a "dummy" MSA with 1 query row from the sequence.
+    # Modified bases (e.g. 5MC) are mapped to their canonical parent DNA base
+    # (5MC → DC) via CCD one_letter_code.
+    dna_token_cols = Vector{Vector{Int}}()
+    dna_features = Vector{ChainMSAFeatures}()
+    if !isempty(local_dna_specs)
+        dna_token_cols = if token_chain_ids !== nothing
+            [findall(==(dspec.chain_id), token_chain_ids) for dspec in local_dna_specs]
+        else
+            asym = Int.(feat["asym_id"])
+            # Find the asym_id for each DNA chain by scanning entity order.
+            task_seqs = task["sequences"]
+            cidx = 1
+            all_chain_ids = String[]
+            for entity_any in task_seqs
+                ent = _as_string_dict(entity_any)
+                cnt = 1
+                for k in ("proteinChain", "dnaSequence", "rnaSequence", "ligand", "condition_ligand", "ion")
+                    if haskey(ent, k)
+                        cnt = Int(get(_as_string_dict(ent[k]), "count", 1))
+                        break
+                    end
+                end
+                for _ in 1:cnt
+                    push!(all_chain_ids, _chain_id_from_index(cidx))
+                    cidx += 1
+                end
+            end
+            [begin
+                aidx = findfirst(==(dspec.chain_id), all_chain_ids)
+                aidx === nothing && error("Cannot find asym_id for DNA chain $(dspec.chain_id)")
+                findall(==(aidx - 1), asym)
+            end for dspec in local_dna_specs]
+        end
+
+        for (i, dspec) in enumerate(local_dna_specs)
+            cols = dna_token_cols[i]
+            isempty(cols) && continue
+            # Build sequence-level MSA query from the *original* DNA sequence, not
+            # the modified CCD codes.  Python's FeatureAssemblyLine uses the input
+            # sequence letters (e.g. "ATGC") for MSA, so modifications like 5BU at
+            # position 3 still get the original base DG=27 in the MSA query.
+            seq_len = length(dspec.sequence)
+            seq_indices = Vector{Int}(undef, seq_len)
+            for (j, c) in enumerate(dspec.sequence)
+                dna3 = get(_DNA_1TO3, c, "DN")
+                seq_indices[j] = get(STD_RESIDUES_WITH_GAP, dna3, STD_RESIDUES_WITH_GAP["DN"])
+            end
+            # Build 1-row MSA (query only) and profile.
+            msa_query = reshape(seq_indices, 1, seq_len)
+            n_classes = size(restype, 2)
+            chain_profile = zeros(Float32, seq_len, n_classes)
+            for j in 1:seq_len
+                idx = seq_indices[j] + 1  # 0-indexed → 1-indexed
+                if 1 <= idx <= n_classes
+                    chain_profile[j, idx] = 1f0
+                end
+            end
+            chain_has_del = zeros(Float32, 1, seq_len)
+            chain_del_val = zeros(Float32, 1, seq_len)
+            chain_del_mean = zeros(Float32, seq_len)
+            combined = _chain_msa_block(msa_query, chain_has_del, chain_del_val, chain_del_mean, chain_profile)
+            cf = convert(ChainMSAFeatures, (combined = combined, non_pairing = combined, pairing = nothing, pairing_keys = nothing))
+
+            # Broadcast from sequence-level to token-level if modified bases created
+            # per-atom tokens (e.g. 5MC → 21 tokens instead of 1).
+            if seq_len != length(cols)
+                token_rids = residue_idx[cols]
+                cf = _broadcast_msa_features_to_tokens(cf, token_rids)
+            end
+            size(cf.combined.msa, 2) == length(cols) || error(
+                "DNA MSA/token length mismatch on chain $(dspec.chain_id): MSA has $(size(cf.combined.msa, 2)) columns, tokens have $(length(cols)).",
+            )
+            push!(dna_features, cf)
+        end
+    end
+
     # --- Assemble unified MSA matrix ---
-    # Combine protein and RNA features/columns into unified lists.
-    all_features = vcat(prot_features, rna_features)
-    all_token_cols = vcat(prot_token_cols, rna_token_cols)
+    # Combine protein, RNA, and DNA features/columns into unified lists.
+    all_features = vcat(prot_features, rna_features, dna_features)
+    all_token_cols = vcat(prot_token_cols, rna_token_cols, dna_token_cols)
 
     # Protein-only pairing logic (RNA never participates in cross-species pairing).
     heteromer_pairing_merge = false
@@ -3000,7 +3086,8 @@ function _inject_task_msa_features!(
         paired_rows = pairing_plan === nothing ? minimum(size(cf.pairing.msa, 1) for cf in prot_features) : length(pairing_plan)
         nonpair_extra_rows = sum(max(size(cf.non_pairing.msa, 1) - 1, 0) for cf in prot_features)
         rna_rows = isempty(rna_features) ? 0 : sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in rna_features)
-        paired_rows + nonpair_extra_rows + rna_rows
+        dna_rows = isempty(dna_features) ? 0 : sum(max(size(cf.combined.msa, 1) - 1, 0) for cf in dna_features)
+        paired_rows + nonpair_extra_rows + rna_rows + dna_rows
     elseif is_prot_homomer_or_monomer || isempty(prot_features)
         # Python v1.0 FeatureAssemblyLine merges all polymer chains into a shared
         # MSA: chains contribute columns (concatenated), not extra rows.  The final
@@ -3093,6 +3180,20 @@ function _inject_task_msa_features!(
             profile[cols, :] .= cf.combined.profile
             deletion_mean[cols] .= cf.combined.deletion_mean
         end
+
+        # Append DNA non-pairing rows (excluding duplicate query row).
+        for (cf, cols) in zip(dna_features, dna_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            if n_row >= 2
+                rows = row:(row + (n_row - 2))
+                msa[rows, cols] .= cf.combined.msa[2:end, :]
+                has_deletion[rows, cols] .= cf.combined.has_deletion[2:end, :]
+                deletion_value[rows, cols] .= cf.combined.deletion_value[2:end, :]
+                row += n_row - 1
+            end
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+        end
         row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch (expected $total_rows, got $(row-1))")
     elseif is_prot_homomer_or_monomer || isempty(prot_features)
         # Python v1.0 FeatureAssemblyLine layout:
@@ -3111,6 +3212,9 @@ function _inject_task_msa_features!(
         for (cf, cols) in zip(rna_features, rna_token_cols)
             msa[1, cols] .= cf.combined.msa[1, :]
         end
+        for (cf, cols) in zip(dna_features, dna_token_cols)
+            msa[1, cols] .= cf.combined.msa[1, :]
+        end
         # Rows 2..max_unpaired+1 = unpaired MSA (merged columns, shared rows).
         unpaired_start = 2
         for (cf, cols) in zip(prot_features, prot_token_cols)
@@ -3125,6 +3229,17 @@ function _inject_task_msa_features!(
             deletion_mean[cols] .= cf.combined.deletion_mean
         end
         for (cf, cols) in zip(rna_features, rna_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            for r in 1:n_row
+                target_row = unpaired_start + r - 1
+                msa[target_row, cols] .= cf.combined.msa[r, :]
+                has_deletion[target_row, cols] .= cf.combined.has_deletion[r, :]
+                deletion_value[target_row, cols] .= cf.combined.deletion_value[r, :]
+            end
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+        end
+        for (cf, cols) in zip(dna_features, dna_token_cols)
             n_row = size(cf.combined.msa, 1)
             for r in 1:n_row
                 target_row = unpaired_start + r - 1
@@ -3164,6 +3279,19 @@ function _inject_task_msa_features!(
             deletion_mean[cols] .= cf.combined.deletion_mean
             row_start = row_stop + 1
         end
+        for (cf, cols) in zip(dna_features, dna_token_cols)
+            n_row = size(cf.combined.msa, 1)
+            if n_row >= 2
+                row_stop = row_start + (n_row - 2)
+                rows = row_start:row_stop
+                msa[rows, cols] .= cf.combined.msa[2:end, :]
+                has_deletion[rows, cols] .= cf.combined.has_deletion[2:end, :]
+                deletion_value[rows, cols] .= cf.combined.deletion_value[2:end, :]
+                row_start = row_stop + 1
+            end
+            profile[cols, :] .= cf.combined.profile
+            deletion_mean[cols] .= cf.combined.deletion_mean
+        end
     end
 
     # Python v1.0 FeatureAssemblyLine assigns "X" (UNK, index 20) as the MSA query
@@ -3175,6 +3303,9 @@ function _inject_task_msa_features!(
         covered[cols] .= true
     end
     for cols in rna_token_cols
+        covered[cols] .= true
+    end
+    for cols in dna_token_cols
         covered[cols] .= true
     end
     unk_idx = 20  # STD_RESIDUES_WITH_GAP["UNK"]
@@ -4316,6 +4447,7 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     msa_pair_as_unpair = params.msa_pair_as_unpair,
                     chain_specs = parsed_task.protein_specs,
                     rna_chain_specs = parsed_task.rna_specs,
+                    dna_chain_specs = parsed_task.dna_specs,
                     token_chain_ids = token_chain_ids,
                 )
                 _inject_task_covalent_token_bonds!(

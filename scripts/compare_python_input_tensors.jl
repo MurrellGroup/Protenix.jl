@@ -240,6 +240,8 @@ function _build_julia_feature_dict(
     token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
     feat = bundle["input_feature_dict"]
     PA._normalize_protenix_feature_dict!(feat)
+    PA._fix_restype_for_modified_residues!(feat, bundle["atoms"], bundle["tokens"])
+    PA._fix_entity_and_sym_ids!(feat, bundle["atoms"], bundle["tokens"], parsed_task.entity_chain_ids)
     PA._inject_task_msa_features!(
         feat,
         task,
@@ -247,6 +249,8 @@ function _build_julia_feature_dict(
         use_msa = params.use_msa,
         msa_pair_as_unpair = params.msa_pair_as_unpair,
         chain_specs = parsed_task.protein_specs,
+        rna_chain_specs = parsed_task.rna_specs,
+        dna_chain_specs = parsed_task.dna_specs,
         token_chain_ids = token_chain_ids,
     )
     PA._inject_task_covalent_token_bonds!(
