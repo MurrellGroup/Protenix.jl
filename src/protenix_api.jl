@@ -510,6 +510,15 @@ function resolve_model_spec(model_name::AbstractString)
 end
 
 """
+    _is_v1_model(model_name) → Bool
+
+Return `true` if the model name indicates Protenix v1.0 or later.
+v1.0 models use a different featurization path (e.g., CCD mol_type override
+applies to all entities including ligands, not just polymer entities).
+"""
+_is_v1_model(model_name::AbstractString) = occursin("v1.0", String(model_name))
+
+"""
     recommended_params(model_name; use_default_params=true, cycle=nothing, step=nothing,
                        sample=nothing, use_msa=nothing) → NamedTuple
 
@@ -1187,26 +1196,37 @@ function _apply_mse_to_met(atoms::Vector{AtomRecord})::Vector{AtomRecord}
 end
 
 """
-    _apply_ccd_mol_type_override(atoms, polymer_chain_ids) → Vector{AtomRecord}
+    _apply_ccd_mol_type_override(atoms, polymer_chain_ids; all_entities=false) → Vector{AtomRecord}
 
-Override mol_type for atoms in **polymer entities only**, based on CCD
-`_chem_comp.type` classification. This matches Python Protenix's
-`add_token_mol_type()`, which gates the CCD lookup on whether the entity
-is in `entity_poly_type` (i.e., is a polymer). Atoms in ligand/ion entities
-are never reclassified, regardless of their CCD type.
+Override mol_type for atoms based on CCD `_chem_comp.type` classification.
+
+When `all_entities=false` (default, v0.5 behavior): only polymer entities are
+checked, matching Python Protenix v0.5's `add_token_mol_type()` which gates
+the CCD lookup on `entity_poly_type`.
+
+When `all_entities=true` (v1.0 behavior): ALL entities including ligand/ion
+are checked. This matches Python Protenix v1.0's inference path where
+`build_ligand()` adds a fake "sequence" key to ligand entities, causing them
+to be included in `entity_poly_type` and thus CCD-lookup'd. This means CCD
+compounds with protein-type codes (e.g. 4HT "L-PEPTIDE LINKING") declared as
+ligand entities get reclassified to protein, affecting tokenization, restype,
+and is_protein/is_ligand flags.
 
 Examples:
 - Modified residue SEP in a proteinChain → CCD "L-PEPTIDE LINKING" → "protein"
 - DNA base 5MC in a dnaSequence → CCD "RNA LINKING" → "rna" (even in a DNA chain)
-- Ligand 4HT declared as ligand → NOT overridden (stays "ligand"), even though
-  CCD type = "L-PEPTIDE LINKING". Python's entity gate prevents the CCD lookup.
+- Ligand 4HT (all_entities=false): stays "ligand" (v0.5 entity gate)
+- Ligand 4HT (all_entities=true): → "protein" (v1.0 CCD reclassification)
 """
-function _apply_ccd_mol_type_override(atoms::Vector{AtomRecord}, polymer_chain_ids::Set{String})::Vector{AtomRecord}
+function _apply_ccd_mol_type_override(
+    atoms::Vector{AtomRecord},
+    polymer_chain_ids::Set{String};
+    all_entities::Bool = false,
+)::Vector{AtomRecord}
     result = similar(atoms)
     for (i, a) in enumerate(atoms)
-        # Python's add_token_mol_type() only consults CCD for polymer entities.
-        # Non-polymer entities (ligand, ion) get mol_type="ligand" unconditionally.
-        if a.chain_id ∉ polymer_chain_ids
+        if !all_entities && a.chain_id ∉ polymer_chain_ids
+            # v0.5 mode: skip non-polymer entities
             result[i] = a
             continue
         end
@@ -4453,7 +4473,8 @@ function predict_json(input::AbstractString, opts::ProtenixPredictOptions)
                     rng = rng,
                 )
                 atoms = _apply_mse_to_met(atoms)
-                atoms = _apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids)
+                atoms = _apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids;
+                    all_entities = _is_v1_model(opts.model_name))
                 bundle = build_feature_bundle_from_atoms(atoms; task_name = task_name, rng = rng)
                 token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
                 _normalize_protenix_feature_dict!(bundle["input_feature_dict"])

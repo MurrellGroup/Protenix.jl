@@ -230,7 +230,8 @@ function _build_julia_feature_dict(
         rng = rng,
     )
     atoms = PA._apply_mse_to_met(atoms)
-    atoms = PA._apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids)
+    atoms = PA._apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids;
+        all_entities = PA._is_v1_model(model_name))
     bundle = PXDesign.Data.build_feature_bundle_from_atoms(
         atoms;
         task_name = task_name,

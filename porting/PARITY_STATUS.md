@@ -582,6 +582,36 @@ columns. A warning is emitted noting the mismatch.
 - mini v0.5: bond_viol=5 clashes=41 score=1.86
 - base v1.0: bond_viol=0 clashes=45 score=1.38
 
+### Fix 18: v1.0 CCD mol_type override for all entities (2026-02-24)
+
+**Bug**: Python Protenix v1.0's inference path (`protenix/data/inference/json_parser.py`)
+adds a fake `"sequence"` key to ligand entities via `build_ligand()` (line 588:
+`atom_info["sequence"] = "-" * len(atom_info["atom_array"])`). This causes
+`get_entity_poly_type_and_seqs()` to include ligand entities in `entity_poly_type`,
+which means `add_token_mol_type()` performs CCD lookup on ALL entities — not just
+polymer entities.
+
+For CCD compounds with protein-type codes (e.g., 4HT "L-PEPTIDE LINKING", ASA
+"L-PEPTIDE LINKING"), this reclassifies atoms from `mol_type="ligand"` to
+`mol_type="protein"`. The v0.5 Python code does NOT have this behavior (different
+parser, no fake sequence key).
+
+**Impact**: Three features affected:
+- `is_protein` / `is_ligand`: 4HT/ASA atoms marked as protein instead of ligand
+- `restype`: 4HT tokens get TRP (W=17) one-hot instead of UNK (20)
+
+`is_protein`/`is_ligand` are NOT consumed by the model (not in ProtenixFeatures).
+However, `restype` IS consumed by the model's single representation embedding. The
+v1.0 model was trained with the reclassified behavior, so Julia should match it.
+
+**Fix**: Added `all_entities::Bool` keyword to `_apply_ccd_mol_type_override()`.
+When `true` (v1.0 mode), CCD lookup applies to all atoms regardless of entity type.
+When `false` (v0.5 mode, default), only polymer entities are checked (Fix 14 gating).
+Added `_is_v1_model()` helper to detect model version from name.
+
+**Verification**: s014_ccd_4ht and s025_ccd_asa now PASS (ref_pos only) in v1.0
+parity comparison, matching all 27 shared feature keys.
+
 ## Remaining Failure Analysis (17 cases)
 
 ### Breakdown
@@ -590,10 +620,12 @@ columns. A warning is emitted noting the mismatch.
 |----------|-------|-------|------------|--------|
 | SMILES conformer coords | 15 | s026-s031, s034-s036, s038-s040, s087, s095-s097 | ref_pos, frame_atom_index | Accepted |
 | Ion MSA (Python quirk) | 2 | s079, s090 | numpy -1 indexing | Accepted |
+| DNA mod is_dna/is_rna | 2 | s072, s077 | is_dna, is_rna | Accepted (unused features, Python bug) |
 
 ### Classification
 
-- **Accepted (17)**: 15 SMILES (inherent RDKit RNG) + 2 ion (Python numpy quirk)
+- **Accepted (17+2)**: 15 SMILES (inherent RDKit RNG) + 2 ion (Python numpy quirk)
+  + 2 DNA mod is_dna/is_rna (unused features, Python sorting bug)
 - **Actionable (0)**: All fixable issues have been resolved.
 
 ### Conclusion
