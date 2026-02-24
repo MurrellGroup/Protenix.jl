@@ -20,6 +20,14 @@ Pkg.instantiate()
 
 CUDA GPU support requires `CUDA.jl` and `cuDNN.jl` in your environment. SMILES ligand support requires `MoleculeFlow.jl`.
 
+### cuTile Kernels
+
+To use cuTile/OnionTile accelerated kernels, add `OnionTile.jl` to your environment. You will also need the [BFloat16s-compatible SafeTensors fork](https://github.com/AntonOresten/SafeTensors.jl/tree/bfloat16s-v0.6) to resolve a dependency conflict with BFloat16s:
+
+```julia
+Pkg.add(url="https://github.com/AntonOresten/SafeTensors.jl", rev="bfloat16s-v0.6")
+```
+
 ## Quickstart: Folding
 
 ```julia
