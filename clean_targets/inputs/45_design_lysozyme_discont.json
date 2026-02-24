@@ -1,0 +1,1 @@
+[{"name":"45_design_lysozyme_discont","hotspot":{"A":[35,52,108,119]},"generation":[{"length":90,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-60,100-129"},"chain_id":["A"]},"structure_file":"../structures/1lyz.cif","msa":{}}}]

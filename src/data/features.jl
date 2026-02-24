@@ -908,7 +908,17 @@ function _build_feature_dict(
     restype = restype_onehot_encoded(cano_res)
     size(restype, 2) == restype_depth || error("Unexpected restype depth.")
     profile = restype[:, 1:32]
-    msa = fill(STD_RESIDUES_WITH_GAP["-"], n_msa, n_token)
+    # MSA: set to argmax(restype) per token — matching Python's
+    # features_dict["msa"] = torch.nonzero(features_dict["restype"])[:, 1].unsqueeze(0)
+    msa = zeros(Int, n_msa, n_token)
+    for i in 1:n_token
+        for j in 1:restype_depth
+            if restype[i, j] != 0
+                msa[1, i] = j - 1  # 0-indexed
+                break
+            end
+        end
+    end
     has_deletion = zeros(Float32, n_msa, n_token)
     deletion_value = zeros(Float32, n_msa, n_token)
     deletion_mean = zeros(Float32, n_token)
@@ -931,7 +941,7 @@ function _build_feature_dict(
     # Build ref_space_uid -> atom indices mapping for ligand frame computation
     uid_to_atom_indices = Dict{Int, Vector{Int}}()
     for (i, a) in enumerate(atoms)
-        if a.mol_type == "ligand" || !(a.res_name in keys(STD_RESIDUES_PROTENIX))
+        if a.mol_type == "ligand" || !(haskey(RES_ATOMS_DICT, a.res_name))
             uid = ref_space_uid[i]
             if !haskey(uid_to_atom_indices, uid)
                 uid_to_atom_indices[uid] = Int[]
@@ -944,8 +954,8 @@ function _build_feature_dict(
     frame_atom_index = fill(-1, n_token, 3)
     for (i, tok) in enumerate(tokens)
         ca = centre_atoms[i]
-        if ca.mol_type != "ligand" && ca.res_name in keys(STD_RESIDUES_PROTENIX) && length(tok.atom_indices) > 1
-            # Standard polymer token: use N/CA/C or C1'/C3'/C4'
+        if ca.mol_type != "ligand" && haskey(RES_ATOMS_DICT, ca.res_name) && length(tok.atom_indices) > 1
+            # Standard polymer or design backbone token: use N/CA/C or C1'/C3'/C4'
             ok, frame = _frame_for_polymer_token(tok, ca)
             has_frame[i] = ok
             frame_atom_index[i, :] = ifelse.(frame .>= 0, frame .- 1, frame)
