@@ -1,356 +1,210 @@
 # PXDesign.jl
 
-Pure Julia implementation of Protenix structure prediction and PXDesign binder design.
+Pure Julia implementation of [Protenix](https://github.com/bytedance/Protenix) structure prediction and [PXDesign](https://github.com/bytedance/PXDesign) protein binder design. Supports all Protenix v0.5 and v1.0 folding models plus the PXDesign diffusion design model.
 
 ## Installation
-
-From a local checkout:
 
 ```julia
 using Pkg
 Pkg.develop(path="path/to/PXDesign.jl")
-Pkg.instantiate()
 ```
 
-If your resolver cannot find shared dependencies, add them as path dependencies first:
+If shared dependencies aren't resolved automatically:
 
 ```julia
-using Pkg
 Pkg.develop(path="path/to/Onion.jl")
 Pkg.develop(path="path/to/ProtInterop.jl")
 Pkg.develop(path="path/to/PXDesign.jl")
 Pkg.instantiate()
 ```
 
-## Quickstart
+CUDA GPU support requires `CUDA.jl` and `cuDNN.jl` in your environment. SMILES ligand support requires `MoleculeFlow.jl`.
 
-### Load and Fold
+## Quickstart: Folding
 
 ```julia
 using PXDesign
 
-h = load_protenix(gpu=true)
+# Load the latest v1.0 model
+h = load_protenix("protenix_v1"; gpu=true)
+
+# Fold a sequence
 result = fold(h, "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH")
-result.mean_plddt   # average predicted local distance difference test (0-100)
-result.cif          # mmCIF text as String
-result.cif_paths    # paths to written CIF files
+result.mean_plddt   # predicted local distance difference test (0-100)
+result.cif_paths    # paths to output CIF files
 ```
 
-### Confidence Metrics
+### Multi-Entity Complex
 
 ```julia
-m = confidence_metrics(result)
-m.mean_plddt  # average pLDDT (0-100)
-m.mean_pae    # average predicted aligned error (Angstroms)
-m.pde         # predicted distance error
-m.resolved    # predicted experimentally-resolved mask
+task = protenix_task(
+    protein_chain("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH"),
+    ligand("CCD_ATP"),
+    ion("MG"),
+)
+result = fold(h, task; seed=101, out_dir="./output")
 ```
 
-### Batch JSON Prediction (Multi-Entity)
+### With MSA
+
+```julia
+task = protenix_task(
+    protein_chain("MGSSHHHHHHSSGLVPRGSH...";
+        msa = Dict(
+            "precomputed_msa_dir" => "path/to/msa_dir",
+            "pairing_db" => "uniref100",
+        ),
+    ),
+)
+result = fold(h, task; seed=101)
+```
+
+### With Covalent Bonds (Glycoprotein)
+
+```julia
+rbd = protein_chain(rbd_sequence; msa = Dict("precomputed_msa_dir" => msa_dir))
+glycan = ligand("CCD_NAG_NAG_BMA")
+
+task = protenix_task(rbd, glycan;
+    covalent_bonds = [
+        Dict("entity1"=>"1", "position1"=>"13", "atom1"=>"ND2",
+             "entity2"=>"2", "position2"=>"1", "atom2"=>"C1"),
+    ],
+)
+result = fold(h, task)
+```
+
+### Batch JSON Prediction
 
 ```julia
 records = predict_json("inputs/complex.json";
-    model_name = "protenix_base_default_v0.5.0",
+    model_name = "protenix_v1",
     out_dir = "./output",
     seeds = [101, 102],
-    gpu = true,
-)
-for r in records
-    println("$(r.task_name) seed=$(r.seed): $(r.prediction_dir)")
-end
-```
-
-### Sequence Prediction
-
-```julia
-records = predict_sequence("ACDEFGHIKLMNPQRSTVWY";
-    model_name = "protenix_mini_default_v0.5.0",
-    out_dir = "./output",
+    use_msa = true,
     gpu = true,
 )
 ```
 
-## Supported Models
-
-| Model | Family | Cycle | Step | Sample | MSA | ESM |
-|-------|--------|:-----:|:----:|:------:|:---:|:---:|
-| `protenix_base_default_v0.5.0` | base | 10 | 200 | 5 | yes | no |
-| `protenix_base_constraint_v0.5.0` | base | 10 | 200 | 5 | yes | no |
-| `protenix_mini_default_v0.5.0` | mini | 4 | 5 | 5 | yes | no |
-| `protenix_mini_tmpl_v0.5.0` | mini | 4 | 5 | 5 | yes | no |
-| `protenix_mini_esm_v0.5.0` | mini | 4 | 5 | 5 | no | yes |
-| `protenix_mini_ism_v0.5.0` | mini | 4 | 5 | 5 | no | yes |
-| `protenix_tiny_default_v0.5.0` | mini | 4 | 5 | 5 | yes | no |
-| `protenix_base_default_v1.0.0` | base | 10 | 200 | 5 | yes | no |
-| `protenix_base_20250630_v1.0.0` | base | 10 | 200 | 5 | yes | no |
-| `pxdesign_v0.1.0` | design | — | 200 | — | — | no |
-
-### Discovering Models at Runtime
+## Quickstart: Design
 
 ```julia
-for m in list_supported_models()
-    println("$(m.model_name)  family=$(m.family)  cycle=$(m.default_cycle) step=$(m.default_step)")
-end
+using PXDesign
+
+dh = load_pxdesign("pxdesign_v0.1.0"; gpu=true)
+
+# Unconditional (de novo)
+result = design(dh; binder_length=60, seed=42, n_sample=5)
+
+# Conditional with target + hotspots
+target = design_target("structures/1ubq.cif"; chains=["A"])
+result = design(dh;
+    binder_length=80,
+    target=target,
+    hotspots=Dict("A" => [8, 44, 48]),
+    seed=42,
+)
+result.cif_paths  # designed structures
 ```
 
-## API Reference
-
-### Core REPL Functions
-
-**`load_protenix(model_name="protenix_base_default_v0.5.0"; gpu=false, strict=true) → ProtenixHandle`**
-
-Load a Protenix model and return a reusable handle. Weights are downloaded from
-HuggingFace on first use and cached locally.
-
-- `model_name`: one of the supported model names (see table above)
-- `gpu`: move model to GPU after loading
-- `strict`: enforce strict weight key coverage (recommended)
-- Returns: `ProtenixHandle` — pass to `fold()` for repeated predictions
-
-**`fold(handle, sequence; seed=101, step=nothing, sample=nothing, cycle=nothing, out_dir=nothing, task_name="protenix_sequence", chain_id="A", esm_token_embedding=nothing) → NamedTuple`**
-
-Fold a protein sequence using a loaded model handle.
-
-- `seed`: RNG seed for diffusion sampling
-- `step`, `sample`, `cycle`: override model defaults (or `nothing` to use defaults)
-- `out_dir`: directory for CIF output (temp dir if `nothing`)
-- `esm_token_embedding`: explicit ESM embedding matrix `[N_token, D]` (overrides auto-generation)
-
-Returns a NamedTuple with fields:
-- `coordinate` — predicted 3D coordinates
-- `cif` — mmCIF text as String
-- `cif_paths` — paths to written CIF files
-- `prediction_dir` — output directory path
-- `plddt` — per-residue pLDDT scores (0-100)
-- `mean_plddt` — average pLDDT
-- `pae` — predicted aligned error matrix (Angstroms)
-- `mean_pae` — average PAE
-- `pde` — predicted distance error
-- `resolved` — predicted experimentally-resolved mask
-- `distogram_logits`, `plddt_logits`, `pae_logits` — raw logits
-- `seed`, `task_name` — echo of inputs
-
-**`confidence_metrics(result) → NamedTuple`**
-
-Extract confidence metrics from a fold result. Returns `(plddt, mean_plddt, pae, mean_pae, pde, resolved)`.
-
-### Batch Prediction
-
-**`predict_json(input; out_dir, model_name, seeds, gpu, cycle, step, sample, use_msa, strict) → Vector{PredictJSONRecord}`**
-
-Run prediction on one or more JSON input files. `input` can be a file path or directory.
-Each record contains `(input_json, task_name, seed, prediction_dir, cif_paths)`.
-
-**`predict_sequence(sequence; out_dir, model_name, seeds, gpu, task_name, chain_id, esm_token_embedding, cycle, step, sample, use_msa, strict) → Vector{PredictSequenceRecord}`**
-
-Run prediction on a single protein sequence. Each record contains
-`(task_name, seed, prediction_dir, cif_paths)`.
-
-### Utilities
-
-**`list_supported_models() → Vector{NamedTuple}`**
-
-Return sorted metadata for all registered models. Each entry has fields:
-`model_name`, `family`, `default_cycle`, `default_step`, `default_sample`,
-`default_use_msa`, `needs_esm_embedding`.
-
-**`recommended_params(model_name; use_default_params=true, cycle, step, sample, use_msa) → NamedTuple`**
-
-Return recommended inference parameters for a model. When `use_default_params=true`,
-returns the model's registered defaults. Override individual parameters as needed.
-
-**`convert_structure_to_infer_json(input; out_dir="./output", altloc="first", assembly_id=nothing) → Vector{String}`**
-
-Convert PDB/mmCIF structure files to Protenix inference JSON format. Returns paths
-to the written JSON files. Supports mmCIF bioassembly expansion via `assembly_id`.
-
-**`add_precomputed_msa_to_json(input_json; out_dir="./output", precomputed_msa_dir, pairing_db="uniref100") → Vector{String}`**
-
-Attach a precomputed MSA directory to an existing inference JSON. Adds
-`msa.precomputed_msa_dir` and `msa.pairing_db` to each `proteinChain` entity.
-
-### Types
-
-- `ProtenixHandle` — loaded model state (model, family, model_name, on_gpu, params)
-- `ProtenixModelSpec` — model metadata (name, family, defaults)
-- `ProtenixPredictOptions` — shared options for `predict_json` / `predict_sequence`
-- `ProtenixSequenceOptions` — sequence-specific options (wraps `ProtenixPredictOptions`)
-- `PredictJSONRecord` — result record from `predict_json`
-- `PredictSequenceRecord` — result record from `predict_sequence`
-
-## Supported Entities
-
-| Entity | JSON Key | Description |
-|--------|----------|-------------|
-| Protein | `proteinChain` | Amino acid sequence with optional `count` for homo-oligomers |
-| DNA | `dnaSequence` | Single-stranded DNA sequence |
-| RNA | `rnaSequence` | Single-stranded RNA sequence |
-| Ligand (CCD) | `ligand` with `"CCD_XXX"` | Ligand by Chemical Component Dictionary code |
-| Ligand (SMILES) | `ligand` with `"SMILES_..."` or SMILES string | Ligand by SMILES notation |
-| Ligand (file) | `ligand` with `"FILE_path.sdf"` | Ligand from local structure file |
-| Ion | `ion` | Metal ion by CCD code (e.g. `"MG"`, `"ZN"`) |
-
-### Constraints
-
-Supported via `protenix_base_constraint_v0.5.0`:
-
-- `constraint.contact` — inter-chain residue/atom distance constraints
-- `constraint.pocket` — pocket-definition constraints
-- `constraint.structure` — accepted and treated as no-op (matches Python v0.5)
-
-## JSON Input Format
-
-Minimal single-task example:
-
-```json
-[{
-  "name": "my_prediction",
-  "sequences": [
-    {"proteinChain": {"sequence": "MKQLLED...", "count": 1}},
-    {"ligand": {"ligand": "CCD_ATP", "count": 1}}
-  ]
-}]
-```
-
-Accepted input shapes:
-- A single task object `{...}`
-- An array of task objects `[{...}, {...}]`
-- A wrapper object `{"tasks": [{...}, {...}]}` (Python-compatible)
-
-## Design Workflow
-
-Design targets use YAML format:
-
-```yaml
-target:
-  structure_path: structures/target.cif
-  chains:
-    - chain_id: A
-      crop: "1-116"
-      hotspot_residues: [40, 99, 107]
-binder:
-  n_residues: 80
-```
-
-Invoke via the CLI:
+### Design with Target Cropping and MSA
 
 ```julia
-PXDesign.main(["infer", "-i", "design_input.yaml", "-o", "./output"])
+target = design_target("structures/5o45.cif";
+    chains=["A"],
+    crop=Dict("A" => "1-116"),
+    msa=Dict("A" => Dict("precomputed_msa_dir" => "msa/PDL1_chain_A")),
+)
+result = design(dh; binder_length=80, target=target, seed=42)
 ```
 
-## CLI Reference
+## Models
 
-All commands are invoked via `PXDesign.main(args)`:
+| Model | Alias | Family | Description |
+|-------|-------|--------|-------------|
+| `protenix_base_20250630_v1.0.0` | `protenix_v1` | Folding | Latest v1.0 model. Best quality. |
+| `protenix_base_default_v1.0.0` | | Folding | Original v1.0 release. |
+| `protenix_base_default_v0.5.0` | | Folding | v0.5 base model. |
+| `protenix_base_constraint_v0.5.0` | | Folding | Supports pocket/distance constraints. |
+| `protenix_mini_default_v0.5.0` | | Folding | Fast mini model (~40x faster). |
+| `protenix_mini_esm_v0.5.0` | | Folding | Mini + ESM2 embeddings. |
+| `protenix_mini_ism_v0.5.0` | | Folding | Mini + ISM embeddings. |
+| `protenix_mini_tmpl_v0.5.0` | | Folding | Mini + template embedder. |
+| `protenix_tiny_default_v0.5.0` | | Folding | Smallest model (smoke tests). |
+| `pxdesign_v0.1.0` | | Design | Diffusion binder design. |
 
-| Command | Description |
-|---------|-------------|
-| `predict --input <json> --out_dir <dir>` | Run JSON or sequence prediction |
-| `predict --sequence <seq> --out_dir <dir>` | Predict from a raw sequence |
-| `predict --list-models` | List supported model variants |
-| `tojson --input <pdb/cif> --out_dir <dir>` | Convert structure to inference JSON |
-| `msa --input <json> --precomputed_msa_dir <dir>` | Attach precomputed MSA to JSON |
-| `infer -i <json/yaml> -o <dir>` | Low-level inference (JSON or YAML design) |
-| `check-input --yaml <yaml>` | Validate a YAML design input |
-| `parity-check <ref_dir> <actual_dir>` | Numeric parity comparison |
+See [docs/models.md](docs/models.md) for detailed model descriptions, capabilities, and recommended usage.
+
+## Supported Input Types
+
+| Entity | REPL Builder | JSON Key | Example |
+|--------|-------------|----------|---------|
+| Protein | `protein_chain(seq)` | `proteinChain` | Single chain or homo-oligomer |
+| DNA | `dna_chain(seq)` | `dnaSequence` | Single-stranded DNA |
+| RNA | `rna_chain(seq)` | `rnaSequence` | Single-stranded RNA |
+| Ligand (CCD) | `ligand("CCD_ATP")` | `ligand` | By Chemical Component Dictionary code |
+| Ligand (SMILES) | `ligand("Nc1ncnc2...")` | `ligand` | By SMILES string |
+| Ligand (file) | `ligand("FILE_x.sdf")` | `ligand` | From SDF file |
+| Ion | `ion("MG")` | `ion` | Metal ion by CCD code |
+
+Additional features: covalent bonds, constraints (pocket/distance), MSA, template structures, PTMs, DNA/RNA modifications.
+
+See [docs/inputs.md](docs/inputs.md) for complete input format documentation.
+
+## Documentation
+
+- **[Models](docs/models.md)** — Detailed model descriptions, capabilities, parameters, and selection guide
+- **[Input Formats](docs/inputs.md)** — Complete reference for REPL API, JSON, and YAML inputs, including MSA, templates, covalent bonds, constraints, modifications
+- **[API Reference](docs/api.md)** — Full function signatures, arguments, return types, environment variables, CLI
 
 ## Model Weights
 
-Weights are downloaded automatically from HuggingFace on first use:
+Weights are downloaded automatically from HuggingFace on first use and cached locally.
 
-- Repository: `MurrellLab/PXDesign.jl`
-- Revision: `main`
+- Repository: [`MurrellLab/PXDesign.jl`](https://huggingface.co/MurrellLab/PXDesign.jl)
+- CCD components file: auto-downloaded alongside weights
 
-For offline mode, prefetch weights once, then set:
-
+For offline use:
 ```bash
 export PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=true
 ```
 
-## Environment Variables
+## Examples
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PXDESIGN_WEIGHTS_REPO_ID` | `MurrellLab/PXDesign.jl` | HuggingFace repository for model weights |
-| `PXDESIGN_WEIGHTS_REVISION` | `main` | Git revision/branch for weights |
-| `PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY` | `false` | Skip network; use cached weights only |
-| `PXDESIGN_ESM_LOCAL_FILES_ONLY` | `false` | Skip network for ESM weights |
-| `PXDESIGN_ESM_REPO_ID` | `facebook/esmfold_v1` | ESM2 weight source |
-| `PXDESIGN_ESM_FILENAME` | `model.safetensors` | ESM2 weight file |
-| `PXDESIGN_ESM_REVISION` | `ba837a3` | ESM2 weight revision |
-| `PXDESIGN_ESM_ISM_REPO_ID` | (from weights repo) | ISM-tuned ESM2 source |
-| `PXDESIGN_ESM_ISM_FILENAME` | (model-specific) | ISM weight file |
-| `PXDESIGN_ESM_ISM_REVISION` | (from weights revision) | ISM weight revision |
-| `PXDESIGN_ESM_ISM_LOADER` | `fair_esm2` | ISM loader backend |
-| `PXDESIGN_PYTHON_VENV` | — | Python venv path (for reference scripts only) |
+The `examples/` directory contains runnable inputs for all supported entity types:
 
-## ESM / ISM Embeddings
+- `examples/inputs/` — 45 folding and design JSON/YAML inputs
+- `examples/stress_inputs/` — 100 stress test inputs (CCD compounds, SMILES, PTMs, covalent bonds, edge cases)
+- `examples/structures/` — CIF structures for design conditioning
+- `examples/msa/` — Precomputed MSA directories
+- `examples/ligands/` — SDF ligand files
+- `examples/rbd_glycosylated_repl.jl` — Full REPL example: RBD + MSA + glycans + covalent bonds
 
-ESM embeddings are required by `protenix_mini_esm_v0.5.0` and `protenix_mini_ism_v0.5.0`.
+### Running an Example
 
-**Automatic mode** (default): When using `fold()` or `predict_*`, ESM embeddings are
-generated automatically via `ESMFold.jl`. No user action needed.
+```julia
+using PXDesign
 
-**Explicit mode**: Supply a pre-computed embedding matrix:
-- REPL: `fold(h, seq; esm_token_embedding=my_matrix)`
-- JSON: add `task.esm_token_embedding` field with shape `[N_token, D]`
+# From JSON
+records = predict_json("examples/inputs/01_protein_monomer.json";
+    model_name="protenix_v1", gpu=true)
 
-ISM variant uses an ISM-tuned ESM2 checkpoint. Configure source via
-`PXDESIGN_ESM_ISM_*` environment variables.
-
-## MSA Support
-
-Precomputed MSA can be attached to protein chains:
-
-```json
-{"proteinChain": {
-  "sequence": "MKQLLED...",
-  "msa": {
-    "precomputed_msa_dir": "path/to/msa_dir",
-    "pairing_db": "uniref100"
-  }
-}}
+# Design from YAML
+cfg = PXDesign.Config.default_config()
+cfg["input_json_path"] = "examples/inputs/23_design_pdl1_hotspots.yaml"
+cfg["dump_dir"] = "./output"
+cfg["model_name"] = "pxdesign_v0.1.0"
+cfg["gpu"] = true
+cfg["seeds"] = [101]
+PXDesign.run_infer(cfg)
 ```
 
-The MSA directory should contain `non_pairing.a3m` (and `pairing.a3m` for multi-chain tasks).
-Enable MSA consumption with `use_msa=true` in predict options.
+## Known Limitations
 
-Online/local MSA search is not implemented — only precomputed A3M files are supported.
-
-## Known Gaps
-
-1. **Template features for v1.0 models**: v1.0 models have an active TemplateEmbedder
-   (`n_blocks=2`), but Julia does not yet compute template features (distogram, unit
-   vector, pseudo-beta mask, backbone frame mask). The embedder currently receives zeros.
-   v0.5 models are unaffected (templates disabled).
-2. **REPL API for complex inputs**: `fold()` only accepts a single protein sequence string.
-   Multi-chain complexes, ligands, ions, covalent bonds, and constraints require JSON
-   input via `predict_json()`. A richer REPL API is planned.
-3. **Online MSA search**: Not implemented. Only precomputed A3M files are supported.
-4. **Amber relax**: Not implemented.
-5. **Heteromer MSA pairing**: Simplified pairing by inferred taxonomy keys with row-index
-   fallback. Full OpenFold species/taxonomic pairing is out of scope.
-6. **SMILES ligand conformers**: SMILES-to-3D coordinate generation produces different
-   3D coordinates than Python's RDKit pipeline (RDKit's internal C++ RNG is not seeded
-   by Python's `random.seed()`). This causes `ref_pos` and `frame_atom_index` to differ
-   for SMILES ligands. All other features (atom names, bonds, ref_mask, restype) match.
-   CCD ligands are unaffected. This is an inherent difference that does not affect model
-   behavior (the model is trained with random conformer augmentation).
-7. **Modified residue tokenization**: Non-standard amino acids (PTMs like SEP, MSE) and
-   modified nucleic acid bases (6OG, PSU, etc.) are tokenized differently from Python.
-   Python queries CCD `_chem_comp.type` to classify components as "PEPTIDE LINKING" (1
-   protein token) vs ligand (per-atom tokens). Julia does not yet implement this CCD
-   mol_type lookup, causing wrong token counts, MSA shape mismatches, and restype errors
-   for inputs with modified residues.
-8. **Multi-chain MSA parity**: Parity has not yet been verified for inputs with separate
-   precomputed MSAs per chain (e.g., different A3M files for chain A and chain B in a
-   heterodimer). Single-chain MSA and homomer MSA are verified.
-
-### Covalent Bond Support
-
-Covalent bonds are supported for **Protenix prediction models** (protenix_base, protenix_mini)
-via the `covalent_bonds` field in JSON input. PXDesign design models (`pxdesign_v0.1.0`)
-do not use covalent bonds — they are a binder-design model family that takes YAML input
-specifying a target structure and hotspot residues.
+1. **Online MSA search**: Not implemented. Only precomputed A3M files are supported.
+2. **Amber relax**: Not implemented.
+3. **Target 20 (complex multichain)**: 1190-token complexes exceed GPU memory for flash attention bias tensors on smaller GPUs.
+4. **SMILES conformers**: SMILES-to-3D generation produces different conformers than Python's RDKit (different internal RNG). This does not affect model behavior (trained with random conformer augmentation). CCD ligands are unaffected.
 
 ## Testing
 
@@ -358,17 +212,3 @@ specifying a target structure and hotspot residues.
 using Pkg
 Pkg.test("PXDesign")
 ```
-
-Or run the test suite directly:
-
-```bash
-julia --project=<env> test/runtests.jl
-```
-
-This covers: config validation, model listing, mixed-entity parsing, covalent bonds,
-MSA ingestion, template/ESM features, end-to-end smoke forwards for all model families,
-and CLI smoke behavior.
-
-## Developer Documentation
-
-Internal porting notes, audit logs, and architecture docs are in `porting/`.

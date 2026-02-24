@@ -158,6 +158,31 @@ function _normalize_loaded_json(value, input_path::AbstractString)
     error("Expected JSON object or array in $input_path")
 end
 
+# Resolve relative paths in design JSON tasks (structure_file, MSA dirs) against the
+# JSON file's directory, matching YAML behavior.
+function _resolve_json_paths!(tasks::AbstractVector, json_path::AbstractString)
+    base_dir = dirname(abspath(json_path))
+    for task in tasks
+        task isa AbstractDict || continue
+        cond = get(task, "condition", nothing)
+        cond isa AbstractDict || continue
+        sf = get(cond, "structure_file", nothing)
+        if sf isa AbstractString && !isempty(sf) && !isabspath(sf)
+            cond["structure_file"] = normpath(joinpath(base_dir, sf))
+        end
+        msa = get(cond, "msa", nothing)
+        msa isa AbstractDict || continue
+        for (chain_id, msa_opts) in msa
+            msa_opts isa AbstractDict || continue
+            msa_dir = get(msa_opts, "precomputed_msa_dir", nothing)
+            if msa_dir isa AbstractString && !isempty(msa_dir) && !isabspath(msa_dir)
+                msa_opts["precomputed_msa_dir"] = normpath(joinpath(base_dir, msa_dir))
+            end
+        end
+    end
+    return tasks
+end
+
 function load_input_tasks(input_path::AbstractString)
     path = abspath(input_path)
     isfile(path) || error("Input file not found: $path")
@@ -165,7 +190,9 @@ function load_input_tasks(input_path::AbstractString)
 
     if ext == ".json"
         parsed = parse_json(read(path, String))
-        return _normalize_loaded_json(parsed, path)
+        tasks = _normalize_loaded_json(parsed, path)
+        _resolve_json_paths!(tasks, path)
+        return tasks
     elseif ext == ".yaml" || ext == ".yml"
         return parse_yaml_to_json(path, nothing)
     end

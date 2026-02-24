@@ -5631,8 +5631,9 @@ function _default_task_name(input_path::AbstractString)
 end
 
 function _resolve_predict_runtime(opts::ProtenixPredictOptions)
+    resolved_name = _resolve_model_alias(opts.model_name)
     params = recommended_params(
-        opts.model_name;
+        resolved_name;
         use_default_params = opts.use_default_params,
         cycle = opts.cycle,
         step = opts.step,
@@ -5641,11 +5642,11 @@ function _resolve_predict_runtime(opts::ProtenixPredictOptions)
     )
     mkpath(opts.out_dir)
     weights_ref = if isempty(opts.weights_path)
-        default_weights_path(opts.model_name)
+        default_weights_path(resolved_name)
     else
         String(opts.weights_path)
     end
-    loaded = _load_model(opts.model_name, weights_ref; strict = opts.strict)
+    loaded = _load_model(resolved_name, weights_ref; strict = opts.strict)
     if opts.gpu
         loaded = (model = gpu(loaded.model), family = loaded.family)
     end
