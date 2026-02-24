@@ -637,7 +637,7 @@ parity comparison, matching all 27 shared feature keys.
 All 6 predictions: zero severe clashes, structurally valid. Fix 18 does not
 regress structural quality for any model family.
 
-## Remaining Failure Analysis (17 cases)
+## Remaining Failure Analysis (19 cases)
 
 ### Breakdown
 
@@ -740,7 +740,7 @@ plus v1 stress outputs. Reports in
 ## v1.0 Output Status (2026-02-24)
 
 **protenix_base_default_v1.0.0**: Input feature parity confirmed (8/8 clean
-targets, 82/100 stress — see above). Output quality assessment via
+targets, 80/100 stress — see above). Output quality assessment via
 `clean_targets/run_20260223/` full rerun. Weights loaded from local
 safetensors (`weights_safetensors_protenix_base_default_v1.0.0/`).
 
@@ -923,8 +923,8 @@ Fixes 14-16 do not regress the affected cases.
 - Parity tests MUST be run with `ka_run_env` or `cutile_run_env` to load
   the MoleculeFlow extension for SMILES support.
 - Python reference dumps are in `/tmp/v1_parity/py_dumps/`
-- Julia parity scripts: `/tmp/stress_parity_all.jl`,
-  `/home/claudey/FixingKAFA/PXDesign.jl/scripts/compare_python_input_tensors.jl`
+- Julia parity scripts: `scripts/stress_parity_v2.jl` (definitive, Fixes 1-18),
+  `scripts/compare_python_input_tensors.jl`
 - Structure check scripts: `clean_targets/scripts/validate_all.jl`,
   `clean_targets/scripts/check_v1_stress_geometry.jl`,
   `clean_targets/scripts/compare_v1_v05_stress_geometry.jl`
