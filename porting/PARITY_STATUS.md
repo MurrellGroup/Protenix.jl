@@ -29,9 +29,16 @@ key, dtype changes) do not affect the shared feature comparison.
      `make_dummy_feature()` (restype=31/gap, all positions zero)
    - v1.0 model tested on GPU with template embedder: 0 bond violations, good clashscore
 
-2. **RNA MSA**: New v1.0 feature, controlled by `use_rna_msa` config flag.
-   Rewritten MSA featurizer in v1.0.4 (`msa_featurizer.py`, `msa_utils.py`).
-   Need to implement RNA-specific MSA handling in Julia.
+2. ~~**RNA MSA**~~: **IMPLEMENTED** (2026-02-24). Julia now:
+   - Supports `use_rna_msa` keyword (default `false`, matching Python default)
+   - `use_rna_msa=true`: full RNA alignment rows included, verified against
+     Python v1.0.4 dumps (all 5 MSA features: msa, profile, has_deletion,
+     deletion_value, deletion_mean — EXACT MATCH)
+   - `use_rna_msa=false`: query-only RNA MSA, verified against Python v1.0.4
+     dumps (all 5 features MATCH)
+   - Fixed MSA gap-filling bug: non-query rows now correctly initialize
+     non-participating columns with gap (31) instead of query sequence values
+   - Tested on inputs 35 (protein+RNA with inline MSA) and 37 (RNA-only with MSA)
 
 3. **Template test data**: Template feature dumps require the PDB mmCIF database
    which is not available locally. Template-enabled Python dumps failed with

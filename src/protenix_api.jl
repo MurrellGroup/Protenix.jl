@@ -2899,6 +2899,7 @@ function _inject_task_msa_features!(
     task::AbstractDict{<:Any, <:Any},
     json_path::AbstractString;
     use_msa::Bool,
+    use_rna_msa::Bool = false,
     msa_pair_as_unpair::Bool = false,
     chain_specs::Union{Nothing, Vector{ProteinChainSpec}} = nothing,
     rna_chain_specs::Union{Nothing, Vector{RNAChainSpec}} = nothing,
@@ -3013,6 +3014,35 @@ function _inject_task_msa_features!(
         rna_features = Vector{ChainMSAFeatures}(undef, length(local_rna_specs))
         for (i, rspec) in enumerate(local_rna_specs)
             rna_features[i] = _rna_chain_msa_features(rspec, json_dir)
+        end
+
+        # When use_rna_msa=false (Python default), strip alignment rows and keep
+        # only the query row.  Python's FeatureAssemblyLine treats RNA chains as
+        # query-only when use_rna_msa is disabled.
+        if !use_rna_msa
+            for i in eachindex(rna_features)
+                cf = rna_features[i]
+                blk = cf.combined
+                seq_len = size(blk.msa, 2)
+                # Recompute profile as one-hot from query row (matching Python's
+                # query-only behavior when use_rna_msa=false).
+                n_classes = size(blk.profile, 2)
+                qprofile = zeros(Float32, seq_len, n_classes)
+                for j in 1:seq_len
+                    idx = blk.msa[1, j] + 1  # 0-indexed → 1-indexed
+                    if 1 <= idx <= n_classes
+                        qprofile[j, idx] = 1f0
+                    end
+                end
+                qonly = _chain_msa_block(
+                    blk.msa[1:1, :],
+                    blk.has_deletion[1:1, :],
+                    blk.deletion_value[1:1, :],
+                    zeros(Float32, seq_len),
+                    qprofile,
+                )
+                rna_features[i] = (combined = qonly, non_pairing = qonly, pairing = nothing, pairing_keys = nothing)
+            end
         end
 
         # Broadcast RNA MSA from sequence-level to token-level for modified bases.
@@ -3163,7 +3193,11 @@ function _inject_task_msa_features!(
     end
     total_rows > 0 || (total_rows = 1)
 
-    msa = repeat(reshape(restype_idx, 1, :), total_rows, 1)
+    # Row 1 (query) gets the full query sequence; rows 2+ default to gap (31).
+    # Chain-specific MSA writing will fill only the columns for that chain;
+    # non-participating columns in non-query rows must be gap, not query values.
+    msa = fill(Int(31), total_rows, n_tok)
+    msa[1, :] .= restype_idx
     has_deletion = zeros(Float32, total_rows, n_tok)
     deletion_value = zeros(Float32, total_rows, n_tok)
     profile = copy(restype)
@@ -3241,12 +3275,11 @@ function _inject_task_msa_features!(
         row - 1 == total_rows || error("internal error: heteromer pairing-row accounting mismatch (expected $total_rows, got $(row-1))")
     elseif is_prot_homomer_or_monomer || isempty(prot_features)
         # Python v1.0 FeatureAssemblyLine layout:
-        #   Row 1 = paired query (already correct from restype_idx initialization,
-        #           zero deletions from the zeros initialization)
+        #   Row 1 = paired query (set explicitly from chain MSA below)
         #   Rows 2..max_unpaired+1 = unpaired MSA (merged columns, shared rows)
         # All chains share the same row space; their columns are interleaved.
         # Chains with fewer unpaired rows than max_unpaired have their remaining
-        # columns stay as query residue types (from the restype_idx initialization).
+        # columns stay as gap (31) from the gap-initialized rows 2+.
         # Row 1 = paired query: set explicitly from chain MSA query rather than
         # relying on restype_idx initialization, because modified residues may
         # have MSA indices that differ from raw restype (e.g. DHA → ALA mapping).
