@@ -612,6 +612,20 @@ Added `_is_v1_model()` helper to detect model version from name.
 **Verification**: s014_ccd_4ht and s025_ccd_asa now PASS (ref_pos only) in v1.0
 parity comparison, matching all 27 shared feature keys.
 
+**Structure quality verification** (no regression from Fix 18):
+
+| Case | Model | bond_viol | clashes | severe | score |
+|------|-------|-----------|---------|--------|-------|
+| s014 4HT | mini v0.5 | 1 | 2 | 0 | 3.416 |
+| s014 4HT | base v0.5 | 0 | 2 | 0 | 1.210 |
+| s014 4HT | base v1.0 | 0 | 36 | 0 | 0.000 |
+| s025 ASA | mini v0.5 | 4 | 1 | 0 | 4.386 |
+| s025 ASA | base v0.5 | 0 | 4 | 0 | 3.255 |
+| s025 ASA | base v1.0 | 0 | 13 | 0 | 1.067 |
+
+All 6 predictions: zero severe clashes, structurally valid. Fix 18 does not
+regress structural quality for any model family.
+
 ## Remaining Failure Analysis (17 cases)
 
 ### Breakdown
