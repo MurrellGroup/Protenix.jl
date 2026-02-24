@@ -3,9 +3,11 @@ module ProtenixAPI
 using Random
 using Statistics
 using Flux: gpu, cpu
+using kalign_jll: kalign_jll
 
 import ..Device: feats_to_device, feats_to_cpu, device_ref
 import ..Data: AtomRecord, build_feature_bundle_from_atoms, load_structure_atoms
+import ..Data.Structure: _split_cif_row, _normalize_mse
 import ..Data.Constants: PROT_STD_RESIDUES_ONE_TO_THREE, PROTEIN_HEAVY_ATOMS, STD_RESIDUES_PROTENIX, DNA_STD_RESIDUES, RNA_STD_RESIDUES_NATURAL, STD_RESIDUES_WITH_GAP
 import ..Data.Design: PROT_THREE_TO_ONE
 import ..Data.Features
@@ -48,7 +50,8 @@ export ProtenixModelSpec,
     load_pxdesign,
     design,
     design_task,
-    design_target
+    design_target,
+    template_structure
 
 struct ProtenixModelSpec
     model_name::String
@@ -3688,6 +3691,761 @@ function _to_float_array(x)
     return _to_dense_array(x, Float32)
 end
 
+# ─── Template feature extraction from CIF files ──────────────────────────────
+# Extract template features from a user-provided CIF/PDB structure file.
+# Matches Python Protenix v1.0.4 TemplateHitProcessor._get_atom_coords() +
+# _extract_template_features() + TemplateFeatures.fix_template_features().
+
+# ATOM37 ordering — the 37 standard protein heavy atom types.
+# Identical to Python's constants.ATOM37 and ProtInterop's OF_ATOM_TYPES.
+const _ATOM37_NAMES = (
+    "N", "CA", "C", "CB", "O", "CG", "CG1", "CG2", "OG", "OG1",
+    "SG", "CD", "CD1", "CD2", "ND1", "ND2", "OD1", "OD2", "SD", "CE",
+    "CE1", "CE2", "CE3", "NE", "NE1", "NE2", "OE1", "OE2", "CH2", "NH1",
+    "NH2", "OH", "CZ", "CZ2", "CZ3", "NZ", "OXT",
+)
+const _ATOM37_ORDER = Dict{String, Int}(name => i - 1 for (i, name) in enumerate(_ATOM37_NAMES))
+const _ATOM37_NUM = 37
+
+# Template residue type encoding — maps 1-letter AA codes to integer indices.
+# Matches Python's encode_template_restype() in template_parser.py.
+const _TEMPLATE_RESTYPE_ENCODE = Dict{Char, Int32}(
+    'A' => 0, 'R' => 1, 'N' => 2, 'D' => 3, 'C' => 4, 'Q' => 5, 'E' => 6,
+    'G' => 7, 'H' => 8, 'I' => 9, 'L' => 10, 'K' => 11, 'M' => 12, 'F' => 13,
+    'P' => 14, 'S' => 15, 'T' => 16, 'W' => 17, 'Y' => 18, 'V' => 19,
+    'X' => 20, 'U' => 4, 'B' => 3, 'Z' => 6, 'J' => 20, 'O' => 20, '-' => 31,
+)
+
+# 3-letter → 1-letter standard amino acid mapping.
+# Non-standard residues (MSE, SEC, etc.) map to 'X' via the default, matching
+# Python BioPython's behavior where only standard AAs get one-letter codes.
+# MSE→MET normalization happens separately at the atom coordinate level.
+const _AA_3TO1 = Dict{String, Char}(
+    "ALA" => 'A', "ARG" => 'R', "ASN" => 'N', "ASP" => 'D', "CYS" => 'C',
+    "GLN" => 'Q', "GLU" => 'E', "GLY" => 'G', "HIS" => 'H', "ILE" => 'I',
+    "LEU" => 'L', "LYS" => 'K', "MET" => 'M', "PHE" => 'F', "PRO" => 'P',
+    "SER" => 'S', "THR" => 'T', "TRP" => 'W', "TYR" => 'Y', "VAL" => 'V',
+    "UNK" => 'X',
+)
+
+# ATOM14 per-residue canonical atom names (padded to 14).
+# Matches Python's ATOM14_PADDED and ProtInterop's OF_RESTYPE_NAME_TO_ATOM14_NAMES.
+const _ATOM14_NAMES = Dict{String, NTuple{14, String}}(
+    "ALA" => ("N", "CA", "C", "O", "CB", "", "", "", "", "", "", "", "", ""),
+    "ARG" => ("N", "CA", "C", "O", "CB", "CG", "CD", "NE", "CZ", "NH1", "NH2", "", "", ""),
+    "ASN" => ("N", "CA", "C", "O", "CB", "CG", "OD1", "ND2", "", "", "", "", "", ""),
+    "ASP" => ("N", "CA", "C", "O", "CB", "CG", "OD1", "OD2", "", "", "", "", "", ""),
+    "CYS" => ("N", "CA", "C", "O", "CB", "SG", "", "", "", "", "", "", "", ""),
+    "GLN" => ("N", "CA", "C", "O", "CB", "CG", "CD", "OE1", "NE2", "", "", "", "", ""),
+    "GLU" => ("N", "CA", "C", "O", "CB", "CG", "CD", "OE1", "OE2", "", "", "", "", ""),
+    "GLY" => ("N", "CA", "C", "O", "", "", "", "", "", "", "", "", "", ""),
+    "HIS" => ("N", "CA", "C", "O", "CB", "CG", "ND1", "CD2", "CE1", "NE2", "", "", "", ""),
+    "ILE" => ("N", "CA", "C", "O", "CB", "CG1", "CG2", "CD1", "", "", "", "", "", ""),
+    "LEU" => ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "", "", "", "", "", ""),
+    "LYS" => ("N", "CA", "C", "O", "CB", "CG", "CD", "CE", "NZ", "", "", "", "", ""),
+    "MET" => ("N", "CA", "C", "O", "CB", "CG", "SD", "CE", "", "", "", "", "", ""),
+    "PHE" => ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ", "", "", ""),
+    "PRO" => ("N", "CA", "C", "O", "CB", "CG", "CD", "", "", "", "", "", "", ""),
+    "SER" => ("N", "CA", "C", "O", "CB", "OG", "", "", "", "", "", "", "", ""),
+    "THR" => ("N", "CA", "C", "O", "CB", "OG1", "CG2", "", "", "", "", "", "", ""),
+    "TRP" => ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "NE1", "CE2", "CE3", "CZ2", "CZ3", "CH2"),
+    "TYR" => ("N", "CA", "C", "O", "CB", "CG", "CD1", "CD2", "CE1", "CE2", "CZ", "OH", "", ""),
+    "VAL" => ("N", "CA", "C", "O", "CB", "CG1", "CG2", "", "", "", "", "", "", ""),
+)
+
+# Build PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37: (21, 24) matrix.
+# For each protein restype (0-19 + UNK=20), maps dense atom index (1:24) to ATOM37 index (0-based).
+# Matches Python's PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37.
+const _PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37 = let
+    restypes_1letter = ('A', 'R', 'N', 'D', 'C', 'Q', 'E', 'G', 'H', 'I',
+                        'L', 'K', 'M', 'F', 'P', 'S', 'T', 'W', 'Y', 'V')
+    n_dense = 24  # max across DENSE_ATOM (nucleic acids have 23-24 atoms)
+    mat = zeros(Int32, length(restypes_1letter) + 1, n_dense)  # +1 for UNK
+    for (rt_idx, rt) in enumerate(restypes_1letter)
+        resname3 = string(get(Dict(
+            'A' => "ALA", 'R' => "ARG", 'N' => "ASN", 'D' => "ASP", 'C' => "CYS",
+            'Q' => "GLN", 'E' => "GLU", 'G' => "GLY", 'H' => "HIS", 'I' => "ILE",
+            'L' => "LEU", 'K' => "LYS", 'M' => "MET", 'F' => "PHE", 'P' => "PRO",
+            'S' => "SER", 'T' => "THR", 'W' => "TRP", 'Y' => "TYR", 'V' => "VAL",
+        ), rt, "UNK"))
+        atom14 = get(_ATOM14_NAMES, resname3, nothing)
+        atom14 === nothing && continue
+        for (j, name) in enumerate(atom14)
+            if j > n_dense
+                break
+            end
+            if !isempty(name) && haskey(_ATOM37_ORDER, name)
+                mat[rt_idx, j] = _ATOM37_ORDER[name]
+            end
+        end
+    end
+    # UNK row (index 21) stays all zeros
+    mat
+end
+
+"""
+    _kalign_align(query, target) → Dict{Int,Int}
+
+Align two sequences using the Kalign binary from kalign_jll
+(matching Python Protenix's alignment).
+Returns a mapping Dict{Int,Int} from query position (1-based) to target position (1-based).
+Only aligned (non-gap) pairs are included.
+"""
+function _kalign_align(query::AbstractString, target::AbstractString)
+    tmpdir = mktempdir()
+    input_path = joinpath(tmpdir, "input.fasta")
+    output_path = joinpath(tmpdir, "output.fasta")
+    try
+        open(input_path, "w") do io
+            println(io, ">sequence 1")
+            println(io, query)
+            println(io, ">sequence 2")
+            println(io, target)
+        end
+
+        # Run kalign from JLL (suppress stderr which contains version/citation info)
+        cmd = `$(kalign_jll.kalign()) -i $input_path -o $output_path -format fasta`
+        run(pipeline(cmd; stdout=devnull, stderr=devnull); wait=true)
+
+        # Parse output FASTA
+        lines = readlines(output_path)
+        seqs = String[]
+        current_seq = String[]
+        for line in lines
+            stripped = strip(line)
+            isempty(stripped) && continue
+            if startswith(stripped, '>')
+                if !isempty(current_seq)
+                    push!(seqs, join(current_seq))
+                    current_seq = String[]
+                end
+            else
+                push!(current_seq, stripped)
+            end
+        end
+        !isempty(current_seq) && push!(seqs, join(current_seq))
+
+        length(seqs) >= 2 || error("Kalign output: expected 2 aligned sequences, got $(length(seqs))")
+
+        q_aln, t_aln = seqs[1], seqs[2]
+
+        # Build mapping: query_pos (1-based) → target_pos (1-based)
+        mapping = Dict{Int, Int}()
+        q_idx, t_idx = 0, 0
+        for (qa, ta) in zip(q_aln, t_aln)
+            if qa != '-'
+                q_idx += 1
+            end
+            if ta != '-'
+                t_idx += 1
+            end
+            if qa != '-' && ta != '-'
+                mapping[q_idx] = t_idx
+            end
+        end
+
+        return mapping
+    finally
+        rm(tmpdir; recursive=true, force=true)
+    end
+end
+
+"""
+    _needleman_wunsch(query, target; match_score=1, mismatch_score=-1, gap_penalty=-1)
+
+Simple Needleman-Wunsch global sequence alignment. Returns a mapping
+Dict{Int,Int} from query position (1-based) to target position (1-based).
+Only aligned (non-gap) pairs are included.
+"""
+function _needleman_wunsch(
+    query::AbstractString,
+    target::AbstractString;
+    match_score::Int = 1,
+    mismatch_score::Int = -1,
+    gap_penalty::Int = -1,
+)
+    m = length(query)
+    n = length(target)
+
+    # Score matrix
+    H = zeros(Int, m + 1, n + 1)
+    for i in 1:(m + 1)
+        H[i, 1] = (i - 1) * gap_penalty
+    end
+    for j in 1:(n + 1)
+        H[1, j] = (j - 1) * gap_penalty
+    end
+    for i in 2:(m + 1), j in 2:(n + 1)
+        s = query[i - 1] == target[j - 1] ? match_score : mismatch_score
+        H[i, j] = max(H[i - 1, j - 1] + s, H[i - 1, j] + gap_penalty, H[i, j - 1] + gap_penalty)
+    end
+
+    # Traceback
+    mapping = Dict{Int, Int}()
+    i, j = m + 1, n + 1
+    while i > 1 && j > 1
+        s = query[i - 1] == target[j - 1] ? match_score : mismatch_score
+        if H[i, j] == H[i - 1, j - 1] + s
+            mapping[i - 1] = j - 1  # 1-based
+            i -= 1
+            j -= 1
+        elseif H[i, j] == H[i - 1, j] + gap_penalty
+            i -= 1
+        else
+            j -= 1
+        end
+    end
+    return mapping
+end
+
+"""
+    _parse_cif_seqres(cif_path, chain_id) → (seqres_seq, auth_seq_num_map)
+
+Parse the `_pdbx_poly_seq_scheme` table from a CIF file to get the full SEQRES
+sequence for a chain, including unresolved residues. Returns:
+- `seqres_seq`: full one-letter sequence string (matching Python's chain_to_seqres)
+- `auth_seq_num_map`: Dict mapping 1-based SEQRES position → auth_seq_num (Int),
+  only for resolved residues (those with auth_seq_num != "?")
+
+Returns `(nothing, nothing)` if the table is not present in the CIF.
+"""
+function _parse_cif_seqres(cif_path::AbstractString, chain_id::AbstractString)
+    lines = readlines(cif_path)
+
+    # Find the _pdbx_poly_seq_scheme loop
+    field_names = String[]
+    data_lines = String[]
+    in_loop = false
+    in_fields = false
+
+    for line in lines
+        stripped = rstrip(line)
+        if in_loop
+            if startswith(stripped, "_pdbx_poly_seq_scheme.")
+                push!(field_names, stripped)
+                in_fields = true
+            elseif in_fields && (startswith(stripped, "_") || stripped == "#" || startswith(stripped, "loop_"))
+                break  # end of this loop block
+            elseif in_fields && !isempty(stripped)
+                push!(data_lines, stripped)
+            end
+        elseif startswith(stripped, "_pdbx_poly_seq_scheme.")
+            push!(field_names, stripped)
+            in_loop = true
+            in_fields = true
+        end
+    end
+
+    isempty(field_names) && return (nothing, nothing, nothing)
+
+    # Find column indices
+    asym_col = findfirst(f -> endswith(f, ".asym_id"), field_names)
+    mon_col = findfirst(f -> endswith(f, ".mon_id"), field_names)
+    seq_col = findfirst(f -> endswith(f, ".seq_id"), field_names)
+    strand_col = findfirst(f -> endswith(f, ".pdb_strand_id"), field_names)
+
+    (asym_col === nothing || mon_col === nothing || seq_col === nothing) && return (nothing, nothing, nothing)
+
+    # Match chain: try pdb_strand_id (auth chain ID, what users pass) first,
+    # then fall back to asym_id (label chain ID)
+    match_col = asym_col
+    if strand_col !== nothing
+        has_strand = any(data_lines) do dline
+            tokens = split(dline)
+            length(tokens) >= length(field_names) && tokens[strand_col] == chain_id
+        end
+        if has_strand
+            match_col = strand_col
+        end
+    end
+
+    # Parse data rows for the matched chain.
+    # Include ALL rows (even disordered duplicates with the same seq_id),
+    # matching Python's TemplateParser behavior.
+    # The atom mapping uses sequential numbering: SEQRES position i → label_seq_id i.
+    # This matches Python, where seqres_to_structure maps positions to sequential
+    # auth_seq_num values. When disordered duplicates cause more SEQRES entries
+    # than structural residues, the excess positions simply have no atom records.
+    seqres_chars = Char[]
+    seq_id_map = Dict{Int, Int}()  # SEQRES position (1-based) → label_seq_id (= position index)
+    label_asym_id = nothing
+
+    for dline in data_lines
+        tokens = split(dline)
+        length(tokens) < length(field_names) && continue
+        tokens[match_col] == chain_id || continue
+
+        if label_asym_id === nothing
+            label_asym_id = String(tokens[asym_col])
+        end
+
+        mon_id = String(tokens[mon_col])
+        one_letter = get(_AA_3TO1, mon_id, 'X')
+        push!(seqres_chars, one_letter)
+
+        seqres_pos = length(seqres_chars)
+        # Sequential mapping: position i → label_seq_id i
+        seq_id_map[seqres_pos] = seqres_pos
+    end
+
+    isempty(seqres_chars) && return (nothing, nothing, nothing)
+    return (String(seqres_chars), seq_id_map, label_asym_id)
+end
+
+"""
+    _parse_template_cif_atoms(cif_path, label_chain_id)
+
+Parse `_atom_site` from a CIF file for template feature extraction.
+
+Uses `label_asym_id` for chain matching and `label_seq_id` for residue numbering
+(matching `seq_id` from `_pdbx_poly_seq_scheme`). This ensures consistent numbering
+regardless of auth_seq_id quirks (insertion codes, negative numbers, offsets).
+
+Handles:
+- First model only (`pdbx_PDB_model_num`)
+- Altloc selection matching BioPython's behavior:
+  * Atom disorder (same residue name): first non-'.' altloc (=A, highest occupancy)
+  * Residue disorder (different names): last non-'.' altloc (=B+, last conformer)
+  * Atoms with altloc '.' are always kept
+- HETATM records (for MSE, SEP, TPO etc.)
+- MSE → MET normalization
+
+Returns `(atoms_by_seqid, resname_by_seqid)` where:
+- `atoms_by_seqid`: Dict{Int, Vector{NamedTuple{(:name,:x,:y,:z), Tuple{String,Float32,Float32,Float32}}}}`
+- `resname_by_seqid`: Dict{Int, String}
+"""
+function _parse_template_cif_atoms(cif_path::AbstractString, label_chain_id::AbstractString)
+    lines = readlines(cif_path)
+
+    # Find _atom_site loop
+    field_names = String[]
+    data_start = 0
+    i = 1
+    while i <= length(lines)
+        if strip(lines[i]) != "loop_"
+            i += 1
+            continue
+        end
+        j = i + 1
+        flds = String[]
+        while j <= length(lines)
+            s = strip(lines[j])
+            startswith(s, "_") || break
+            push!(flds, s)
+            j += 1
+        end
+        if !isempty(flds) && all(startswith(f, "_atom_site.") for f in flds)
+            field_names = flds
+            data_start = j
+            break
+        end
+        i = j
+    end
+    isempty(field_names) && error("No _atom_site loop found in $cif_path")
+
+    # Column index lookups
+    function _col(name)
+        idx = findfirst(==(name), field_names)
+        idx === nothing && return 0
+        return idx
+    end
+
+    col_group    = _col("_atom_site.group_PDB")
+    col_asym     = _col("_atom_site.label_asym_id")
+    col_seqid    = _col("_atom_site.label_seq_id")
+    col_comp     = _col("_atom_site.label_comp_id")
+    col_atom     = _col("_atom_site.label_atom_id")
+    col_altid    = _col("_atom_site.label_alt_id")
+    col_x        = _col("_atom_site.Cartn_x")
+    col_y        = _col("_atom_site.Cartn_y")
+    col_z        = _col("_atom_site.Cartn_z")
+    col_model    = _col("_atom_site.pdbx_PDB_model_num")
+    col_element  = _col("_atom_site.type_symbol")
+    col_occ      = _col("_atom_site.occupancy")
+
+    (col_asym == 0 || col_seqid == 0 || col_comp == 0 || col_atom == 0) &&
+        error("Missing required _atom_site columns in $cif_path")
+    (col_x == 0 || col_y == 0 || col_z == 0) &&
+        error("Missing coordinate columns in $cif_path")
+
+    n_fields = length(field_names)
+    pool = String[]
+    keep_model = nothing
+
+    # Phase 1: Parse ALL atoms (including all altlocs) with their altloc labels + occupancies.
+    # Phase 2 will post-filter to match BioPython's altloc selection behavior.
+    RawAtom = @NamedTuple{name::String, x::Float32, y::Float32, z::Float32,
+                          altloc::String, resname::String, occ::Float32}
+    raw_atoms_by_seqid = Dict{Int, Vector{RawAtom}}()
+
+    j = data_start
+    while j <= length(lines)
+        row = strip(lines[j])
+        if isempty(row)
+            j += 1
+            continue
+        end
+        if row == "#" || row == "loop_" || startswith(row, "_") || startswith(row, "data_")
+            if isempty(pool)
+                break
+            end
+        else
+            append!(pool, _split_cif_row(row))
+            j += 1
+        end
+
+        while length(pool) >= n_fields
+            toks = pool[1:n_fields]
+            pool = length(pool) == n_fields ? String[] : pool[(n_fields + 1):end]
+
+            # Group filter: ATOM or HETATM
+            if col_group > 0
+                grp = uppercase(toks[col_group])
+                (grp == "ATOM" || grp == "HETATM") || continue
+            end
+
+            # Model filter: first model only
+            if col_model > 0
+                model_s = toks[col_model]
+                model_num = tryparse(Int, model_s)
+                if model_num !== nothing
+                    if keep_model === nothing
+                        keep_model = model_num
+                    elseif model_num != keep_model
+                        continue
+                    end
+                end
+            end
+
+            # Chain filter
+            toks[col_asym] == label_chain_id || continue
+
+            # Parse residue sequence ID
+            seqid = tryparse(Int, toks[col_seqid])
+            seqid === nothing && continue
+
+            # Atom name & residue name
+            atom_name = uppercase(toks[col_atom])
+            isempty(atom_name) && continue
+            res_name = uppercase(toks[col_comp])
+
+            # Parse altloc and occupancy (store for post-filtering)
+            alt_id = col_altid > 0 ? toks[col_altid] : "."
+            occ = col_occ > 0 ? something(tryparse(Float32, toks[col_occ]), 1.0f0) : 1.0f0
+
+            # Parse coordinates
+            x = tryparse(Float32, toks[col_x])
+            y = tryparse(Float32, toks[col_y])
+            z = tryparse(Float32, toks[col_z])
+            (x === nothing || y === nothing || z === nothing) && continue
+
+            # Normalize MSE → MET
+            element = col_element > 0 ? uppercase(toks[col_element]) : ""
+            res_name, atom_name, _ = _normalize_mse(res_name, atom_name, element)
+
+            # Store (all altlocs, will post-filter)
+            v = get!(Vector{RawAtom}, raw_atoms_by_seqid, seqid)
+            push!(v, RawAtom((atom_name, x, y, z, alt_id, res_name, occ)))
+        end
+    end
+
+    # Phase 2: Post-filter by altloc, matching BioPython's behavior:
+    #
+    # BioPython has TWO different altloc selection strategies:
+    #   - DisorderedAtom (same residue name, different positions): selects PER-ATOM by
+    #     highest occupancy. When occupancies tie, first altloc (A) wins.
+    #   - DisorderedResidue (different residue names at same position): selects the LAST
+    #     conformer added (last entry in CIF order = highest altloc letter), returning
+    #     all atoms from that conformer.
+    #
+    # We detect the two cases by checking if multiple residue names appear at a seqid.
+    TemplateAtom = @NamedTuple{name::String, x::Float32, y::Float32, z::Float32}
+    atoms_by_seqid = Dict{Int, Vector{TemplateAtom}}()
+    resname_by_seqid = Dict{Int, String}()
+
+    for (seqid, raw_atoms) in raw_atoms_by_seqid
+        # Check if this position has residue-level disorder (multiple residue names)
+        resnames = Set{String}()
+        for ra in raw_atoms
+            push!(resnames, ra.resname)
+        end
+        has_residue_disorder = length(resnames) > 1
+
+        filtered = TemplateAtom[]
+        sel_resname = "UNK"
+
+        if has_residue_disorder
+            # Residue disorder: keep LAST non-"." altloc (matches BioPython DisorderedResidue)
+            last_alt = nothing
+            for ra in raw_atoms
+                if ra.altloc != "." && ra.altloc != ""
+                    last_alt = ra.altloc
+                end
+            end
+            for ra in raw_atoms
+                if ra.altloc == "." || ra.altloc == ""
+                    push!(filtered, TemplateAtom((ra.name, ra.x, ra.y, ra.z)))
+                    sel_resname = ra.resname
+                elseif last_alt !== nothing && ra.altloc == last_alt
+                    push!(filtered, TemplateAtom((ra.name, ra.x, ra.y, ra.z)))
+                    sel_resname = ra.resname
+                end
+            end
+        else
+            # Atom disorder: per-atom, pick highest occupancy (BioPython DisorderedAtom).
+            # For atoms with altloc ".", keep as-is.
+            # For atoms with non-"." altloc, group by atom_name and pick highest occ.
+            # Build best altloc per atom_name (highest occupancy; ties → first altloc)
+            best_alt = Dict{String, Tuple{String, Float32}}()  # atom_name → (altloc, occ)
+            for ra in raw_atoms
+                (ra.altloc == "." || ra.altloc == "") && continue
+                key = ra.name
+                if !haskey(best_alt, key)
+                    best_alt[key] = (ra.altloc, ra.occ)
+                else
+                    _, prev_occ = best_alt[key]
+                    if ra.occ > prev_occ
+                        best_alt[key] = (ra.altloc, ra.occ)
+                    end
+                end
+            end
+
+            for ra in raw_atoms
+                if ra.altloc == "." || ra.altloc == ""
+                    push!(filtered, TemplateAtom((ra.name, ra.x, ra.y, ra.z)))
+                    sel_resname = ra.resname
+                elseif haskey(best_alt, ra.name) && ra.altloc == best_alt[ra.name][1]
+                    push!(filtered, TemplateAtom((ra.name, ra.x, ra.y, ra.z)))
+                    sel_resname = ra.resname
+                end
+            end
+        end
+
+        if !isempty(filtered)
+            atoms_by_seqid[seqid] = filtered
+            resname_by_seqid[seqid] = sel_resname
+        end
+    end
+
+    return (atoms_by_seqid, resname_by_seqid)
+end
+
+"""
+    _extract_template_from_cif(query_sequence, cif_path, chain_id; zero_center=true)
+
+Extract template features from a CIF file for a given query protein sequence.
+
+Uses the CIF's SEQRES (`_pdbx_poly_seq_scheme`) to get the full template sequence
+including unresolved residues (matching Python Protenix's BioPython-based parsing).
+Falls back to ATOM-record-only parsing if SEQRES is not available.
+
+Returns a Dict with:
+- `"template_restype"` — (1, N_query) Int matrix, 0-indexed residue types
+- `"template_all_atom_mask"` — (1, N_query, 24) Float32 array
+- `"template_all_atom_positions"` — (1, N_query, 24, 3) Float32 array
+
+These can be passed directly to `_derive_template_features!()` to produce the
+distogram, unit_vector, and mask features needed by the template embedder.
+"""
+function _extract_template_from_cif(
+    query_sequence::AbstractString,
+    cif_path::AbstractString,
+    chain_id::AbstractString;
+    zero_center::Bool = true,
+)
+    # 1. Get SEQRES sequence (full, including unresolved residues)
+    #    seq_id_map maps SEQRES pos → seq_id (= label_seq_id in _atom_site)
+    seqres_seq, seq_id_map, label_chain = _parse_cif_seqres(cif_path, chain_id)
+
+    # 2. Parse ATOM records with proper altloc filtering + label_seq_id numbering
+    if seqres_seq !== nothing && seq_id_map !== nothing && label_chain !== nothing
+        atoms_by_seqid, resname_by_seqid = _parse_template_cif_atoms(cif_path, label_chain)
+        n_template = length(seqres_seq)
+        template_seq_str = seqres_seq
+        seqres_to_seqid = seq_id_map  # SEQRES pos → label_seq_id
+    else
+        # Fallback: no SEQRES available, parse atoms and build sequence from ATOM records
+        # Try label_asym_id = chain_id directly
+        atoms_by_seqid, resname_by_seqid = _parse_template_cif_atoms(cif_path, chain_id)
+        if isempty(atoms_by_seqid)
+            error("Chain '$chain_id' not found in $cif_path (no SEQRES and no ATOM records)")
+        end
+        seqids_ordered = sort(collect(keys(atoms_by_seqid)))
+        n_template = length(seqids_ordered)
+        template_seq_str = String([get(_AA_3TO1, resname_by_seqid[sid], 'X') for sid in seqids_ordered])
+        seqres_to_seqid = Dict{Int, Int}(i => seqids_ordered[i] for i in 1:n_template)
+    end
+
+    # 3. Fill atom37 arrays for the template chain
+    all_pos = zeros(Float32, n_template, _ATOM37_NUM, 3)
+    all_mask = zeros(Float32, n_template, _ATOM37_NUM)
+
+    for si in 1:n_template
+        haskey(seqres_to_seqid, si) || continue
+        sid = seqres_to_seqid[si]
+        haskey(atoms_by_seqid, sid) || continue
+
+        res_atoms = atoms_by_seqid[sid]
+        resname = get(resname_by_seqid, sid, "UNK")
+
+        for a in res_atoms
+            if haskey(_ATOM37_ORDER, a.name)
+                idx = _ATOM37_ORDER[a.name] + 1  # 1-based
+                all_pos[si, idx, 1] = a.x
+                all_pos[si, idx, 2] = a.y
+                all_pos[si, idx, 3] = a.z
+                all_mask[si, idx] = 1.0f0
+            end
+        end
+
+        # Correct Arginine NH1/NH2 swap (matching Python)
+        if resname == "ARG"
+            cd_idx = _ATOM37_ORDER["CD"] + 1
+            nh1_idx = _ATOM37_ORDER["NH1"] + 1
+            nh2_idx = _ATOM37_ORDER["NH2"] + 1
+            if all_mask[si, cd_idx] > 0 && all_mask[si, nh1_idx] > 0 && all_mask[si, nh2_idx] > 0
+                d1 = sqrt(sum((all_pos[si, nh1_idx, :] .- all_pos[si, cd_idx, :]) .^ 2))
+                d2 = sqrt(sum((all_pos[si, nh2_idx, :] .- all_pos[si, cd_idx, :]) .^ 2))
+                if d1 > d2
+                    all_pos[si, [nh1_idx, nh2_idx], :] = all_pos[si, [nh2_idx, nh1_idx], :]
+                    all_mask[si, [nh1_idx, nh2_idx]] = all_mask[si, [nh2_idx, nh1_idx]]
+                end
+            end
+        end
+    end
+
+    # 6. Zero-center positions (matching Python default)
+    if zero_center
+        mask_bool = all_mask .> 0
+        n_filled = sum(mask_bool)
+        if n_filled > 0
+            center = zeros(Float32, 3)
+            cnt = 0
+            for ri in 1:n_template, ai in 1:_ATOM37_NUM
+                if mask_bool[ri, ai]
+                    center .+= all_pos[ri, ai, :]
+                    cnt += 1
+                end
+            end
+            center ./= cnt
+            for ri in 1:n_template, ai in 1:_ATOM37_NUM
+                if mask_bool[ri, ai]
+                    all_pos[ri, ai, :] .-= center
+                end
+            end
+        end
+    end
+
+    # 7. Align query to template (SEQRES) sequence
+    n_query = length(query_sequence)
+    mapping = _kalign_align(query_sequence, template_seq_str)
+
+    n_aligned = length(mapping)
+    n_identical = count(kv -> query_sequence[kv.first] == template_seq_str[kv.second], mapping)
+
+    # 8. Map template atoms to query positions (atom37 format)
+    out_pos = zeros(Float32, n_query, _ATOM37_NUM, 3)
+    out_mask = zeros(Float32, n_query, _ATOM37_NUM)
+    out_seq = fill('-', n_query)
+
+    for (q_idx, t_idx) in mapping
+        out_pos[q_idx, :, :] .= all_pos[t_idx, :, :]
+        out_mask[q_idx, :] .= all_mask[t_idx, :]
+        out_seq[q_idx] = template_seq_str[t_idx]
+    end
+
+    # Encode residue types
+    out_aatype = Int32[get(_TEMPLATE_RESTYPE_ENCODE, c, Int32(20)) for c in out_seq]
+
+    # 8. Convert from atom37 to dense 24-atom representation
+    # Matches Python's fix_template_features(): uses PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37
+    dense_pos = zeros(Float32, 1, n_query, 24, 3)
+    dense_mask = zeros(Float32, 1, n_query, 24)
+    restype_mat = zeros(Int32, 1, n_query)
+
+    for qi in 1:n_query
+        rt = out_aatype[qi]  # 0-indexed
+        restype_mat[1, qi] = rt
+        rt_row = clamp(rt + 1, 1, 21)  # 1-indexed into _PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37
+        for di in 1:24
+            a37_idx = _PROTEIN_AATYPE_DENSE_ATOM_TO_ATOM37[rt_row, di]  # 0-indexed atom37
+            a37_idx1 = a37_idx + 1  # 1-indexed
+            dense_pos[1, qi, di, :] .= out_pos[qi, a37_idx1, :]
+            dense_mask[1, qi, di] = out_mask[qi, a37_idx1]
+        end
+        # Mask positions where mask is zero
+        for di in 1:24
+            if dense_mask[1, qi, di] == 0
+                dense_pos[1, qi, di, :] .= 0
+            end
+        end
+    end
+
+    return Dict{String, Any}(
+        "template_restype" => restype_mat,                    # (1, N_query)
+        "template_all_atom_mask" => dense_mask,               # (1, N_query, 24)
+        "template_all_atom_positions" => dense_pos,           # (1, N_query, 24, 3)
+        "_alignment_info" => (
+            n_aligned = n_aligned,
+            n_identical = n_identical,
+            template_length = n_template,
+            query_length = n_query,
+        ),
+    )
+end
+
+"""
+    template_structure(cif_path, chain_id; chains=nothing)
+
+Build template features from a CIF/PDB structure file for use with the folding API.
+Returns a Dict that can be passed as `template_features` in `protenix_task()`.
+
+# Example
+```julia
+h = load_protenix("protenix_base_default_v1.0.0"; gpu=true)
+tmpl = template_structure("structures/1ubq.cif", "A")
+task = protenix_task(
+    protein_chain("MQIFVKTLTGKTITLEVEPS..."),
+    template_features = tmpl,
+)
+r = fold(h, task)
+```
+"""
+function template_structure(
+    cif_path::AbstractString,
+    chain_id::AbstractString,
+)
+    return Dict{String, Any}(
+        "_template_cif_path" => abspath(cif_path),
+        "_template_chain_id" => chain_id,
+    )
+end
+
+"""
+    _extract_task_protein_sequence(task) → String
+
+Extract the concatenated protein sequence from a task Dict (as built by `protenix_task()`).
+Returns the concatenation of all protein chain sequences in entity order.
+"""
+function _extract_task_protein_sequence(task::AbstractDict)
+    seqs = String[]
+    sequences = get(task, "sequences", Any[])
+    for entity in sequences
+        ed = _as_string_dict(entity)
+        if haskey(ed, "protein")
+            pd = _as_string_dict(ed["protein"])
+            seq = get(pd, "sequence", nothing)
+            seq !== nothing && push!(seqs, String(seq))
+        elseif haskey(ed, "proteinChain")
+            pd = _as_string_dict(ed["proteinChain"])
+            seq = get(pd, "sequence", nothing)
+            seq !== nothing && push!(seqs, String(seq))
+        end
+    end
+    isempty(seqs) && error("No protein chains found in task — templates require at least one protein entity.")
+    return join(seqs, "")
+end
+
 function _inject_task_template_features!(
     feat::Dict{String, Any},
     task::AbstractDict{<:Any, <:Any},
@@ -3697,25 +4455,71 @@ function _inject_task_template_features!(
     tf_any isa AbstractDict || error("task.template_features must be an object when provided.")
     tf = _as_string_dict(tf_any)
 
+    n_tok = size(feat["restype"], 1)
+
+    # ── Lazy CIF path: resolve template_structure() dict ──
+    if haskey(tf, "_template_cif_path")
+        cif_path = tf["_template_cif_path"]
+        chain_id = tf["_template_chain_id"]
+
+        # Extract protein sequence from the task entities
+        protein_seq = _extract_task_protein_sequence(task)
+        n_protein = length(protein_seq)
+
+        # Extract template features aligned to the protein sequence
+        tmpl = _extract_template_from_cif(protein_seq, cif_path, chain_id)
+        info = tmpl["_alignment_info"]
+        @info "Template: $(info.n_aligned) aligned positions, $(info.n_identical) identical " *
+              "($(round(100 * info.n_identical / max(info.n_aligned, 1); digits=1))% identity)"
+
+        if n_protein == n_tok
+            # Pure protein task — template covers all tokens
+            feat["template_restype"] = tmpl["template_restype"]
+            feat["template_all_atom_mask"] = tmpl["template_all_atom_mask"]
+            feat["template_all_atom_positions"] = tmpl["template_all_atom_positions"]
+        else
+            # Multi-entity task — embed protein template into full token dimension
+            restype_vec = feat["restype"]  # (n_tok,)
+            protein_indices = findall(i -> 0 <= restype_vec[i] <= 19, 1:n_tok)
+
+            full_restype = fill(Int32(31), 1, n_tok)  # gap token
+            full_mask = zeros(Float32, 1, n_tok, 24)
+            full_pos = zeros(Float32, 1, n_tok, 24, 3)
+
+            for (pi, ti) in enumerate(protein_indices)
+                if pi <= n_protein
+                    full_restype[1, ti] = tmpl["template_restype"][1, pi]
+                    full_mask[1, ti, :] .= tmpl["template_all_atom_mask"][1, pi, :]
+                    full_pos[1, ti, :, :] .= tmpl["template_all_atom_positions"][1, pi, :, :]
+                end
+            end
+
+            feat["template_restype"] = full_restype
+            feat["template_all_atom_mask"] = full_mask
+            feat["template_all_atom_positions"] = full_pos
+        end
+        return feat
+    end
+
+    # ── Pre-computed tensor path ──
     required = ("template_restype", "template_all_atom_mask", "template_all_atom_positions")
     all(haskey(tf, k) for k in required) || error(
         "template_features must include template_restype/template_all_atom_mask/template_all_atom_positions.",
     )
 
-    n_tok = size(feat["restype"], 1)
     template_restype = _to_int_array(tf["template_restype"])
     template_mask = _to_float_array(tf["template_all_atom_mask"])
     template_pos = _to_float_array(tf["template_all_atom_positions"])
 
     ndims(template_restype) == 2 || error("template_restype must be rank-2 [N_template, N_token].")
-    ndims(template_mask) == 3 || error("template_all_atom_mask must be rank-3 [N_template, N_token, 37].")
-    ndims(template_pos) == 4 || error("template_all_atom_positions must be rank-4 [N_template, N_token, 37, 3].")
+    ndims(template_mask) == 3 || error("template_all_atom_mask must be rank-3 [N_template, N_token, N_atom].")
+    ndims(template_pos) == 4 || error("template_all_atom_positions must be rank-4 [N_template, N_token, N_atom, 3].")
 
     size(template_restype, 2) == n_tok || error("template_restype token length mismatch.")
     size(template_mask, 2) == n_tok || error("template_all_atom_mask token length mismatch.")
     size(template_pos, 2) == n_tok || error("template_all_atom_positions token length mismatch.")
-    size(template_mask, 3) == 37 || error("template_all_atom_mask must have 37 atom slots.")
-    size(template_pos, 3) == 37 || error("template_all_atom_positions must have 37 atom slots.")
+    size(template_mask, 3) == 24 || error("template_all_atom_mask must have 24 dense atom slots.")
+    size(template_pos, 3) == 24 || error("template_all_atom_positions must have 24 dense atom slots.")
     size(template_pos, 4) == 3 || error("template_all_atom_positions final dimension must be xyz=3.")
     size(template_restype, 1) == size(template_mask, 1) == size(template_pos, 1) || error(
         "template feature N_template dimensions must match.",
@@ -5787,7 +6591,7 @@ function ion(
 end
 
 """
-    protenix_task(entities...; name=nothing, constraint=nothing, covalent_bonds=nothing) → Dict
+    protenix_task(entities...; name, constraint, covalent_bonds, template_features) → Dict
 
 Assemble entity Dicts (from [`protein_chain`](@ref), [`rna_chain`](@ref),
 [`dna_chain`](@ref), [`ligand`](@ref), [`ion`](@ref)) into a task Dict
@@ -5796,6 +6600,9 @@ suitable for `fold(handle, task)`.
 `covalent_bonds` is an optional vector of bond specification Dicts, each with
 keys `entity1`, `position1`, `atom1`, `entity2`, `position2`, `atom2`.
 
+`template_features` is an optional Dict from [`template_structure`](@ref) for
+models that support template conditioning (e.g. v1.0 models).
+
 ```julia
 task = protenix_task(
     protein_chain("MVLSPAD..."),
@@ -5803,6 +6610,10 @@ task = protenix_task(
     name = "heterodimer",
 )
 r = fold(h, task)
+
+# With template structure
+tmpl = template_structure("template.cif", "A")
+task = protenix_task(protein_chain("MVLSPAD..."), template_features=tmpl)
 ```
 """
 function protenix_task(
@@ -5810,12 +6621,14 @@ function protenix_task(
     name::Union{Nothing, AbstractString} = nothing,
     constraint::Union{Nothing, AbstractDict, AbstractVector} = nothing,
     covalent_bonds::Union{Nothing, AbstractVector} = nothing,
+    template_features::Union{Nothing, AbstractDict} = nothing,
 )
     isempty(entities) && error("At least one entity is required")
     task = Dict{String, Any}("sequences" => collect(Any, entities))
     name !== nothing && (task["name"] = String(name))
     constraint !== nothing && (task["constraint"] = constraint)
     covalent_bonds !== nothing && (task["covalent_bonds"] = covalent_bonds)
+    template_features !== nothing && (task["template_features"] = template_features)
     return task
 end
 

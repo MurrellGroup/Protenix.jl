@@ -62,7 +62,8 @@ using .ProtenixAPI:
     load_pxdesign,
     design,
     design_task,
-    design_target
+    design_target,
+    template_structure
 using .CLI: main
 
 export ProtenixMiniModel, run_inference, build_sequence_atoms, build_sequence_feature_bundle, fold_sequence
@@ -95,7 +96,8 @@ export ProtenixModelSpec,
     load_pxdesign,
     design,
     design_task,
-    design_target
+    design_target,
+    template_structure
 export InputTask, GenerationSpec, MSAChainOptions
 export resolve_weight_source, download_model_weights
 export to_device, zeros_like, ones_like, device_ref, feats_to_device, feats_to_cpu
