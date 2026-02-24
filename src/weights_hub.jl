@@ -177,8 +177,53 @@ function resolve_weight_source(model_name::AbstractString)
     )
 end
 
-function download_model_weights(model_name::AbstractString; cache::Bool = true)
+"""
+    _try_local_weights(layout_spec, project_root) → Union{String, Nothing}
+
+Check if weights exist locally relative to `project_root`. Returns the local
+path if found, `nothing` otherwise. For sharded weights, returns the directory
+containing the safetensors files. For single weights, returns the file path.
+"""
+function _try_local_weights(layout_spec, project_root::AbstractString)
+    if layout_spec.layout == :sharded && !isempty(layout_spec.index_filename)
+        local_index = joinpath(project_root, layout_spec.index_filename)
+        if isfile(local_index)
+            local_dir = dirname(local_index)
+            # Verify at least one .safetensors shard exists
+            shards = filter(f -> endswith(f, ".safetensors") && f != basename(local_index), readdir(local_dir))
+            if !isempty(shards)
+                return local_dir
+            end
+        end
+    elseif layout_spec.layout == :single && !isempty(layout_spec.filename)
+        local_file = joinpath(project_root, layout_spec.filename)
+        if isfile(local_file)
+            return local_file
+        end
+    end
+    return nothing
+end
+
+function download_model_weights(model_name::AbstractString; cache::Bool = true, project_root::AbstractString = "")
     src = resolve_weight_source(model_name)
+
+    # Try local weights first (relative to project root or package root)
+    roots_to_try = String[]
+    if !isempty(project_root)
+        push!(roots_to_try, project_root)
+    end
+    pkg_root = normpath(joinpath(@__DIR__, ".."))
+    push!(roots_to_try, pkg_root)
+
+    layout_spec = _lookup_model_layout(model_name)
+    for root in roots_to_try
+        local_path = _try_local_weights(layout_spec, root)
+        if local_path !== nothing
+            return local_path
+        end
+    end
+
+    # Fall back to HuggingFace Hub download
     if src.layout == :single
         return _download_one(
             src.repo_id,
