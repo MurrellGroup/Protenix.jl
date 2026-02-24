@@ -4,6 +4,7 @@ using Random
 using Statistics
 using Flux: gpu, cpu
 using kalign_jll: kalign_jll
+using HuggingFaceApi: hf_hub_download
 
 import ..Device: feats_to_device, feats_to_cpu, device_ref
 import ..Data: AtomRecord, build_feature_bundle_from_atoms, load_structure_atoms
@@ -765,6 +766,7 @@ function _try_parse_i(x)
 end
 
 function _default_ccd_components_path()
+    # Check local paths first (fast, no network)
     if haskey(ENV, "PROTENIX_DATA_ROOT_DIR")
         root = ENV["PROTENIX_DATA_ROOT_DIR"]
         p1 = joinpath(root, "components.v20240608.cif")
@@ -777,7 +779,8 @@ function _default_ccd_components_path()
     isfile(p1) && return p1
     p2 = joinpath(project_root, "release_data", "ccd_cache", "components.cif")
     isfile(p2) && return p2
-    return ""
+    # Download from HuggingFace (cached after first download)
+    return hf_hub_download("MurrellLab/PXDesign.jl", "components.v20240608.cif")
 end
 
 function _infer_element_from_atom_name(atom_name::AbstractString)
@@ -820,14 +823,6 @@ function _ensure_ccd_component_entries!(codes::Set{String})
     isempty(needed) && return
 
     ccd_path = _default_ccd_components_path()
-    if isempty(ccd_path)
-        error(
-            "CCD components file not found. PXDesign requires the CCD dictionary " *
-            "(components.v20240608.cif or components.cif) for correct residue classification. " *
-            "Set ENV[\"PROTENIX_DATA_ROOT_DIR\"] to a directory containing the file, or place it " *
-            "in release_data/ccd_cache/ relative to the PXDesign.jl package root."
-        )
-    end
 
     current_code = ""
     active = false
