@@ -1,1 +1,0 @@
-[{"name":"43_design_insulin_hetero","hotspot":{"A":[1,6,11,19],"B":[3,11,23,28]},"generation":[{"length":40,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{},"chain_id":["A","B"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/4ins.cif","msa":{}}}]

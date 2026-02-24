@@ -20,7 +20,7 @@ const RBD_SEQ = "RVQPTESIVRFPNITNLCPFGEVFNATRFASVYAWNRKRISNCVADYSVLYNSASFSTFK" *
                 "PTNGVGYQPYRVVVLSFELLHAPATVCGPKKSTNLVKNKCVNF"
 
 # ── 2. MSA directory (absolute path so it resolves from any pwd) ─────────────
-const MSA_DIR = abspath(joinpath(@__DIR__, "..", "clean_targets", "msa", "rbd_glyco"))
+const MSA_DIR = abspath(joinpath(@__DIR__, "msa", "rbd_glyco"))
 
 # ── 3. Build entities ────────────────────────────────────────────────────────
 #

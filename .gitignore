@@ -1,20 +1,24 @@
+# Development scaffolding (parity scripts, porting docs, debug outputs)
+dev/
+
+# Julia
+Manifest.toml
 .julia_depot/
 .julia_config/
-Manifest.toml
-output/
-.venv_pyref/
-.pydeps/
-.external/
+
+# Weights (downloaded via HuggingFace)
 weights_raw/
 weights_raw_*/
 weights_safetensors/
 weights_safetensors_*/
 release_data/
-clean_targets/cif_results*/
-clean_targets/julia_outputs*/
-clean_targets/python_outputs/
-clean_targets/stress_outputs/
-clean_targets/stress_cif_results/
+
+# Python reference environment
+.venv_pyref/
+.pydeps/
+.external/
+
+# Runtime outputs
+output/
+e2e_output/
 esm_embeddings/
-clean_targets/*_run_log.txt
-clean_targets/*.log

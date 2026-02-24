@@ -1,1 +1,0 @@
-[{"name":"39_design_ubiquitin_hotspots","hotspot":{"A":[8,44,48,63,70]},"generation":[{"length":60,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{},"chain_id":["A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/1ubq.cif","msa":{}}}]
