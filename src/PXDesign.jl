@@ -21,7 +21,7 @@ include("cli.jl")
 using .Device: to_device, zeros_like, ones_like, device_ref, feats_to_device, feats_to_cpu
 using .Config: default_config, default_urls
 using .Infer: run_infer
-using .Schema: parse_tasks
+using .Schema: parse_tasks, InputTask, GenerationSpec, MSAChainOptions
 using .Ranges: parse_ranges, format_ranges
 using .Model: InferenceNoiseScheduler, sample_diffusion
 using .WeightsHub: resolve_weight_source, download_model_weights
@@ -51,7 +51,18 @@ using .ProtenixAPI:
     add_precomputed_msa_to_json,
     load_protenix,
     fold,
-    confidence_metrics
+    confidence_metrics,
+    protenix_task,
+    protein_chain,
+    rna_chain,
+    dna_chain,
+    ligand,
+    ion,
+    PXDesignHandle,
+    load_pxdesign,
+    design,
+    design_task,
+    design_target
 using .CLI: main
 
 export ProtenixMiniModel, run_inference, build_sequence_atoms, build_sequence_feature_bundle, fold_sequence
@@ -73,7 +84,19 @@ export ProtenixModelSpec,
     add_precomputed_msa_to_json,
     load_protenix,
     fold,
-    confidence_metrics
+    confidence_metrics,
+    protenix_task,
+    protein_chain,
+    rna_chain,
+    dna_chain,
+    ligand,
+    ion,
+    PXDesignHandle,
+    load_pxdesign,
+    design,
+    design_task,
+    design_target
+export InputTask, GenerationSpec, MSAChainOptions
 export resolve_weight_source, download_model_weights
 export to_device, zeros_like, ones_like, device_ref, feats_to_device, feats_to_cpu
 

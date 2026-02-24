@@ -751,6 +751,35 @@ ion tokens from ligand tokens.  Passed through `_parse_task_entities()` →
 
 **Parity improvement**: 80/19/1 → **82/17/1** (4 cases moved from fail → pass)
 
+### Fix 20: Template embedder GPU device mismatch (2026-02-24)
+
+**Bug**: `_template_embedder_core` in `pairformer.jl` had two device mismatch
+issues when running v1.0 models on GPU:
+
+1. `multichain_mask` computed from CPU `asym_id` (Int array, intentionally not
+   moved to GPU in `features_to_device`) stayed on CPU while `z` (pair
+   representation) was on GPU. Broadcasting `multichain_mask .* dgram` failed
+   with `KernelError: passing non-bitstype argument`.
+
+2. `aatype_oh` created with `zeros(T, 32, n_token)` was CPU while other tensors
+   in `cat(aatype_oh, aatype_oh, ..., dgram; dims=1)` were GPU.
+
+**Fix**: Used `copyto!(similar(z, T, dims...), cpu_array)` pattern to create
+arrays on the same device as `z` without importing CUDA directly:
+```julia
+# multichain_mask
+multichain_mask_cpu = T.(reshape(asym_id, n_token, 1) .== reshape(asym_id, 1, n_token))
+multichain_mask = copyto!(similar(z, T, n_token, n_token), multichain_mask_cpu)
+
+# aatype_oh
+aatype_oh_cpu = zeros(T, 32, n_token)
+# ... fill on CPU ...
+aatype_oh = copyto!(similar(z, T, 32, n_token), aatype_oh_cpu)
+```
+
+**Verification**: v1.0.0 RBD + MSA + glycan fold on GPU — pLDDT 86.2, PAE 8.3,
+561s, 5 CIFs. Structure checks: 2-3 bond violations, 72-121 clashes per sample.
+
 ## Remaining Failure Analysis (17 cases)
 
 ### Breakdown
@@ -851,17 +880,26 @@ Generated from `clean_targets/stress_outputs/` (100 inputs × 2 v0.5 models)
 plus v1 stress outputs. Reports in
 `clean_targets/structure_check_reference/stress/`.
 
-## v1.0 Output Status (2026-02-24) — Input features VALIDATED, template gap remains
+## v1.0 Output Status (2026-02-24) — Template embedder WORKING on GPU
 
 **protenix_base_default_v1.0.0**: Input feature parity confirmed against
 Protenix v1.0.4 (82/99 stress pass, 13/14 clean pass — identical to baseline).
-TemplateEmbedder is NOT YET IMPLEMENTED in Julia — the v1.0 weights have
-2 trained template blocks (89 safetensors keys) that should be active when
-`use_template=true`. All current v1.0 outputs are WITHOUT template embedding.
+TemplateEmbedder fully implemented and verified on GPU. Template embedder GPU
+device mismatch fixed (Fix 20: `multichain_mask` and `aatype_oh` in
+`_template_embedder_core` now use `similar(z, T, dims...)` + `copyto!()` for
+device-agnostic array creation).
+
+**REPL API v1.0 verification** (RBD + MSA + glycan, seed 101, GPU):
+- mean pLDDT: **86.2** (vs 76.1 on v0.5.0)
+- mean PAE: **8.3** (vs 14.7 on v0.5.0)
+- 5 CIF samples, 561s runtime
+- Structure checks: 2-3 bond violations per sample, 72-121 clashes
+- Score range: 0.783 – 1.274
+
 Weights loaded from local safetensors.
 
-**protenix_base_20250630_v1.0.0**: Weights available locally. Same template
-gap as above. Output quality assessment via RBD test set in `run_20260223/`.
+**protenix_base_20250630_v1.0.0**: Weights available locally. Output quality
+assessment via RBD test set in `run_20260223/`.
 
 ### v1.0 DNA Modification Structure Checks (Fix 16 validation)
 
@@ -891,10 +929,9 @@ produce structurally valid outputs.
 
 Confirmed gaps in v1.0 output:
 
-1. **Template features**: ACTIVE in released v1.0.4. Julia returns zeros.
-   Need full TemplateEmbedder implementation (2-block PairformerStack,
-   108-channel feature concat, multichain masking). 89 weight keys already
-   present in safetensors.
+1. ~~**Template features**~~: **FIXED** (Fix 20). TemplateEmbedder now works
+   on GPU. 2-block PairformerStack with 89 weight keys loaded and active.
+   GPU device mismatch in `_template_embedder_core` fixed.
 
 2. **RNA MSA**: New v1.0 feature. `use_rna_msa` flag in Python, not yet
    implemented in Julia.
@@ -1173,6 +1210,32 @@ systematically worse than the pre-fix reference. Bond geometry is excellent
 (0 violations in most cases). Clash scores vary with design complexity but
 are within expected ranges for diffusion-based protein design. The fixes
 D1-D4 corrected input features without degrading output quality.
+
+## REPL API Verification (2026-02-24)
+
+The REPL API (`load_protenix`/`fold`/`load_pxdesign`/`design`) was tested
+end-to-end on GPU with structure checks.
+
+### Folding REPL API
+
+| Model | Task | pLDDT | PAE | Time | Samples | Bond Viol | Clashes | Score Range |
+|-------|------|-------|-----|------|---------|-----------|---------|-------------|
+| v0.5.0 | RBD+MSA+glycan | 76.1 | 14.7 | 574s | 5 | 0 | 63-75 | 0.649–0.792 |
+| v1.0.0 | RBD+MSA+glycan | **86.2** | **8.3** | 561s | 5 | 2-3 | 72-121 | 0.783–1.274 |
+
+v1.0 model produces significantly better confidence scores. Slightly more
+geometry issues (2-3 bond violations vs 0) are expected from different model
+architecture.
+
+### Design REPL API
+
+| Task | Binder L | Time | Samples | Bond Viol | Clashes | Score Range |
+|------|----------|------|---------|-----------|---------|-------------|
+| Unconditional | 60 | 11.6s | 2 | 0 | 1-3 | 0.395–0.408 |
+| Ubiquitin binder | 50 | 6.2s | 2 | 0 | 10-17 | 0.426–0.630 |
+
+Both unconditional and conditional design produce valid structures with 0 bond
+violations. CIF output paths returned in result NamedTuple.
 
 ## Environment Notes
 

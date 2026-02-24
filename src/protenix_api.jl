@@ -11,10 +11,19 @@ import ..Data.Design: PROT_THREE_TO_ONE
 import ..Data.Features
 import ..JSONLite: parse_json, write_json
 import ..Model: load_safetensors_weights
+import ..Model:
+    DiffusionModule, DesignConditionEmbedder,
+    load_diffusion_module!, load_design_condition_embedder!,
+    infer_model_scaffold_dims, infer_design_condition_embedder_dims,
+    checkpoint_coverage_report,
+    as_relpos_input, as_atom_attention_input,
+    InferenceNoiseScheduler, sample_diffusion
+import ..Data: build_basic_feature_bundle
 import ..Output: dump_prediction_bundle
 import ..ProtenixBase
 import ..ProtenixMini
 import ..ESMProvider
+import ..Schema: InputTask, GenerationSpec, MSAChainOptions
 import ..WeightsHub: download_model_weights
 
 export ProtenixModelSpec,
@@ -34,7 +43,12 @@ export ProtenixModelSpec,
     add_precomputed_msa_to_json,
     load_protenix,
     fold,
-    confidence_metrics
+    confidence_metrics,
+    PXDesignHandle,
+    load_pxdesign,
+    design,
+    design_task,
+    design_target
 
 struct ProtenixModelSpec
     model_name::String
@@ -5473,6 +5487,174 @@ function fold(
 end
 
 """
+    fold(handle::ProtenixHandle, task::AbstractDict; seed=101, step=nothing,
+         sample=nothing, cycle=nothing, out_dir=nothing) → NamedTuple
+
+Fold a multi-entity task from a Dict. The `task` Dict must follow the Protenix
+JSON schema (with `"sequences"` array). Use the builder helpers [`protenix_task`](@ref),
+[`protein_chain`](@ref), [`rna_chain`](@ref), [`dna_chain`](@ref), [`ligand`](@ref),
+and [`ion`](@ref) to construct it conveniently.
+
+Returns the same rich NamedTuple as the single-sequence `fold` method.
+
+# Examples
+
+```julia
+h = load_protenix("protenix_base_default_v0.5.0"; gpu=true)
+
+# Heterodimer
+task = protenix_task(
+    protein_chain("MVLSPAD..."),
+    protein_chain("MVHLTPE..."),
+    name = "heterodimer",
+)
+r = fold(h, task; seed=101)
+r.mean_plddt
+
+# Protein + ligand
+task = protenix_task(protein_chain("MVLSPAD..."), ligand("CCD_ATP"))
+r = fold(h, task)
+
+# Power user — raw Dict
+task = Dict(
+    "name" => "manual",
+    "sequences" => [
+        Dict("proteinChain" => Dict("sequence" => "MVLSPAD...", "count" => 1)),
+    ],
+)
+r = fold(h, task)
+```
+"""
+function fold(
+    handle::ProtenixHandle,
+    task::AbstractDict;
+    seed::Integer = 101,
+    step::Union{Nothing, Integer} = nothing,
+    sample::Union{Nothing, Integer} = nothing,
+    cycle::Union{Nothing, Integer} = nothing,
+    out_dir::Union{Nothing, AbstractString} = nothing,
+)
+    task = _as_string_dict(task)
+    task_name = get(task, "name", "repl_task")
+
+    p = handle.params
+    run_cycle = cycle === nothing ? p.cycle : Int(cycle)
+    run_step = step === nothing ? p.step : Int(step)
+    run_sample = sample === nothing ? p.sample : Int(sample)
+    actual_out_dir = out_dir === nothing ? mktempdir() : mkpath(String(out_dir))
+
+    json_dir = pwd()
+    parsed_task = _parse_task_entities(task; json_dir = json_dir)
+    chain_sequences = _protein_chain_sequence_map(parsed_task.protein_specs)
+
+    rng = MersenneTwister(Int(seed))
+    atoms = _remove_covalent_leaving_atoms(
+        parsed_task.atoms, task, parsed_task.entity_chain_ids, parsed_task.entity_atom_map;
+        rng = rng,
+    )
+    atoms = _apply_mse_to_met(atoms)
+    atoms = _apply_ccd_mol_type_override(atoms, parsed_task.polymer_chain_ids;
+        all_entities = _is_v1_model(handle.model_name))
+    bundle = build_feature_bundle_from_atoms(atoms; task_name = task_name, rng = rng)
+    token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
+    _normalize_protenix_feature_dict!(bundle["input_feature_dict"])
+    _fix_restype_for_modified_residues!(bundle["input_feature_dict"], bundle["atoms"], bundle["tokens"])
+    _fix_entity_and_sym_ids!(bundle["input_feature_dict"], bundle["atoms"], bundle["tokens"], parsed_task.entity_chain_ids)
+
+    json_path = joinpath(json_dir, "_repl_.json")
+    _inject_task_msa_features!(
+        bundle["input_feature_dict"],
+        task,
+        json_path;
+        use_msa = p.use_msa,
+        msa_pair_as_unpair = p.msa_pair_as_unpair,
+        chain_specs = parsed_task.protein_specs,
+        rna_chain_specs = parsed_task.rna_specs,
+        dna_chain_specs = parsed_task.dna_specs,
+        token_chain_ids = token_chain_ids,
+        ion_chain_ids = parsed_task.ion_chain_ids,
+    )
+    _inject_task_covalent_token_bonds!(
+        bundle["input_feature_dict"],
+        bundle["atoms"],
+        task,
+        parsed_task.entity_chain_ids,
+        parsed_task.entity_atom_map,
+    )
+    _inject_task_template_features!(bundle["input_feature_dict"], task)
+    if _is_v1_model(handle.model_name)
+        _inject_dummy_template_features!(bundle["input_feature_dict"])
+    end
+    _inject_task_esm_token_embedding!(bundle["input_feature_dict"], task)
+    _inject_auto_esm_token_embedding!(
+        bundle["input_feature_dict"],
+        bundle["atoms"],
+        bundle["tokens"],
+        chain_sequences,
+        p,
+        "task '$task_name' (REPL)",
+    )
+    _inject_task_constraint_feature!(
+        bundle["input_feature_dict"],
+        task,
+        bundle["atoms"],
+        parsed_task.entity_chain_ids,
+        parsed_task.entity_atom_map,
+        "task '$task_name' (REPL)",
+    )
+    _validate_required_model_inputs!(p, bundle["input_feature_dict"], "task '$task_name' (REPL)")
+
+    typed_feat = ProtenixMini.as_protenix_features(bundle["input_feature_dict"])
+    if handle.on_gpu
+        ref = device_ref(handle.model)
+        typed_feat = _features_to_device(typed_feat, ref)
+    end
+
+    pred = _run_model(
+        (model = handle.model, family = handle.family),
+        typed_feat;
+        cycle = run_cycle,
+        step = run_step,
+        sample = run_sample,
+        rng = rng,
+    )
+    if handle.on_gpu
+        pred = _pred_to_cpu(pred)
+    end
+
+    task_dump_dir = joinpath(actual_out_dir, task_name, "seed_$(seed)")
+    cross_bonds = get(bundle["input_feature_dict"], "_cif_cross_chain_bonds", nothing)
+    pred_dir = dump_prediction_bundle(task_dump_dir, task_name, bundle["atoms"], pred.coordinate; cross_chain_bonds=cross_bonds)
+    _write_confidence_summaries(pred_dir, task_name, Int(seed), pred)
+
+    cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
+    cif_text = isempty(cif_paths) ? "" : read(first(cif_paths), String)
+
+    plddt_scores = _logits_to_plddt(pred.plddt)
+    pae_scores = _logits_to_pae(pred.pae)
+    mean_plddt = Float32(Statistics.mean(plddt_scores))
+    mean_pae = Float32(Statistics.mean(pae_scores))
+
+    return (
+        coordinate = pred.coordinate,
+        cif = cif_text,
+        cif_paths = cif_paths,
+        prediction_dir = pred_dir,
+        plddt = plddt_scores,
+        mean_plddt = mean_plddt,
+        pae = pae_scores,
+        mean_pae = mean_pae,
+        pde = pred.pde,
+        resolved = pred.resolved,
+        distogram_logits = pred.distogram_logits,
+        plddt_logits = pred.plddt,
+        pae_logits = pred.pae,
+        seed = Int(seed),
+        task_name = task_name,
+    )
+end
+
+"""
     confidence_metrics(result) → NamedTuple
 
 Extract confidence metrics from a fold result.
@@ -5493,6 +5675,628 @@ function confidence_metrics(result::NamedTuple)
         mean_pae = result.mean_pae,
         pde = result.pde,
         resolved = result.resolved,
+    )
+end
+
+# ── Builder helpers ──────────────────────────────────────────────────────────
+# Pure functions that construct entity Dicts matching the Protenix JSON schema.
+# These allow users to build task inputs from the REPL without writing JSON files.
+
+"""
+    protein_chain(sequence; count=1, msa=nothing, modifications=nothing) → Dict
+
+Build a protein chain entity Dict for use with [`protenix_task`](@ref).
+
+```julia
+protein_chain("MVLSPAD...")
+protein_chain("MVLSPAD..."; count=2)  # homodimer
+```
+"""
+function protein_chain(
+    sequence::AbstractString;
+    count::Integer = 1,
+    msa::Union{Nothing, AbstractDict, AbstractVector} = nothing,
+    modifications::Union{Nothing, AbstractVector} = nothing,
+)
+    count > 0 || error("count must be positive")
+    pc = Dict{String, Any}("sequence" => String(sequence), "count" => Int(count))
+    msa !== nothing && (pc["msa"] = msa)
+    modifications !== nothing && (pc["modifications"] = modifications)
+    return Dict{String, Any}("proteinChain" => pc)
+end
+
+"""
+    rna_chain(sequence; count=1, unpaired_msa=nothing, unpaired_msa_path=nothing, modifications=nothing) → Dict
+
+Build an RNA chain entity Dict for use with [`protenix_task`](@ref).
+
+```julia
+rna_chain("AUGCAUGC")
+```
+"""
+function rna_chain(
+    sequence::AbstractString;
+    count::Integer = 1,
+    unpaired_msa::Union{Nothing, AbstractString} = nothing,
+    unpaired_msa_path::Union{Nothing, AbstractString} = nothing,
+    modifications::Union{Nothing, AbstractVector} = nothing,
+)
+    count > 0 || error("count must be positive")
+    rc = Dict{String, Any}("sequence" => String(sequence), "count" => Int(count))
+    unpaired_msa !== nothing && (rc["unpairedMsa"] = String(unpaired_msa))
+    unpaired_msa_path !== nothing && (rc["unpairedMsaPath"] = String(unpaired_msa_path))
+    modifications !== nothing && (rc["modifications"] = modifications)
+    return Dict{String, Any}("rnaSequence" => rc)
+end
+
+"""
+    dna_chain(sequence; count=1, modifications=nothing) → Dict
+
+Build a DNA chain entity Dict for use with [`protenix_task`](@ref).
+
+```julia
+dna_chain("ATCGATCG")
+```
+"""
+function dna_chain(
+    sequence::AbstractString;
+    count::Integer = 1,
+    modifications::Union{Nothing, AbstractVector} = nothing,
+)
+    count > 0 || error("count must be positive")
+    dc = Dict{String, Any}("sequence" => String(sequence), "count" => Int(count))
+    modifications !== nothing && (dc["modifications"] = modifications)
+    return Dict{String, Any}("dnaSequence" => dc)
+end
+
+"""
+    ligand(name; count=1) → Dict
+
+Build a ligand entity Dict for use with [`protenix_task`](@ref).
+`name` follows the Protenix convention: `"CCD_ATP"`, `"SMILES_..."`, etc.
+
+```julia
+ligand("CCD_ATP")
+ligand("CCD_HEM"; count=2)
+```
+"""
+function ligand(
+    name::AbstractString;
+    count::Integer = 1,
+)
+    count > 0 || error("count must be positive")
+    return Dict{String, Any}("ligand" => Dict{String, Any}("ligand" => String(name), "count" => Int(count)))
+end
+
+"""
+    ion(name; count=1) → Dict
+
+Build an ion entity Dict for use with [`protenix_task`](@ref).
+`name` follows the Protenix convention, e.g. `"CCD_MG"` or `"MG"`.
+
+```julia
+ion("CCD_MG"; count=2)
+```
+"""
+function ion(
+    name::AbstractString;
+    count::Integer = 1,
+)
+    count > 0 || error("count must be positive")
+    return Dict{String, Any}("ion" => Dict{String, Any}("ion" => String(name), "count" => Int(count)))
+end
+
+"""
+    protenix_task(entities...; name=nothing, constraint=nothing, covalent_bonds=nothing) → Dict
+
+Assemble entity Dicts (from [`protein_chain`](@ref), [`rna_chain`](@ref),
+[`dna_chain`](@ref), [`ligand`](@ref), [`ion`](@ref)) into a task Dict
+suitable for `fold(handle, task)`.
+
+`covalent_bonds` is an optional vector of bond specification Dicts, each with
+keys `entity1`, `position1`, `atom1`, `entity2`, `position2`, `atom2`.
+
+```julia
+task = protenix_task(
+    protein_chain("MVLSPAD..."),
+    protein_chain("MVHLTPE..."),
+    name = "heterodimer",
+)
+r = fold(h, task)
+```
+"""
+function protenix_task(
+    entities::AbstractDict...;
+    name::Union{Nothing, AbstractString} = nothing,
+    constraint::Union{Nothing, AbstractDict, AbstractVector} = nothing,
+    covalent_bonds::Union{Nothing, AbstractVector} = nothing,
+)
+    isempty(entities) && error("At least one entity is required")
+    task = Dict{String, Any}("sequences" => collect(Any, entities))
+    name !== nothing && (task["name"] = String(name))
+    constraint !== nothing && (task["constraint"] = constraint)
+    covalent_bonds !== nothing && (task["covalent_bonds"] = covalent_bonds)
+    return task
+end
+
+# ── Design REPL API ──────────────────────────────────────────────────────────
+
+"""
+    PXDesignHandle
+
+Holds a loaded PXDesign diffusion model and optional design condition embedder.
+Created by [`load_pxdesign`](@ref), passed to [`design`](@ref).
+"""
+struct PXDesignHandle
+    model::Any                          # DiffusionModule
+    design_condition_embedder::Any      # Union{Nothing, DesignConditionEmbedder}
+    model_name::String
+    on_gpu::Bool
+    dims::NamedTuple                    # c_token, c_s, c_z, c_s_inputs, c_atom, c_atompair, ...
+    default_n_step::Int
+    default_n_sample::Int
+end
+
+function Base.show(io::IO, h::PXDesignHandle)
+    dce = h.design_condition_embedder !== nothing ? "yes" : "no"
+    print(io, "PXDesignHandle($(h.model_name), gpu=$(h.on_gpu), dce=$dce)")
+end
+
+"""
+    load_pxdesign(model_name="pxdesign_v0.1.0"; gpu=false, strict=true) → PXDesignHandle
+
+Load a PXDesign diffusion model and return a reusable handle. Weights are
+downloaded from HuggingFace on first use and cached locally.
+
+# Examples
+
+```julia
+dh = load_pxdesign(gpu=true)
+r = design(dh; binder_length=60, seed=42)
+```
+"""
+function load_pxdesign(
+    model_name::AbstractString = "pxdesign_v0.1.0";
+    gpu::Bool = false,
+    strict::Bool = true,
+)
+    weights_ref = download_model_weights(model_name)
+    weights = load_safetensors_weights(weights_ref)
+
+    inferred = infer_model_scaffold_dims(weights)
+    c_token = inferred.c_token
+    c_s = inferred.c_s
+    c_z = inferred.c_z
+    c_s_inputs = inferred.c_s_inputs
+    n_blocks = inferred.n_blocks
+    n_heads = inferred.n_heads
+    c_atom = inferred.c_atom
+    c_atompair = inferred.c_atompair
+    atom_encoder_blocks = inferred.atom_encoder_blocks
+    atom_encoder_heads = inferred.atom_encoder_heads
+    atom_decoder_blocks = inferred.atom_decoder_blocks
+    atom_decoder_heads = inferred.atom_decoder_heads
+
+    typed_model = DiffusionModule(
+        c_token, c_s, c_z, c_s_inputs;
+        c_atom = c_atom,
+        c_atompair = c_atompair,
+        atom_encoder_blocks = atom_encoder_blocks,
+        atom_encoder_heads = atom_encoder_heads,
+        n_blocks = n_blocks,
+        n_heads = n_heads,
+        atom_decoder_blocks = atom_decoder_blocks,
+        atom_decoder_heads = atom_decoder_heads,
+        rng = MersenneTwister(42),
+    )
+    load_diffusion_module!(typed_model, weights; strict = strict)
+
+    # Detect and build DesignConditionEmbedder if keys are present
+    design_condition_embedder = nothing
+    if haskey(weights, "design_condition_embedder.input_embedder.input_map.weight") &&
+       haskey(weights, "design_condition_embedder.condition_template_embedder.embedder.weight")
+        inferred_design = infer_design_condition_embedder_dims(weights)
+        inferred_design.c_s_inputs == c_s_inputs ||
+            error("DesignConditionEmbedder c_s_inputs mismatch: diffusion inferred $c_s_inputs, design inferred $(inferred_design.c_s_inputs)")
+        inferred_design.c_z == c_z ||
+            error("DesignConditionEmbedder c_z mismatch: diffusion inferred $c_z, design inferred $(inferred_design.c_z)")
+        design_condition_embedder = DesignConditionEmbedder(
+            inferred_design.c_token;
+            c_s_inputs = c_s_inputs,
+            c_z = c_z,
+            c_atom = c_atom,
+            c_atompair = c_atompair,
+            n_blocks = inferred_design.n_blocks,
+            n_heads = inferred_design.n_heads,
+            rng = MersenneTwister(73),
+        )
+        load_design_condition_embedder!(design_condition_embedder, weights; strict = strict)
+    end
+
+    if strict
+        report = checkpoint_coverage_report(typed_model, design_condition_embedder, weights)
+        if !isempty(report.missing) || !isempty(report.unused)
+            error(
+                "Checkpoint key coverage mismatch: missing=$(length(report.missing)) unused=$(length(report.unused)). " *
+                "Set strict=false to allow partial loads.",
+            )
+        end
+    end
+
+    # GPU: move diffusion model to GPU; DCE stays on CPU (matches infer.jl pattern)
+    if gpu
+        typed_model = _flux_gpu(typed_model)
+    end
+
+    dims_nt = (
+        c_token = c_token, c_s = c_s, c_z = c_z, c_s_inputs = c_s_inputs,
+        c_atom = c_atom, c_atompair = c_atompair,
+        n_blocks = n_blocks, n_heads = n_heads,
+        atom_encoder_blocks = atom_encoder_blocks, atom_encoder_heads = atom_encoder_heads,
+        atom_decoder_blocks = atom_decoder_blocks, atom_decoder_heads = atom_decoder_heads,
+    )
+
+    return PXDesignHandle(typed_model, design_condition_embedder, String(model_name), gpu, dims_nt, 200, 5)
+end
+
+"""
+    design_target(structure_file; chains=String[], crop=Dict(), msa=Dict()) → NamedTuple
+
+Build a target specification for conditional design. Returns an intermediate
+that can be passed to [`design_task`](@ref).
+
+# Examples
+
+```julia
+target = design_target("structures/1ubq.cif"; chains=["A"])
+target = design_target("structures/5o45.cif";
+    chains=["A"],
+    crop=Dict("A"=>"1-116"),
+    msa=Dict("A"=>Dict("precomputed_msa_dir"=>"/path/to/msa")),
+)
+```
+"""
+function design_target(
+    structure_file::AbstractString;
+    chains::AbstractVector{<:AbstractString} = String[],
+    crop::Union{Nothing, AbstractDict} = nothing,
+    msa::Union{Nothing, AbstractDict} = nothing,
+)
+    return (
+        structure_file = String(structure_file),
+        chain_ids = String.(chains),
+        crop = crop === nothing ? Dict{String, String}() : Dict{String, String}(String(k) => String(v) for (k, v) in crop),
+        msa = msa === nothing ? Dict{String, Any}() : Dict{String, Any}(String(k) => v for (k, v) in msa),
+    )
+end
+
+"""
+    design_task(; binder_length, target=nothing, hotspots=nothing, name=nothing) → InputTask
+
+Construct a `Schema.InputTask` for the design pipeline.
+
+# Examples
+
+```julia
+# Unconditional design
+task = design_task(binder_length=60)
+
+# Conditional design with target + hotspots
+target = design_target("structures/1ubq.cif"; chains=["A"])
+task = design_task(binder_length=80; target=target, hotspots=Dict("A"=>[8,44,48]))
+```
+"""
+function design_task(;
+    binder_length::Integer,
+    target = nothing,
+    hotspots::Union{Nothing, AbstractDict} = nothing,
+    name::Union{Nothing, AbstractString} = nothing,
+)
+    binder_length > 0 || error("binder_length must be positive")
+
+    task_name = name === nothing ? "design_L$(binder_length)" : String(name)
+
+    structure_file = ""
+    chain_ids = String[]
+    crop = Dict{String, String}()
+    msa_opts = Dict{String, MSAChainOptions}()
+
+    if target !== nothing
+        structure_file = target.structure_file
+        chain_ids = target.chain_ids
+        crop = target.crop
+        # Parse MSA options from target's Dict format into MSAChainOptions
+        raw_msa = target.msa
+        for (chain, cfg) in raw_msa
+            cfg_dict = cfg isa AbstractDict ? cfg : Dict{String, Any}()
+            precomputed = haskey(cfg_dict, "precomputed_msa_dir") ? String(cfg_dict["precomputed_msa_dir"]) : nothing
+            pairing = haskey(cfg_dict, "pairing_db") ? String(cfg_dict["pairing_db"]) : nothing
+            extra = Dict{String, String}()
+            for (k, v) in cfg_dict
+                ks = String(k)
+                (ks == "precomputed_msa_dir" || ks == "pairing_db") && continue
+                extra[ks] = String(v)
+            end
+            msa_opts[String(chain)] = (precomputed_msa_dir = precomputed, pairing_db = pairing, extra = extra)
+        end
+    end
+
+    hs = Dict{String, Vector{Int}}()
+    if hotspots !== nothing
+        for (k, v) in hotspots
+            hs[String(k)] = Int.(v)
+        end
+    end
+
+    generation = [GenerationSpec("protein", Int(binder_length), 1)]
+
+    return InputTask(task_name, structure_file, chain_ids, crop, hs, msa_opts, generation)
+end
+
+# ── Private helpers for design inference ────────────────────────────────────
+
+function _design_to_matrix_f32(x)
+    x isa AbstractMatrix || error("Expected matrix feature, got $(typeof(x))")
+    return Float32.(x)
+end
+
+function _design_pad_or_truncate_columns(x::AbstractMatrix{<:Real}, width::Int)
+    n, d = size(x)
+    if d == width
+        return Float32.(x)
+    elseif d > width
+        return Float32.(x[:, 1:width])
+    end
+    out = zeros(Float32, n, width)
+    out[:, 1:d] .= Float32.(x)
+    return out
+end
+
+function _build_design_model_inputs(
+    feat::Dict{String, Any},
+    c_s_inputs::Int,
+    c_s::Int,
+    c_z::Int;
+    design_condition_embedder = nothing,
+)
+    relpos_input = as_relpos_input(feat)
+    n_token = length(relpos_input.token_index)
+
+    # Features-first convention: s_trunk (c_s, n_token), s_inputs (c_s_inputs, n_token), z_trunk (c_z, n_token, n_token)
+    s_trunk = zeros(Float32, c_s, n_token)
+    if design_condition_embedder === nothing
+        restype = _design_to_matrix_f32(feat["restype"])
+        profile = _design_to_matrix_f32(feat["profile"])
+        deletion_mean = Float32.(feat["deletion_mean"])
+        plddt = Float32.(feat["plddt"])
+        hotspot = Float32.(feat["hotspot"])
+        token_features = hcat(
+            restype,
+            profile,
+            reshape(deletion_mean, :, 1),
+            reshape(plddt, :, 1),
+            reshape(hotspot, :, 1),
+        )
+        s_inputs_fl = _design_pad_or_truncate_columns(token_features, c_s_inputs)
+        s_inputs = permutedims(s_inputs_fl)  # (c_s_inputs, n_token)
+        z_trunk = zeros(Float32, c_z, n_token, n_token)
+        if c_z > 0
+            templ_mask = _design_to_matrix_f32(feat["conditional_templ_mask"])
+            z_trunk[1, :, :] .= templ_mask
+        end
+        if c_z > 1
+            templ_bins = _design_to_matrix_f32(feat["conditional_templ"])
+            z_trunk[2, :, :] .= templ_bins ./ 63f0
+        end
+        atom_to_token_idx = Int.(feat["atom_to_token_idx"])
+        return (
+            relpos_input = relpos_input,
+            atom_input = as_atom_attention_input(feat),
+            s_inputs = s_inputs,
+            s_trunk = s_trunk,
+            z_trunk = z_trunk,
+            atom_to_token_idx = atom_to_token_idx,
+        )
+    end
+
+    # DesignConditionEmbedder path
+    s_inputs, z_trunk = design_condition_embedder(feat)
+    size(s_inputs, 2) == n_token || error("DesignConditionEmbedder returned mismatched token count.")
+    size(s_inputs, 1) == c_s_inputs || error("DesignConditionEmbedder returned c_s_inputs=$(size(s_inputs, 1)) expected $c_s_inputs.")
+    size(z_trunk, 2) == n_token || error("DesignConditionEmbedder returned mismatched pair token count.")
+    size(z_trunk, 3) == n_token || error("DesignConditionEmbedder returned mismatched pair token count.")
+    size(z_trunk, 1) == c_z || error("DesignConditionEmbedder returned c_z=$(size(z_trunk, 1)) expected $c_z.")
+
+    atom_to_token_idx = Int.(feat["atom_to_token_idx"])
+    return (
+        relpos_input = relpos_input,
+        atom_input = as_atom_attention_input(feat),
+        s_inputs = s_inputs,
+        s_trunk = s_trunk,
+        z_trunk = z_trunk,
+        atom_to_token_idx = atom_to_token_idx,
+    )
+end
+
+"""
+    design(handle, task::InputTask; seed=42, n_step=nothing, n_sample=nothing,
+           out_dir=nothing, gamma0=1.0, gamma_min=0.01, noise_scale_lambda=1.003,
+           diffusion_chunk_size=0) → NamedTuple
+
+Run design inference using a pre-loaded [`PXDesignHandle`](@ref) and an
+[`InputTask`](@ref) (from [`design_task`](@ref)).
+
+Returns a `NamedTuple` with:
+- `coordinate`: raw coordinates `(3, N_atom, N_sample)`
+- `cif_paths`: paths to generated CIF files
+- `prediction_dir`: output directory
+- `seed`, `task_name`, `n_samples`, `n_step`
+
+# Examples
+
+```julia
+dh = load_pxdesign(gpu=true)
+task = design_task(binder_length=60)
+r = design(dh, task; seed=42, n_sample=5, n_step=200)
+r.cif_paths
+```
+"""
+function design(
+    handle::PXDesignHandle,
+    task::InputTask;
+    seed::Integer = 42,
+    n_step::Union{Nothing, Integer} = nothing,
+    n_sample::Union{Nothing, Integer} = nothing,
+    out_dir::Union{Nothing, AbstractString} = nothing,
+    gamma0::Real = 1.0,
+    gamma_min::Real = 0.01,
+    noise_scale_lambda::Real = 1.003,
+    diffusion_chunk_size::Integer = 0,
+    eta_type::AbstractString = "const",
+    eta_min::Real = 1.5,
+    eta_max::Real = 1.5,
+)
+    actual_n_step = n_step === nothing ? handle.default_n_step : Int(n_step)
+    actual_n_sample = n_sample === nothing ? handle.default_n_sample : Int(n_sample)
+    actual_out_dir = out_dir === nothing ? mktempdir() : mkpath(String(out_dir))
+
+    rng = MersenneTwister(Int(seed))
+    feature_bundle = build_basic_feature_bundle(task; rng = rng)
+
+    feat = feature_bundle["input_feature_dict"]
+    dims = feature_bundle["dims"]
+    n_atom = Int(dims["N_atom"])
+    task_name = feature_bundle["task_name"]
+
+    model_inputs = _build_design_model_inputs(
+        feat,
+        handle.dims.c_s_inputs,
+        handle.dims.c_s,
+        handle.dims.c_z;
+        design_condition_embedder = handle.design_condition_embedder,
+    )
+
+    # GPU transfer of dense tensors
+    dev_ref = nothing
+    if handle.on_gpu
+        dev_ref = device_ref(handle.model)
+        _to_gpu = x::AbstractArray{Float32} -> copyto!(similar(dev_ref, Float32, size(x)...), x)
+        model_inputs = (
+            relpos_input = model_inputs.relpos_input,
+            atom_input = model_inputs.atom_input,
+            s_inputs = _to_gpu(model_inputs.s_inputs),
+            s_trunk = _to_gpu(model_inputs.s_trunk),
+            z_trunk = _to_gpu(model_inputs.z_trunk),
+            atom_to_token_idx = model_inputs.atom_to_token_idx,
+        )
+    end
+
+    # Build denoise closure
+    denoise_net = function (x_noisy, t_hat; kwargs...)
+        return handle.model(
+            x_noisy,
+            t_hat;
+            relpos_input = model_inputs.relpos_input,
+            s_inputs = model_inputs.s_inputs,
+            s_trunk = model_inputs.s_trunk,
+            z_trunk = model_inputs.z_trunk,
+            atom_to_token_idx = model_inputs.atom_to_token_idx,
+            input_feature_dict = model_inputs.atom_input,
+        )
+    end
+
+    eta = (type = String(eta_type), min = Float64(eta_min), max = Float64(eta_max))
+    scheduler = InferenceNoiseScheduler()
+    noise_schedule = scheduler(actual_n_step; dtype = Float32)
+
+    coordinates = sample_diffusion(
+        denoise_net;
+        noise_schedule = noise_schedule,
+        N_sample = actual_n_sample,
+        N_atom = n_atom,
+        gamma0 = Float64(gamma0),
+        gamma_min = Float64(gamma_min),
+        noise_scale_lambda = Float64(noise_scale_lambda),
+        step_scale_eta = eta,
+        diffusion_chunk_size = Int(diffusion_chunk_size),
+        rng = rng,
+        device_ref = dev_ref,
+    )
+
+    # Dump CIF files
+    task_dump_dir = joinpath(actual_out_dir, task_name, "seed_$(seed)")
+    pred_dir = dump_prediction_bundle(task_dump_dir, task_name, feature_bundle["atoms"], coordinates)
+
+    cif_paths = sort(filter(endswith(".cif"), readdir(pred_dir; join = true)))
+
+    return (
+        coordinate = coordinates,
+        cif_paths = cif_paths,
+        prediction_dir = pred_dir,
+        seed = Int(seed),
+        task_name = task_name,
+        n_samples = actual_n_sample,
+        n_step = actual_n_step,
+    )
+end
+
+"""
+    design(handle; binder_length, target=nothing, hotspots=nothing, name=nothing,
+           seed=42, n_step=nothing, n_sample=nothing, out_dir=nothing, ...) → NamedTuple
+
+Convenience method: builds an [`InputTask`](@ref) via [`design_task`](@ref) and
+runs [`design`](@ref).
+
+# Examples
+
+```julia
+dh = load_pxdesign(gpu=true)
+
+# Unconditional
+r = design(dh; binder_length=60, seed=42, n_sample=5, n_step=200)
+
+# Conditional
+target = design_target("structures/1ubq.cif"; chains=["A"])
+r = design(dh; binder_length=80, target=target, hotspots=Dict("A"=>[8,44,48]), seed=42)
+```
+"""
+function design(
+    handle::PXDesignHandle;
+    binder_length::Integer,
+    target = nothing,
+    hotspots::Union{Nothing, AbstractDict} = nothing,
+    name::Union{Nothing, AbstractString} = nothing,
+    seed::Integer = 42,
+    n_step::Union{Nothing, Integer} = nothing,
+    n_sample::Union{Nothing, Integer} = nothing,
+    out_dir::Union{Nothing, AbstractString} = nothing,
+    gamma0::Real = 1.0,
+    gamma_min::Real = 0.01,
+    noise_scale_lambda::Real = 1.003,
+    diffusion_chunk_size::Integer = 0,
+    eta_type::AbstractString = "const",
+    eta_min::Real = 1.5,
+    eta_max::Real = 1.5,
+)
+    task = design_task(;
+        binder_length = binder_length,
+        target = target,
+        hotspots = hotspots,
+        name = name,
+    )
+    return design(
+        handle, task;
+        seed = seed,
+        n_step = n_step,
+        n_sample = n_sample,
+        out_dir = out_dir,
+        gamma0 = gamma0,
+        gamma_min = gamma_min,
+        noise_scale_lambda = noise_scale_lambda,
+        diffusion_chunk_size = diffusion_chunk_size,
+        eta_type = eta_type,
+        eta_min = eta_min,
+        eta_max = eta_max,
     )
 end
 

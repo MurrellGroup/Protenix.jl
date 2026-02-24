@@ -509,8 +509,14 @@ function _template_embedder_core(
     n_token = size(z, 2)
 
     # Build multichain mask: same asymmetric unit → 1, different → 0
-    multichain_mask = T.(reshape(asym_id, n_token, 1) .== reshape(asym_id, 1, n_token))
-    pair_mask_plane = pair_mask === nothing ? ones(T, n_token, n_token) : T.(pair_mask)
+    # Compute on CPU (asym_id is always CPU) then move to match z's device via similar()
+    multichain_mask_cpu = T.(reshape(asym_id, n_token, 1) .== reshape(asym_id, 1, n_token))
+    multichain_mask = copyto!(similar(z, T, n_token, n_token), multichain_mask_cpu)
+    pair_mask_plane = if pair_mask === nothing
+        fill!(similar(z, T, n_token, n_token), one(T))
+    else
+        T.(pair_mask)
+    end
 
     z_ln = m.layernorm_z(z)
     z_proj = m.linear_no_bias_z(z_ln)    # (c, N, N)
@@ -541,14 +547,15 @@ function _template_embedder_core(
         unit_vec = unit_vec .* mask_3d
         bb_mask_2d = bb_mask_2d .* multichain_mask .* pair_mask_plane
 
-        # One-hot aatype → (32, N)
-        aatype_oh = zeros(T, 32, n_token)
+        # One-hot aatype → (32, N) — build on CPU then move to match z's device
+        aatype_oh_cpu = zeros(T, 32, n_token)
         for j in 1:n_token
             idx = aatype[j]
             if 0 <= idx < 32
-                aatype_oh[idx + 1, j] = one(T)
+                aatype_oh_cpu[idx + 1, j] = one(T)
             end
         end
+        aatype_oh = copyto!(similar(z, T, 32, n_token), aatype_oh_cpu)
         aatype_i = repeat(reshape(aatype_oh, 32, n_token, 1), 1, 1, n_token)
         aatype_j = repeat(reshape(aatype_oh, 32, 1, n_token), 1, n_token, 1)
 
