@@ -1,1 +1,1 @@
-[{"name":"42_design_pdl1_chain_b","hotspot":{"B":[20,30,50,80]},"generation":[{"length":60,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{},"chain_id":["B"]},"structure_file":"../structures/5o45.cif","msa":{}}}]
+[{"name":"42_design_pdl1_chain_b","hotspot":{"B":[20,30,50,80]},"generation":[{"length":60,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{},"chain_id":["B"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif","msa":{}}}]

@@ -1,1 +1,1 @@
-[{"name":"40_design_lysozyme_crop","hotspot":{"A":[35,52,62,108]},"generation":[{"length":70,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-80"},"chain_id":["A"]},"structure_file":"../structures/1lyz.cif","msa":{}}}]
+[{"name":"40_design_lysozyme_crop","hotspot":{"A":[35,52,62,108]},"generation":[{"length":70,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{"A":"1-80"},"chain_id":["A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/1lyz.cif","msa":{}}}]
