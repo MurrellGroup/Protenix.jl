@@ -143,8 +143,15 @@ function _completed_residue_atoms(res_atoms::Vector{AtomRecord})
     end
 
     expected = PROTEIN_HEAVY_ATOMS[first_atom.res_name]
-    expected_no_oxt = [n for n in expected if n != "OXT"]
-    expected_set = Set(expected_no_oxt)
+    # Include OXT if it's actually present in the input (i.e., C-terminal residue).
+    # Only exclude OXT from the "fill missing atoms" list, not from the "keep" list.
+    has_oxt_in_input = any(a.atom_name == "OXT" for a in res_atoms)
+    expected_for_filter = if has_oxt_in_input
+        expected
+    else
+        [n for n in expected if n != "OXT"]
+    end
+    expected_set = Set(expected_for_filter)
 
     kept = AtomRecord[]
     seen = Set{String}()
@@ -160,6 +167,8 @@ function _completed_residue_atoms(res_atoms::Vector{AtomRecord})
         push!(seen, a.atom_name)
     end
 
+    # Fill missing standard atoms (excluding OXT — never synthesize it)
+    expected_no_oxt = [n for n in expected if n != "OXT"]
     for atom_name in expected_no_oxt
         atom_name in seen && continue
         element = _infer_element_from_atom_name(atom_name)

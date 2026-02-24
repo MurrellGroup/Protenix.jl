@@ -68,6 +68,7 @@ function build_protenix_base_model(
         constraint_substructure_hidden_dim = constraint_substructure_hidden_dim,
         constraint_substructure_n_layers = constraint_substructure_n_layers,
         constraint_substructure_n_heads = constraint_substructure_n_heads,
+        template_blocks = d.template_blocks,
         rng = rng,
     )
 end

@@ -1,5 +1,0 @@
-[[tasks]]
-name = "32_design_many_hotspots"
-num_chains = 1
-structure_file = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif"
-generation_count = 1

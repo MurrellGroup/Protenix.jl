@@ -1,1 +1,0 @@
-[{"name": "24_design_no_hotspots", "condition": {"structure_file": "../structures/5o45.cif", "filter": {"chain_id": ["A"], "crop": {"A": "1-116"}}, "msa": {}}, "hotspot": {}, "generation": [{"type": "protein", "length": 80, "count": 1}]}]

@@ -1,5 +1,0 @@
-[[tasks]]
-name = "25_design_full_chain"
-num_chains = 1
-structure_file = "/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif"
-generation_count = 1

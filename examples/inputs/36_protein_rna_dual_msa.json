@@ -1,0 +1,15 @@
+[{
+  "name": "protein_rna_dual_msa",
+  "sequences": [
+    {"proteinChain": {
+      "sequence": "MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH",
+      "count": 1,
+      "msa": {"precomputed_msa_dir": "../msa/7r6r_chain1"}
+    }},
+    {"rnaSequence": {
+      "sequence": "GUACGUACGUACGUAC",
+      "count": 1,
+      "unpairedMsaPath": "../msa/rna_16mer/non_pairing.a3m"
+    }}
+  ]
+}]

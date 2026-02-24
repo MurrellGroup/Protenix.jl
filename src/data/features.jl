@@ -9,6 +9,7 @@ import ..Constants: STD_RESIDUES_WITH_GAP, STD_RESIDUES_WITH_GAP_ID_TO_NAME, ELE
 import ..Tokenizer: AtomRecord, Token, TokenArray, centre_atom_indices, tokenize_atoms
 import ..Design: canonical_resname_for_atom, restype_onehot_encoded
 import ..Structure: load_structure_atoms
+using HuggingFaceApi: hf_hub_download
 
 export build_design_backbone_atoms, build_basic_feature_bundle, build_feature_bundle_from_atoms
 
@@ -401,6 +402,7 @@ function _try_parse_i(x)
 end
 
 function _default_ccd_components_path()
+    # Check local paths first (fast, no network)
     if haskey(ENV, "PROTENIX_DATA_ROOT_DIR")
         root = ENV["PROTENIX_DATA_ROOT_DIR"]
         p1 = joinpath(root, "components.v20240608.cif")
@@ -413,29 +415,28 @@ function _default_ccd_components_path()
     isfile(p1) && return p1
     p2 = joinpath(project_root, "release_data", "ccd_cache", "components.cif")
     isfile(p2) && return p2
-    return ""
+    # Download from HuggingFace (cached after first download)
+    return hf_hub_download("MurrellLab/PXDesign.jl", "components.v20240608.cif")
 end
 
 function _default_ccd_std_ref_path()
+    # Prefer local file alongside the CCD components (matches the Protenix data root).
     if haskey(ENV, "PROTENIX_DATA_ROOT_DIR")
-        root = ENV["PROTENIX_DATA_ROOT_DIR"]
-        p = joinpath(root, "ref_coords_std.json")
+        p = joinpath(ENV["PROTENIX_DATA_ROOT_DIR"], "ref_coords_std.json")
         isfile(p) && return p
     end
     project_root = normpath(joinpath(@__DIR__, "..", ".."))
     p = joinpath(project_root, "release_data", "ccd_cache", "ref_coords_std.json")
     isfile(p) && return p
-    return ""
+    return hf_hub_download("MurrellLab/PXDesign.jl", "ref_coords_std.json")
 end
 
 function _load_ccd_std_ref_cache!()
     _CCD_STD_REF_CACHE_LOADED[] && return
     _CCD_STD_REF_CACHE_LOADED[] = true
     p = _default_ccd_std_ref_path()
-    isempty(p) && return
-
     raw = parse_json(read(p, String))
-    raw isa AbstractDict || return
+    raw isa AbstractDict || error("CCD standard reference file at '$p' did not parse as a JSON object")
     for (code_any, entry_any) in raw
         code = uppercase(String(code_any))
         entry_any isa AbstractDict || continue
@@ -681,7 +682,6 @@ function _ensure_ccd_bond_entries!(codes::Set{String})
     end
     isempty(missing) && return
     ccd_path = _default_ccd_components_path()
-    isempty(ccd_path) && return
     _scan_ccd_for_bonds!(missing, ccd_path)
 end
 
@@ -693,7 +693,6 @@ function _ensure_ccd_ref_entries!(codes::Set{String})
     end
     isempty(missing) && return
     ccd_path = _default_ccd_components_path()
-    isempty(ccd_path) && return
     _scan_ccd_for_codes!(missing, ccd_path)
 end
 
@@ -829,6 +828,15 @@ function _basic_atom_features(
         ref_pos_augment = ref_pos_augment,
     )
     token_bonds = _compute_token_bonds(atoms, atom_to_token_idx, ref_space_uid, n_token)
+    # NOTE: is_dna/is_rna/is_protein/is_ligand are set per-atom from mol_type.
+    # Python Protenix upstream uses chain-level majority vote (max frequency),
+    # while the PXDesign fork has a sorting bug that picks the LEAST frequent
+    # type.  Since these features are NOT consumed by the model (not in
+    # ProtenixFeatures), the exact behavior doesn't affect model output.
+    # We use per-atom classification here which is correct for all standard
+    # cases and only differs for chains containing modified bases with a
+    # different CCD mol_type than the chain majority (e.g. 5MC "RNA LINKING"
+    # in a DNA chain).
     return Dict(
         "is_protein" => [a.mol_type == "protein" for a in atoms],
         "is_ligand" => [a.mol_type == "ligand" for a in atoms],
@@ -900,7 +908,17 @@ function _build_feature_dict(
     restype = restype_onehot_encoded(cano_res)
     size(restype, 2) == restype_depth || error("Unexpected restype depth.")
     profile = restype[:, 1:32]
-    msa = fill(STD_RESIDUES_WITH_GAP["-"], n_msa, n_token)
+    # MSA: set to argmax(restype) per token — matching Python's
+    # features_dict["msa"] = torch.nonzero(features_dict["restype"])[:, 1].unsqueeze(0)
+    msa = zeros(Int, n_msa, n_token)
+    for i in 1:n_token
+        for j in 1:restype_depth
+            if restype[i, j] != 0
+                msa[1, i] = j - 1  # 0-indexed
+                break
+            end
+        end
+    end
     has_deletion = zeros(Float32, n_msa, n_token)
     deletion_value = zeros(Float32, n_msa, n_token)
     deletion_mean = zeros(Float32, n_token)
@@ -911,17 +929,19 @@ function _build_feature_dict(
 
     ref_space_uid = _compute_ref_space_uid(atoms)
 
-    # Compute basic atom features first (needed for ligand frame computation)
+    # Compute basic atom features (includes augmented ref_pos for output)
     basic_feats = _basic_atom_features(atoms, tokens, atom_to_token_idx, ref_space_uid, n_token, rng, ref_pos_augment)
-    # ref_pos from basic_feats is already augmented, but for frame computation we use it
-    # (Python also uses ref_pos after CCD lookup for frame computation)
-    ref_pos_for_frames = basic_feats["ref_pos"]  # (N_atom, 3)
-    ref_mask_for_frames = basic_feats["ref_mask"]  # (N_atom,)
+
+    # Frame computation must use UN-augmented ref_pos (matching Python which computes
+    # frames before augmentation).  Get the raw CCD reference positions separately.
+    raw_ref_pos, _, raw_ref_mask = _ccd_reference_features(atoms, ref_space_uid, rng; ref_pos_augment = false)
+    ref_pos_for_frames = raw_ref_pos   # (N_atom, 3) — no rotation
+    ref_mask_for_frames = raw_ref_mask  # (N_atom,)
 
     # Build ref_space_uid -> atom indices mapping for ligand frame computation
     uid_to_atom_indices = Dict{Int, Vector{Int}}()
     for (i, a) in enumerate(atoms)
-        if a.mol_type == "ligand" || !(a.res_name in keys(STD_RESIDUES_PROTENIX))
+        if a.mol_type == "ligand" || !(haskey(RES_ATOMS_DICT, a.res_name))
             uid = ref_space_uid[i]
             if !haskey(uid_to_atom_indices, uid)
                 uid_to_atom_indices[uid] = Int[]
@@ -934,8 +954,8 @@ function _build_feature_dict(
     frame_atom_index = fill(-1, n_token, 3)
     for (i, tok) in enumerate(tokens)
         ca = centre_atoms[i]
-        if ca.mol_type != "ligand" && ca.res_name in keys(STD_RESIDUES_PROTENIX) && length(tok.atom_indices) > 1
-            # Standard polymer token: use N/CA/C or C1'/C3'/C4'
+        if ca.mol_type != "ligand" && haskey(RES_ATOMS_DICT, ca.res_name) && length(tok.atom_indices) > 1
+            # Standard polymer or design backbone token: use N/CA/C or C1'/C3'/C4'
             ok, frame = _frame_for_polymer_token(tok, ca)
             has_frame[i] = ok
             frame_atom_index[i, :] = ifelse.(frame .>= 0, frame .- 1, frame)

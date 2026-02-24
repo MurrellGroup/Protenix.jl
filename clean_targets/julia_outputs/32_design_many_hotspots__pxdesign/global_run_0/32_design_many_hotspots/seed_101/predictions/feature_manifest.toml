@@ -1,6 +1,0 @@
-N_design_token = 80
-task_name = "32_design_many_hotspots"
-N_condition_token = 116
-N_atom = 1250
-N_token = 196
-N_msa = 1

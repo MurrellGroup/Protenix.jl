@@ -270,7 +270,10 @@ function _load_template_embedder!(
     _load_linear_nobias!(t.linear_no_bias_a, weights, "$prefix.linear_no_bias_a.weight"; strict = strict)
     _load_layernorm!(t.layernorm_v, weights, "$prefix.layernorm_v"; strict = strict)
     _load_linear_nobias!(t.linear_no_bias_u, weights, "$prefix.linear_no_bias_u.weight"; strict = strict)
-    # pairformer_stack exists but template path is disabled in reference; load only if keys exist.
+    # Load pairformer_stack when template blocks are present (v1.0 models)
+    if t.n_blocks > 0
+        _load_pairformer_stack!(t.pairformer_stack, weights, "$prefix.pairformer_stack"; strict = strict)
+    end
     return t
 end
 
@@ -506,6 +509,7 @@ function infer_protenix_mini_dims(weights::AbstractDict{<:AbstractString, <:Any}
     pairformer_blocks = _infer_blocks("pairformer_stack.blocks.")
     msa_blocks = _infer_blocks("msa_module.blocks.")
     conf_blocks = _infer_blocks("confidence_head.pairformer_stack.blocks.")
+    template_blocks = _infer_blocks("template_embedder.pairformer_stack.blocks.")
 
     plddt_w = _key(weights, "confidence_head.plddt_weight"; strict = true)
     plddt_w isa AbstractArray || error("confidence_head.plddt_weight must be array")
@@ -542,6 +546,7 @@ function infer_protenix_mini_dims(weights::AbstractDict{<:AbstractString, <:Any}
         pairformer_heads = size(pair_att, 1),
         max_atoms_per_token = size(plddt_w, 1),
         b_plddt = size(plddt_w, 3),
+        template_blocks = template_blocks,
         input_esm_enable = has_esm,
         input_esm_embedding_dim = esm_embedding_dim,
     )
@@ -571,6 +576,7 @@ function build_protenix_mini_model(
         confidence_max_atoms_per_token = d.max_atoms_per_token,
         sample_n_step = 5,
         sample_n_sample = 1,
+        template_blocks = d.template_blocks,
         input_esm_enable = use_esm,
         input_esm_embedding_dim = d.input_esm_embedding_dim,
         rng = rng,
@@ -587,7 +593,9 @@ function load_protenix_mini_model!(
     rel = _key(weights, "relative_position_encoding.linear_no_bias.weight"; strict = strict)
     rel !== nothing && _load_matrix!(model.relative_position_encoding.weight, rel, "relative_position_encoding.linear_no_bias.weight")
 
-    _load_template_embedder!(model.template_embedder, weights, "template_embedder"; strict = false)
+    # Load template embedder strictly when it has blocks (v1.0+), non-strictly for v0.5 (n_blocks=0)
+    te_strict = model.template_embedder.n_blocks > 0 ? strict : false
+    _load_template_embedder!(model.template_embedder, weights, "template_embedder"; strict = te_strict)
     if model.noisy_structure_embedder !== nothing
         _load_noisy_structure_embedder!(model.noisy_structure_embedder, weights, "noisy_structure_embedder"; strict = false)
     end

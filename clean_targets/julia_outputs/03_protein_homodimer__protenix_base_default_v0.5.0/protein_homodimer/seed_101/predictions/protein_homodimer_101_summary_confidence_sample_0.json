@@ -1,1 +1,0 @@
-{"model_output":"julia_protenix","sample_name":"protein_homodimer","seed":101,"sample_idx":0,"plddt_logits_shape":[50,796],"pae_logits_shape":[64,102,102],"pde_logits_shape":[64,102,102],"resolved_logits_shape":[2,796],"plddt_logits_maxprob_mean":0.06747019199328294,"resolved_logits_maxprob_mean":0.9632014757733387}

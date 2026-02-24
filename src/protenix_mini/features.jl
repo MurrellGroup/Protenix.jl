@@ -30,9 +30,13 @@ end
     msa                   # Union{Nothing, AbstractMatrix{Int}}  — (N_tok, N_msa) features-first
     has_deletion          # Union{Nothing, AbstractMatrix{Float32}}  — (N_tok, N_msa) features-first
     deletion_value        # Union{Nothing, AbstractMatrix{Float32}}  — (N_tok, N_msa) features-first
-    template_restype      # Union{Nothing, AbstractMatrix{Int}}
+    template_restype      # Union{Nothing, AbstractMatrix{Int}}  — (N_tmpl, N_tok) NOT transposed
     template_all_atom_mask      # Union{Nothing, AbstractArray{Float32,3}}
     template_all_atom_positions # Union{Nothing, AbstractArray{Float32,4}}
+    template_distogram          # Union{Nothing, AbstractArray{Float32}}    — (N_tmpl, N, N, 39)
+    template_unit_vector        # Union{Nothing, AbstractArray{Float32}}    — (N_tmpl, N, N, 3)
+    template_pseudo_beta_mask   # Union{Nothing, AbstractArray{Float32}}    — (N_tmpl, N, N)
+    template_backbone_frame_mask # Union{Nothing, AbstractArray{Float32}}   — (N_tmpl, N, N)
     struct_cb_coords      # Union{Nothing, AbstractMatrix{Float32}}  — (3, N_tok) features-first
     struct_cb_mask        # Union{Nothing, AbstractVector{Bool}}
     esm_token_embedding   # Union{Nothing, AbstractMatrix{Float32}}  — (C_esm, N_tok) features-first
@@ -78,6 +82,13 @@ end
 function _optional_i_mat_ff(feat::AbstractDict{<:AbstractString, <:Any}, key::String)
     haskey(feat, key) || return nothing
     return permutedims(_as_i_mat(feat[key], key))
+end
+
+function _optional_f_arr(feat::AbstractDict{<:AbstractString, <:Any}, key::String)
+    haskey(feat, key) || return nothing
+    x = feat[key]
+    x isa AbstractArray || error("$key must be array-like")
+    return Float32.(x)
 end
 
 function _optional_f_arr3(feat::AbstractDict{<:AbstractString, <:Any}, key::String)
@@ -166,8 +177,15 @@ function as_protenix_features(feat::AbstractDict{<:AbstractString, <:Any})
     has_deletion = _optional_f_mat_ff(feat, "has_deletion")
     deletion_value = _optional_f_mat_ff(feat, "deletion_value")
 
-    # Template features: transpose
-    template_restype = _optional_i_mat_ff(feat, "template_restype")
+    # Template features: keep template_restype in (N_template, N_token) layout
+    # (NOT transposed — _template_embedder_core indexes dim 1 as template batch dim)
+    template_restype = if haskey(feat, "template_restype")
+        _as_i_mat(feat["template_restype"], "template_restype")
+    elseif haskey(feat, "template_aatype")
+        _as_i_mat(feat["template_aatype"], "template_aatype")
+    else
+        nothing
+    end
 
     # Atom features: transpose to features-first
     ref_pos = permutedims(_as_f_mat(feat["ref_pos"], "ref_pos"))  # (N_atom, 3) → (3, N_atom)
@@ -195,6 +213,10 @@ function as_protenix_features(feat::AbstractDict{<:AbstractString, <:Any})
         template_restype,
         _optional_f_arr3(feat, "template_all_atom_mask"),
         _optional_f_arr4(feat, "template_all_atom_positions"),
+        _optional_f_arr(feat, "template_distogram"),
+        _optional_f_arr(feat, "template_unit_vector"),
+        _optional_f_arr(feat, "template_pseudo_beta_mask"),
+        _optional_f_arr(feat, "template_backbone_frame_mask"),
         struct_cb_coords,  # (3, N_tok)
         haskey(feat, "struct_cb_mask") ? _as_b_vec(feat["struct_cb_mask"], "struct_cb_mask") : nothing,
         esm_token_embedding,  # (C_esm, N_tok)
@@ -243,6 +265,10 @@ function features_to_device(feat::ProtenixFeatures, ref::AbstractArray)
         feat.template_restype,
         mv(feat.template_all_atom_mask),
         mv(feat.template_all_atom_positions),
+        mv(feat.template_distogram),
+        mv(feat.template_unit_vector),
+        mv(feat.template_pseudo_beta_mask),
+        mv(feat.template_backbone_frame_mask),
         mv(feat.struct_cb_coords),
         feat.struct_cb_mask,
         mv(feat.esm_token_embedding),

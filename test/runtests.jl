@@ -430,8 +430,8 @@ end
     PXDesign.ProtenixAPI._inject_task_covalent_token_bonds!(feat, bundle["atoms"], bond_task, parsed_bond.entity_chain_ids)
 
     token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
-    tok_a = findfirst(==("A0"), token_chain_ids)
-    tok_b = findfirst(==("B0"), token_chain_ids)
+    tok_a = findfirst(==("A"), token_chain_ids)
+    tok_b = findfirst(==("B"), token_chain_ids)
     @test tok_a !== nothing
     @test tok_b !== nothing
     @test feat["token_bonds"][tok_a, tok_b] == 1
@@ -469,8 +469,8 @@ end
         parsed_smiles.entity_atom_map,
     )
     token_chain_ids_smiles = [bundle_smiles["atoms"][tok.centre_atom_index].chain_id for tok in bundle_smiles["tokens"]]
-    prot_cols = findall(==("A0"), token_chain_ids_smiles)
-    lig_cols = findall(==("B0"), token_chain_ids_smiles)
+    prot_cols = findall(==("A"), token_chain_ids_smiles)
+    lig_cols = findall(==("B"), token_chain_ids_smiles)
     @test !isempty(prot_cols)
     @test !isempty(lig_cols)
     @test any(feat_smiles["token_bonds"][i, j] == 1 for i in prot_cols, j in lig_cols)
@@ -779,8 +779,8 @@ A-D
         )
 
         msa = Int.(feat["msa"])
-        a_cols = findall(==("A0"), token_chain_ids)
-        b_cols = findall(==("B0"), token_chain_ids)
+        a_cols = findall(==("A"), token_chain_ids)
+        b_cols = findall(==("B"), token_chain_ids)
         q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
         q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
         pair1_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
@@ -838,8 +838,8 @@ A-D
         )
 
         msa = Int.(feat["msa"])
-        a_cols = findall(==("A0"), token_chain_ids)
-        b_cols = findall(==("B0"), token_chain_ids)
+        a_cols = findall(==("A"), token_chain_ids)
+        b_cols = findall(==("B"), token_chain_ids)
         q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
         q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
         tax111_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
@@ -897,8 +897,8 @@ A-D
         )
 
         msa = Int.(feat["msa"])
-        a_cols = findall(==("A0"), token_chain_ids)
-        b_cols = findall(==("B0"), token_chain_ids)
+        a_cols = findall(==("A"), token_chain_ids)
+        b_cols = findall(==("B"), token_chain_ids)
         q_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AC")
         q_b = PXDesign.ProtenixAPI._sequence_to_protenix_indices("GG")
         homo_a = PXDesign.ProtenixAPI._sequence_to_protenix_indices("AA")
@@ -919,6 +919,141 @@ A-D
         @test msa[4, b_cols] == q_b
         @test msa[5, a_cols] == q_a
         @test msa[5, b_cols] == nonpair_b
+    end
+end
+
+@testset "RNA MSA feature ingestion" begin
+    # Test 1: RNA-only with inline MSA.
+    mktempdir() do d
+        input_json = joinpath(d, "input.json")
+        task = Dict{String, Any}(
+            "name" => "rna_msa_inline_smoke",
+            "sequences" => Any[
+                Dict(
+                    "rnaSequence" => Dict(
+                        "sequence" => "GUCA",
+                        "count" => 1,
+                        "unpairedMsa" => ">query\nGUCA\n>hit1\nGUCA\n>hit2\nAUCG\n",
+                    ),
+                ),
+            ],
+        )
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        atoms = PXDesign.ProtenixAPI._build_atoms_from_infer_task(task)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = "rna_msa_inline_smoke")
+        feat = bundle["input_feature_dict"]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(feat, task, input_json; use_msa = true)
+
+        @test size(feat["msa"], 2) == 4  # 4 RNA tokens
+        @test size(feat["msa"], 1) >= 2  # query + at least 1 hit
+        # Check RNA indices: G→22, U→24, C→23, A→21
+        msa = Int.(feat["msa"])
+        @test msa[1, :] == [22, 24, 23, 21]  # GUCA → [22, 24, 23, 21]
+        @test size(feat["profile"]) == (4, 32)
+        # Profile should have non-zero entries in RNA index range (21-24)
+        @test sum(feat["profile"][:, 22:25]) > 0f0  # RNA nucleotide columns
+    end
+
+    # Test 2: RNA with MSA file path.
+    mktempdir() do d
+        rna_msa_dir = joinpath(d, "msa", "rna")
+        mkpath(rna_msa_dir)
+        write(
+            joinpath(rna_msa_dir, "non_pairing.a3m"),
+            ">query\nGUCA\n>hit1\nGUCG\n>hit2\nAU-A\n",
+        )
+        input_json = joinpath(d, "input.json")
+        task = Dict{String, Any}(
+            "name" => "rna_msa_file_smoke",
+            "sequences" => Any[
+                Dict(
+                    "rnaSequence" => Dict(
+                        "sequence" => "GUCA",
+                        "count" => 1,
+                        "unpairedMsaPath" => "msa/rna/non_pairing.a3m",
+                    ),
+                ),
+            ],
+        )
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        atoms = PXDesign.ProtenixAPI._build_atoms_from_infer_task(task)
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = "rna_msa_file_smoke")
+        feat = bundle["input_feature_dict"]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(feat, task, input_json; use_msa = true)
+
+        msa = Int.(feat["msa"])
+        @test size(msa, 2) == 4
+        @test msa[1, :] == [22, 24, 23, 21]  # GUCA query
+        @test size(feat["profile"]) == (4, 32)
+    end
+
+    # Test 3: Protein + RNA with MSA on both chains.
+    mktempdir() do d
+        # Protein MSA
+        prot_msa_dir = joinpath(d, "msa", "prot")
+        mkpath(prot_msa_dir)
+        write(joinpath(prot_msa_dir, "non_pairing.a3m"), ">query\nACD\n>hit1\nAGD\n")
+
+        input_json = joinpath(d, "input.json")
+        task = Dict{String, Any}(
+            "name" => "dual_msa_smoke",
+            "sequences" => Any[
+                Dict(
+                    "proteinChain" => Dict(
+                        "sequence" => "ACD",
+                        "count" => 1,
+                        "msa" => Dict(
+                            "precomputed_msa_dir" => "msa/prot",
+                            "pairing_db" => "uniref100",
+                        ),
+                    ),
+                ),
+                Dict(
+                    "rnaSequence" => Dict(
+                        "sequence" => "GU",
+                        "count" => 1,
+                        "unpairedMsa" => ">query\nGU\n>hit1\nAC\n",
+                    ),
+                ),
+            ],
+        )
+        PXDesign.JSONLite.write_json(input_json, Any[task])
+
+        parsed = PXDesign.ProtenixAPI._parse_task_entities(task; json_dir = d)
+        atoms = parsed.atoms
+        bundle = PXDesign.Data.build_feature_bundle_from_atoms(atoms; task_name = "dual_msa_smoke")
+        feat = bundle["input_feature_dict"]
+        token_chain_ids = [bundle["atoms"][tok.centre_atom_index].chain_id for tok in bundle["tokens"]]
+        PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat)
+        PXDesign.ProtenixAPI._inject_task_msa_features!(
+            feat,
+            task,
+            input_json;
+            use_msa = true,
+            chain_specs = parsed.protein_specs,
+            rna_chain_specs = parsed.rna_specs,
+            token_chain_ids = token_chain_ids,
+        )
+
+        @test !isempty(parsed.protein_specs)
+        @test !isempty(parsed.rna_specs)
+        @test parsed.rna_specs[1].sequence == "GU"
+
+        n_prot_tok = count(==("A"), token_chain_ids)
+        n_rna_tok = count(==("B"), token_chain_ids)
+        @test n_prot_tok == 3
+        @test n_rna_tok == 2
+        @test size(feat["msa"], 2) == 5  # 3 protein + 2 RNA tokens
+        @test size(feat["profile"]) == (5, 32)
+
+        msa = Int.(feat["msa"])
+        rna_cols = findall(==("B"), token_chain_ids)
+        # RNA query row should have G→22, U→24
+        @test msa[1, rna_cols] == [22, 24]
     end
 end
 
@@ -1061,7 +1196,7 @@ end
                 auto_feat,
                 auto_bundle["atoms"],
                 auto_bundle["tokens"],
-                Dict("A0" => "AC"),
+                Dict("A" => "AC"),
                 params,
                 "auto esm test",
             )
@@ -1083,7 +1218,7 @@ end
                 auto_feat,
                 auto_bundle["atoms"],
                 auto_bundle["tokens"],
-                Dict("A0" => "AC"),
+                Dict("A" => "AC"),
                 params,
                 "auto esm no-overwrite",
             )
@@ -1098,7 +1233,7 @@ end
 @testset "ProtenixBase sequence wrappers" begin
     atoms = PXDesign.ProtenixBase.build_sequence_atoms("ACD")
     @test !isempty(atoms)
-    @test atoms[1].chain_id == "A0"
+    @test atoms[1].chain_id == "A"
 
     bundle = PXDesign.ProtenixBase.build_sequence_feature_bundle("ACD")
     @test bundle["task_name"] == "protenix_base_sequence"
@@ -1856,7 +1991,7 @@ end
         @test counts["_unmatched"] == 1
     end
 
-    real_idx = joinpath(dirname(@__DIR__), "docs", "checkpoint_index.json")
+    real_idx = joinpath(dirname(@__DIR__), "porting", "docs", "checkpoint_index.json")
     if isfile(real_idx)
         keys = PXDesign.Model.load_checkpoint_index(real_idx)
         counts = PXDesign.Model.checkpoint_prefix_counts(keys)
@@ -2631,7 +2766,7 @@ ATOM 4 O O . ALA A 1 1 ? 3.000 0.200 0.000 1.00 10.00 ? 1 ALA A O 1
         cif_text = read(joinpath(pred_dir, first(sort(cif_files))), String)
         @test occursin("_entity_poly.", cif_text)
         @test occursin("_struct_conn.", cif_text)
-        @test occursin(" A0 ", cif_text)
+        @test occursin(" A ", cif_text)
         @test occursin(" B0 ", cif_text)
         @test isfile(joinpath(pred_dir, "sample_level_output.csv"))
         @test isfile(joinpath(cfg["dump_dir"], "global_run_0", "demo_infer", "seed_12345", "SUCCESS_FILE"))

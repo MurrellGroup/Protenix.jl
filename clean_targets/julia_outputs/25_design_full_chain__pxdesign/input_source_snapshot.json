@@ -1,1 +1,0 @@
-[{"name":"25_design_full_chain","hotspot":{"A":[40,99,107]},"generation":[{"length":80,"count":1,"type":"protein"}],"condition":{"filter":{"crop":{},"chain_id":["A"]},"structure_file":"/home/claudey/FixingKAFA/PXDesign.jl/clean_targets/structures/5o45.cif","msa":{}}}]
