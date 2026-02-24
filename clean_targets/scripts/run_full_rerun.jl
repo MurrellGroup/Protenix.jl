@@ -2,7 +2,7 @@
 #
 # Full rerun: all test sets with all models.
 #
-# After Fixes 1-13 for v1.0 input feature parity, this establishes a fresh baseline
+# After Fixes 1-18 for v1.0 input feature parity, this establishes a fresh baseline
 # with all outputs in one isolated directory.
 #
 # Usage:
@@ -31,7 +31,7 @@ const ROOT = joinpath(@__DIR__, "..", "..")
 const INPUTS = joinpath(ROOT, "clean_targets", "inputs")
 const STRESS_INPUTS = joinpath(ROOT, "clean_targets", "stress_inputs")
 
-const RUN_DIR = joinpath(ROOT, "clean_targets", "run_20260223")
+const RUN_DIR = joinpath(ROOT, "clean_targets", "run_20260224")
 
 # Nested prediction output directories
 const CLEAN_OUTDIR   = joinpath(RUN_DIR, "clean_targets")

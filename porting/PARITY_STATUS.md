@@ -52,7 +52,7 @@ Total:         100
 ```
 
 **Progress**: Improved from 52 ref_pos/47 failed → 80 ref_pos/19 failed after
-Fixes 1-13, then → 82 ref_pos/17 failed after Fixes 14-16. Of the 17 remaining
+Fixes 1-13, then → 82 ref_pos/17 failed after Fixes 14-18. Of the 17 remaining
 failures:
 - 15 accepted SMILES conformer differences (ref_pos, frame_atom_index)
 - 2 accepted Python quirks: ion MSA (s079, s090 — numpy -1 indexing)
