@@ -1,6 +1,6 @@
 # Models
 
-PXDesign.jl supports two model families: **Protenix** (structure prediction / folding) and **PXDesign** (protein binder design). All weights are hosted on HuggingFace and downloaded automatically on first use.
+Protenix.jl supports two model families: **Protenix** (structure prediction / folding) and **PXDesign** (protein binder design). All weights are hosted on HuggingFace and downloaded automatically on first use.
 
 ## Folding Models (Protenix)
 
@@ -123,7 +123,7 @@ Design models generate novel protein binders conditioned on a target structure.
 ## Listing Models at Runtime
 
 ```julia
-using PXDesign
+using Protenix
 for m in list_supported_models()
     println(m.model_name, "  family=", m.family, "  step=", m.default_step)
 end
@@ -135,5 +135,5 @@ All weights are stored as SafeTensors on HuggingFace (`MurrellLab/PXDesign.jl`).
 
 Weights are cached after first download. For offline use:
 ```bash
-export PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=true
+export PROTENIX_WEIGHTS_LOCAL_FILES_ONLY=true
 ```

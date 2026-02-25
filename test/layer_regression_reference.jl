@@ -1,7 +1,7 @@
 module LayerRegressionReference
 
 using Random
-using PXDesign
+using Protenix
 
 function _deepcopy_feature_dict(x)
     if x isa AbstractDict
@@ -22,15 +22,15 @@ function _as_array_f32(x)
 end
 
 function _build_feature_bundles()
-    atoms = PXDesign.ProtenixMini.build_sequence_atoms("ACDEFG"; chain_id = "A0")
-    bundle = PXDesign.Data.build_feature_bundle_from_atoms(
+    atoms = Protenix.ProtenixMini.build_sequence_atoms("ACDEFG"; chain_id = "A0")
+    bundle = Protenix.Data.build_feature_bundle_from_atoms(
         atoms;
         task_name = "layer_regression",
         rng = MersenneTwister(20260211),
     )
     feat_design = _deepcopy_feature_dict(bundle["input_feature_dict"])
     feat_mini = _deepcopy_feature_dict(bundle["input_feature_dict"])
-    PXDesign.ProtenixAPI._normalize_protenix_feature_dict!(feat_mini)
+    Protenix.ProtenixAPI._normalize_protenix_feature_dict!(feat_mini)
     return (atoms = atoms, feat_design = feat_design, feat_mini = feat_mini)
 end
 
@@ -49,21 +49,21 @@ function compute_layer_regression_outputs()
 
     n_tok = length(feat_design["token_index"])
     n_atom = length(atoms)
-    relpos_input = PXDesign.Model.as_relpos_input(feat_design)
-    atom_input = PXDesign.Model.as_atom_attention_input(feat_design)
+    relpos_input = Protenix.Model.as_relpos_input(feat_design)
+    atom_input = Protenix.Model.as_atom_attention_input(feat_design)
 
     # PXDesign model layers
-    cte = PXDesign.Model.ConditionTemplateEmbedder(65, 16; rng = MersenneTwister(1))
-    out["pxdesign.condition_template_embedding"] = PXDesign.Model.condition_template_embedding(
+    cte = Protenix.Model.ConditionTemplateEmbedder(65, 16; rng = MersenneTwister(1))
+    out["pxdesign.condition_template_embedding"] = Protenix.Model.condition_template_embedding(
         cte,
         Int.(feat_design["conditional_templ"]),
         Int.(feat_design["conditional_templ_mask"]),
     )
 
-    relpe = PXDesign.Model.RelativePositionEncoding(4, 2, 8; rng = MersenneTwister(2))
+    relpe = Protenix.Model.RelativePositionEncoding(4, 2, 8; rng = MersenneTwister(2))
     out["pxdesign.relative_position_encoding"] = relpe(relpos_input)
 
-    ife_design = PXDesign.Model.InputFeatureEmbedderDesign(
+    ife_design = Protenix.Model.InputFeatureEmbedderDesign(
         24;
         c_s_inputs = 32,
         c_atom = 16,
@@ -75,7 +75,7 @@ function compute_layer_regression_outputs()
     s_inputs_design = ife_design(feat_design)
     out["pxdesign.input_feature_embedder_design"] = s_inputs_design
 
-    dce = PXDesign.Model.DesignConditionEmbedder(
+    dce = Protenix.Model.DesignConditionEmbedder(
         24;
         c_s_inputs = 32,
         c_z = 8,
@@ -89,7 +89,7 @@ function compute_layer_regression_outputs()
     out["pxdesign.design_condition_embedder.s_inputs"] = s_inputs_dce
     out["pxdesign.design_condition_embedder.z"] = z_dce
 
-    cond = PXDesign.Model.DiffusionConditioning(
+    cond = Protenix.Model.DiffusionConditioning(
         16.0;
         c_z = 8,
         c_s = 16,
@@ -101,7 +101,7 @@ function compute_layer_regression_outputs()
     )
     s_trunk = reshape(Float32.(collect(1:(n_tok * 16))), 16, n_tok) ./ 100f0
     z_trunk = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), 8, n_tok, n_tok) ./ 100f0
-    pair_cache = PXDesign.Model.prepare_pair_cache(cond, relpos_input, z_trunk)
+    pair_cache = Protenix.Model.prepare_pair_cache(cond, relpos_input, z_trunk)
     single_s, pair_z = cond(
         Float32[16f0, 16f0],
         relpos_input,
@@ -117,20 +117,20 @@ function compute_layer_regression_outputs()
     a_test = reshape(Float32.(collect(1:(n_tok * 12))), 12, n_tok) ./ 50f0
     s_test = reshape(Float32.(collect(1:(n_tok * 16))), 16, n_tok) ./ 60f0
     z_test = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), 8, n_tok, n_tok) ./ 70f0
-    ctb = PXDesign.Model.ConditionedTransitionBlock(12, 16; n = 2, rng = MersenneTwister(6))
+    ctb = Protenix.Model.ConditionedTransitionBlock(12, 16; n = 2, rng = MersenneTwister(6))
     out["pxdesign.conditioned_transition_block"] = ctb(a_test, s_test)
     mask_test = ones(Float32, n_tok, 1)
 
-    apb = PXDesign.Model.AttentionPairBias(12, 16, 8; n_heads = 4, rng = MersenneTwister(7))
+    apb = Protenix.Model.AttentionPairBias(12, 16, 8; n_heads = 4, rng = MersenneTwister(7))
     out["pxdesign.attention_pair_bias"] = apb(a_test, s_test, z_test)
 
-    dtb = PXDesign.Model.DiffusionTransformerBlock(12, 16, 8; n_heads = 4, rng = MersenneTwister(8))
+    dtb = Protenix.Model.DiffusionTransformerBlock(12, 16, 8; n_heads = 4, rng = MersenneTwister(8))
     out["pxdesign.diffusion_transformer_block"] = dtb(a_test, s_test, z_test, mask_test)
 
-    dt = PXDesign.Model.DiffusionTransformer(12, 16, 8; n_blocks = 2, n_heads = 4, rng = MersenneTwister(9))
+    dt = Protenix.Model.DiffusionTransformer(12, 16, 8; n_blocks = 2, n_heads = 4, rng = MersenneTwister(9))
     out["pxdesign.diffusion_transformer"] = dt(a_test, s_test, z_test)
 
-    aae_no_coords = PXDesign.Model.AtomAttentionEncoder(
+    aae_no_coords = Protenix.Model.AtomAttentionEncoder(
         24;
         has_coords = false,
         c_atom = 16,
@@ -147,7 +147,7 @@ function compute_layer_regression_outputs()
     out["pxdesign.atom_attention_encoder_no_coords.c_skip"] = c_skip0
     out["pxdesign.atom_attention_encoder_no_coords.p_skip"] = p_skip0
 
-    aae_coords = PXDesign.Model.AtomAttentionEncoder(
+    aae_coords = Protenix.Model.AtomAttentionEncoder(
         24;
         has_coords = true,
         c_atom = 16,
@@ -169,7 +169,7 @@ function compute_layer_regression_outputs()
     out["pxdesign.atom_attention_encoder_with_coords.c_skip"] = c_skip1
     out["pxdesign.atom_attention_encoder_with_coords.p_skip"] = p_skip1
 
-    aad = PXDesign.Model.AtomAttentionDecoder(
+    aad = Protenix.Model.AtomAttentionDecoder(
         24;
         c_atom = 16,
         c_atompair = 8,
@@ -181,7 +181,7 @@ function compute_layer_regression_outputs()
     )
     out["pxdesign.atom_attention_decoder"] = aad(atom_input, a_tok1, q_skip1, c_skip1, p_skip1)
 
-    dm = PXDesign.Model.DiffusionModule(
+    dm = Protenix.Model.DiffusionModule(
         24,
         16,
         8,
@@ -209,29 +209,29 @@ function compute_layer_regression_outputs()
     )
 
     # Protenix-mini/v0.5 layers
-    ife_mini = PXDesign.ProtenixMini.InputFeatureEmbedder(16, 8, 24; rng = MersenneTwister(21))
+    ife_mini = Protenix.ProtenixMini.InputFeatureEmbedder(16, 8, 24; rng = MersenneTwister(21))
     s_inputs_mini = ife_mini(feat_mini)
     out["protenix_mini.input_feature_embedder"] = s_inputs_mini
 
-    relpe_mini = PXDesign.ProtenixMini.RelativePositionEncoding(4, 2, 8; rng = MersenneTwister(22))
+    relpe_mini = Protenix.ProtenixMini.RelativePositionEncoding(4, 2, 8; rng = MersenneTwister(22))
     out["protenix_mini.relative_position_encoding"] = relpe_mini(feat_mini)
 
     a_pair = reshape(Float32.(collect(1:(n_tok * 12))), 12, n_tok) ./ 100f0
     z_pair = reshape(Float32.(collect(1:(n_tok * n_tok * 8))), 8, n_tok, n_tok) ./ 120f0
-    pair_att = PXDesign.ProtenixMini.PairAttentionNoS(12, 8; n_heads = 4, rng = MersenneTwister(23))
+    pair_att = Protenix.ProtenixMini.PairAttentionNoS(12, 8; n_heads = 4, rng = MersenneTwister(23))
     out["protenix_mini.pair_attention_no_s"] = pair_att(a_pair, z_pair)
 
-    tri_mul = PXDesign.ProtenixMini.TriangleMultiplication(8, 4; outgoing = true, rng = MersenneTwister(24))
+    tri_mul = Protenix.ProtenixMini.TriangleMultiplication(8, 4; outgoing = true, rng = MersenneTwister(24))
     out["protenix_mini.triangle_multiplication"] = tri_mul(z_pair)
 
-    tri_att = PXDesign.ProtenixMini.TriangleAttention(8, 8, 2; starting = true, rng = MersenneTwister(25))
+    tri_att = Protenix.ProtenixMini.TriangleAttention(8, 8, 2; starting = true, rng = MersenneTwister(25))
     out["protenix_mini.triangle_attention"] = tri_att(z_pair)
 
     msa_small = reshape(Float32.(collect(1:(2 * n_tok * 6))), 6, 2, n_tok) ./ 130f0
-    opm = PXDesign.ProtenixMini.OuterProductMean(6, 8, 4; rng = MersenneTwister(26))
+    opm = Protenix.ProtenixMini.OuterProductMean(6, 8, 4; rng = MersenneTwister(26))
     out["protenix_mini.outer_product_mean"] = opm(msa_small)
 
-    pfb = PXDesign.ProtenixMini.PairformerBlock(
+    pfb = Protenix.ProtenixMini.PairformerBlock(
         8,
         12;
         n_heads = 4,
@@ -244,12 +244,12 @@ function compute_layer_regression_outputs()
     out["protenix_mini.pairformer_block.s"] = s_pfb
     out["protenix_mini.pairformer_block.z"] = z_pfb
 
-    pfs = PXDesign.ProtenixMini.PairformerStack(8, 12; n_blocks = 1, n_heads = 4, rng = MersenneTwister(28))
+    pfs = Protenix.ProtenixMini.PairformerStack(8, 12; n_blocks = 1, n_heads = 4, rng = MersenneTwister(28))
     s_pfs, z_pfs = pfs(a_pair, z_pair)
     out["protenix_mini.pairformer_stack.s"] = s_pfs
     out["protenix_mini.pairformer_stack.z"] = z_pfs
 
-    msa_module = PXDesign.ProtenixMini.MSAModule(
+    msa_module = Protenix.ProtenixMini.MSAModule(
         8,
         89;
         n_blocks = 1,
@@ -262,10 +262,10 @@ function compute_layer_regression_outputs()
     s_msa = reshape(Float32.(collect(1:(n_tok * 89))), 89, n_tok) ./ 150f0
     out["protenix_mini.msa_module"] = msa_module(feat_mini, z_msa, s_msa; rng = MersenneTwister(291))
 
-    dist_head = PXDesign.ProtenixMini.DistogramHead(8; no_bins = 16, rng = MersenneTwister(30))
+    dist_head = Protenix.ProtenixMini.DistogramHead(8; no_bins = 16, rng = MersenneTwister(30))
     out["protenix_mini.distogram_head"] = dist_head(z_pair)
 
-    conf_head = PXDesign.ProtenixMini.ConfidenceHead(
+    conf_head = Protenix.ProtenixMini.ConfidenceHead(
         16,
         8,
         89;
@@ -292,7 +292,7 @@ function compute_layer_regression_outputs()
     out["protenix_mini.confidence_head.pde"] = pde
     out["protenix_mini.confidence_head.resolved"] = resolved
 
-    pm = PXDesign.ProtenixMini.ProtenixMiniModel(
+    pm = Protenix.ProtenixMini.ProtenixMiniModel(
         32,
         32,
         16,
@@ -315,7 +315,7 @@ function compute_layer_regression_outputs()
         sample_n_sample = 1,
         rng = MersenneTwister(32),
     )
-    trunk = PXDesign.ProtenixMini.get_pairformer_output(pm, feat_mini; n_cycle = 1, rng = MersenneTwister(321))
+    trunk = Protenix.ProtenixMini.get_pairformer_output(pm, feat_mini; n_cycle = 1, rng = MersenneTwister(321))
     out["protenix_mini.model_trunk.s_inputs"] = trunk.s_inputs
     out["protenix_mini.model_trunk.s"] = trunk.s
     out["protenix_mini.model_trunk.z"] = trunk.z
@@ -328,12 +328,12 @@ function compute_layer_regression_outputs()
     x_denoised_pm = pm.diffusion_module(
         x_noisy_pm,
         Float32[16f0];
-        relpos_input = PXDesign.Model.as_relpos_input(feat_mini),
+        relpos_input = Protenix.Model.as_relpos_input(feat_mini),
         s_inputs = s_inputs_ff,
         s_trunk = s_trunk_ff,
         z_trunk = z_trunk_ff,
         atom_to_token_idx = Int.(feat_mini["atom_to_token_idx"]),
-        input_feature_dict = PXDesign.Model.as_atom_attention_input(feat_mini),
+        input_feature_dict = Protenix.Model.as_atom_attention_input(feat_mini),
     )
     out["protenix_mini.model_diffusion_module"] = x_denoised_pm
     out["protenix_v0_5.model_diffusion_module"] = x_denoised_pm

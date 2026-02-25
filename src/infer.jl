@@ -347,10 +347,10 @@ function _run_diffusion_coordinates(feature_bundle::Dict{String, Any}, cfg::Dict
         raw_weights_dir = weight_opts.raw_weights_dir
         safetensors_weights_path = weight_opts.safetensors_weights_path
         isempty(raw_weights_dir) || error(
-            "Local raw_weights_dir is disabled. Configure PXDESIGN_WEIGHTS_* to fetch safetensors from HuggingFace.",
+            "Local raw_weights_dir is disabled. Configure PROTENIX_WEIGHTS_* to fetch safetensors from HuggingFace.",
         )
         isempty(safetensors_weights_path) || error(
-            "Local safetensors_weights_path is disabled. Configure PXDESIGN_WEIGHTS_* to fetch safetensors from HuggingFace.",
+            "Local safetensors_weights_path is disabled. Configure PROTENIX_WEIGHTS_* to fetch safetensors from HuggingFace.",
         )
         model_name = String(get(cfg, "model_name", "pxdesign_v0.1.0"))
         weights_ref = download_model_weights(model_name)
@@ -518,7 +518,7 @@ function _write_stub_prediction(task_dump_dir::AbstractString, task_name::Abstra
         "message" => "Dry-run mode: feature pipeline executed, model inference skipped.",
         "timestamp_utc" => string(now(UTC)),
     )
-    open(joinpath(predictions_dir, "PXDesign_stub_result.toml"), "w") do io
+    open(joinpath(predictions_dir, "Protenix_stub_result.toml"), "w") do io
         TOML.print(io, placeholder)
     end
 end

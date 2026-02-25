@@ -1,6 +1,6 @@
 # Input Formats
 
-PXDesign.jl accepts inputs in three ways:
+Protenix.jl accepts inputs in three ways:
 1. **REPL API** — Julia functions for building tasks programmatically
 2. **JSON files** — Protenix-compatible JSON for folding/prediction
 3. **YAML files** — PXDesign design task specifications
@@ -12,7 +12,7 @@ PXDesign.jl accepts inputs in three ways:
 Use entity builder functions to construct a task Dict, then pass it to `fold()`:
 
 ```julia
-using PXDesign
+using Protenix
 
 # Simple protein
 task = protenix_task(protein_chain("MVLSPADKTNVKAAWGKVGAHAGEYGAEALERMFLSFPTTKTYFPHFDLSH"))

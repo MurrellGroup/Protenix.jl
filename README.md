@@ -6,7 +6,7 @@ Unofficial pure Julia implementation of [Protenix](https://github.com/bytedance/
 
 ```julia
 using Pkg
-Pkg.develop(path="path/to/PXDesign.jl")
+Pkg.develop(path="path/to/Protenix.jl")
 ```
 
 If shared dependencies aren't resolved automatically:
@@ -14,7 +14,7 @@ If shared dependencies aren't resolved automatically:
 ```julia
 Pkg.develop(path="path/to/Onion.jl")
 Pkg.develop(path="path/to/ProtInterop.jl")
-Pkg.develop(path="path/to/PXDesign.jl")
+Pkg.develop(path="path/to/Protenix.jl")
 Pkg.instantiate()
 ```
 
@@ -31,7 +31,7 @@ Pkg.add(url="https://github.com/AntonOresten/SafeTensors.jl", rev="bfloat16s-v0.
 ## Quickstart: Folding
 
 ```julia
-using PXDesign
+using Protenix
 
 # Load the latest v1.0 model
 h = load_protenix("protenix_v1"; gpu=true)
@@ -97,7 +97,7 @@ records = predict_json("inputs/complex.json";
 ## Quickstart: Design
 
 ```julia
-using PXDesign
+using Protenix
 
 dh = load_pxdesign("pxdesign_v0.1.0"; gpu=true)
 
@@ -174,7 +174,7 @@ Weights are downloaded automatically from HuggingFace on first use and cached lo
 
 For offline use:
 ```bash
-export PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=true
+export PROTENIX_WEIGHTS_LOCAL_FILES_ONLY=true
 ```
 
 ## Examples
@@ -191,20 +191,20 @@ The `examples/` directory contains runnable inputs for all supported entity type
 ### Running an Example
 
 ```julia
-using PXDesign
+using Protenix
 
 # From JSON
 records = predict_json("examples/inputs/01_protein_monomer.json";
     model_name="protenix_v1", gpu=true)
 
 # Design from YAML
-cfg = PXDesign.Config.default_config()
+cfg = Protenix.Config.default_config()
 cfg["input_json_path"] = "examples/inputs/23_design_pdl1_hotspots.yaml"
 cfg["dump_dir"] = "./output"
 cfg["model_name"] = "pxdesign_v0.1.0"
 cfg["gpu"] = true
 cfg["seeds"] = [101]
-PXDesign.run_infer(cfg)
+Protenix.run_infer(cfg)
 ```
 
 ## Known Limitations
@@ -218,5 +218,5 @@ PXDesign.run_infer(cfg)
 
 ```julia
 using Pkg
-Pkg.test("PXDesign")
+Pkg.test("Protenix")
 ```

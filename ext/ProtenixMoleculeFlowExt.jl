@@ -1,9 +1,9 @@
-module PXDesignMoleculeFlowExt
+module ProtenixMoleculeFlowExt
 
-using PXDesign
+using Protenix
 using MoleculeFlow
 
-import PXDesign.ProtenixAPI: _smiles_to_atoms_and_bonds, AtomRecord
+import Protenix.ProtenixAPI: _smiles_to_atoms_and_bonds, AtomRecord
 
 function _canonical_element_symbol(sym::AbstractString)
     s = strip(String(sym))
@@ -35,7 +35,7 @@ function _coords_from_conformer(mol, n_atoms::Int)
     error("SMILES conformer atom count mismatch: coords=$(size(coords3, 1)) atoms=$n_atoms")
 end
 
-function PXDesign.ProtenixAPI._smiles_to_atoms_and_bonds(smiles::String, chain_id::String)
+function Protenix.ProtenixAPI._smiles_to_atoms_and_bonds(smiles::String, chain_id::String)
     mol = MoleculeFlow.mol_from_smiles(smiles)
     mol.valid || error("Invalid SMILES: $smiles")
 

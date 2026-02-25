@@ -1721,7 +1721,7 @@ function _normalize_ligand_atom_map(atom_map_any, context::String)
     return out
 end
 
-# Stub: overridden by PXDesignMoleculeFlowExt when MoleculeFlow is loaded.
+# Stub: overridden by ProtenixMoleculeFlowExt when MoleculeFlow is loaded.
 # Returns (atoms::Vector{AtomRecord}, bonds::Vector{Tuple{String,String}})
 function _smiles_to_atoms_and_bonds end
 
@@ -6129,7 +6129,7 @@ end
 
 Load a Protenix model and return a reusable [`ProtenixHandle`](@ref). Weights are
 downloaded from HuggingFace (`MurrellLab/PXDesign.jl`) on first use and cached locally.
-Set `PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY=true` for offline mode after prefetching.
+Set `PROTENIX_WEIGHTS_LOCAL_FILES_ONLY=true` for offline mode after prefetching.
 
 # Arguments
 - `model_name::AbstractString`: one of the supported model names (see `list_supported_models()`)

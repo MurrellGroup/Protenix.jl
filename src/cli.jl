@@ -17,7 +17,7 @@ import ..ProtenixAPI:
 export main
 
 function _usage(io::IO = stdout)
-    println(io, "PXDesign.jl")
+    println(io, "Protenix.jl")
     println(io, "")
     println(io, "Usage:")
     println(io, "  pxdesign infer -i <input.json|yaml|yml> -o <dump_dir> [options]")

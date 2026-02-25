@@ -19,11 +19,11 @@ function _env_bool(key::AbstractString, default::Bool = false)
 end
 
 function _resolve_source(variant::Symbol)
-    local_files_only = _env_bool("PXDESIGN_ESM_LOCAL_FILES_ONLY", false)
+    local_files_only = _env_bool("PROTENIX_ESM_LOCAL_FILES_ONLY", false)
     if variant == :esm2_3b
-        repo_id = get(ENV, "PXDESIGN_ESM_REPO_ID", "facebook/esmfold_v1")
-        filename = get(ENV, "PXDESIGN_ESM_FILENAME", "model.safetensors")
-        revision = get(ENV, "PXDESIGN_ESM_REVISION", "ba837a3")
+        repo_id = get(ENV, "PROTENIX_ESM_REPO_ID", "facebook/esmfold_v1")
+        filename = get(ENV, "PROTENIX_ESM_FILENAME", "model.safetensors")
+        revision = get(ENV, "PROTENIX_ESM_REVISION", "ba837a3")
         loader_kind = :esmfold_embed
         return (
             repo_id = repo_id,
@@ -33,14 +33,14 @@ function _resolve_source(variant::Symbol)
             loader_kind = loader_kind,
         )
     elseif variant == :esm2_3b_ism
-        repo_id = get(ENV, "PXDESIGN_ESM_ISM_REPO_ID", get(ENV, "PXDESIGN_WEIGHTS_REPO_ID", "MurrellLab/PXDesign.jl"))
+        repo_id = get(ENV, "PROTENIX_ESM_ISM_REPO_ID", get(ENV, "PROTENIX_WEIGHTS_REPO_ID", "MurrellLab/PXDesign.jl"))
         filename = get(
             ENV,
-            "PXDESIGN_ESM_ISM_FILENAME",
+            "PROTENIX_ESM_ISM_FILENAME",
             "weights_safetensors_esm2_t36_3B_UR50D_ism/esm2_t36_3B_UR50D_ism.safetensors",
         )
-        revision = get(ENV, "PXDESIGN_ESM_ISM_REVISION", get(ENV, "PXDESIGN_WEIGHTS_REVISION", "main"))
-        loader_kind_raw = lowercase(strip(get(ENV, "PXDESIGN_ESM_ISM_LOADER", "fair_esm2")))
+        revision = get(ENV, "PROTENIX_ESM_ISM_REVISION", get(ENV, "PROTENIX_WEIGHTS_REVISION", "main"))
+        loader_kind_raw = lowercase(strip(get(ENV, "PROTENIX_ESM_ISM_LOADER", "fair_esm2")))
         loader_kind = loader_kind_raw == "esmfold_embed" ? :esmfold_embed : :fair_esm2
         return (
             repo_id = repo_id,

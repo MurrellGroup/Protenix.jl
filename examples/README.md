@@ -1,23 +1,23 @@
 # Clean Targets — Comprehensive Protenix & PXDesign Test Suite
 
-This directory contains the definitive validation suite for achieving full feature parity between Python Protenix/PXDesign and Julia PXDesign.jl. It replaces all previous scattered test outputs (`e2e_output/`, `cif_comparison/`, `/tmp/` scripts).
+This directory contains the definitive validation suite for achieving full feature parity between Python Protenix/PXDesign and Julia Protenix.jl. It replaces all previous scattered test outputs (`e2e_output/`, `cif_comparison/`, `/tmp/` scripts).
 
 ## Quick Start
 
 ```bash
 # Run all targets through Python Protenix (generates reference outputs)
-cd path/to/PXDesign.jl
+cd path/to/Protenix.jl
 bash clean_targets/scripts/run_all_python.sh
 
 # Run a single target
 bash clean_targets/scripts/run_all_python.sh 01
 
-# Run all targets through Julia PXDesign
+# Run all targets through Julia Protenix
 cd path/to/your-julia-env
-julia --project=. path/to/PXDesign.jl/clean_targets/scripts/run_all_julia.jl
+julia --project=. path/to/Protenix.jl/clean_targets/scripts/run_all_julia.jl
 
 # Validate all outputs (bond geometry + comparison)
-julia --project=. ../PXDesign.jl/clean_targets/scripts/validate_all.jl
+julia --project=. ../Protenix.jl/clean_targets/scripts/validate_all.jl
 ```
 
 ## Directory Layout
@@ -39,7 +39,7 @@ clean_targets/
 │   └── compounds-3d-RS.sdf
 ├── python_outputs/             # Reference outputs from Python Protenix
 │   └── <target>__<model>/seed_101/...
-├── julia_outputs/              # Julia PXDesign outputs for comparison
+├── julia_outputs/              # Julia Protenix outputs for comparison
 │   └── <target>__<model>/seed_101/...
 └── scripts/
     ├── run_all_python.sh       # Run all targets through Python

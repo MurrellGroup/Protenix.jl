@@ -40,7 +40,7 @@ end
     isfile(_FIXTURE_PATH) || error(
         "Missing layer regression fixture at $_FIXTURE_PATH.\n" *
         "Generate it intentionally with:\n" *
-        "  PXDESIGN_LAYER_FIXTURE_REGEN=do-not-set-this julia --project=. scripts/generate_layer_regression_fixtures.jl"
+        "  PROTENIX_LAYER_FIXTURE_REGEN=do-not-set-this julia --project=. scripts/generate_layer_regression_fixtures.jl"
     )
 
     payload = open(_FIXTURE_PATH, "r") do io

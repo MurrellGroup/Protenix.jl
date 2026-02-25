@@ -266,22 +266,22 @@ predict_sequence(sequence;
 ### `run_infer`
 
 ```julia
-PXDesign.run_infer(cfg::Dict{String, Any}; dry_run=false) → Dict
+Protenix.run_infer(cfg::Dict{String, Any}; dry_run=false) → Dict
 ```
 
 Low-level design inference from a config Dict. Used internally by the CLI and for YAML-based design.
 
 ```julia
-cfg = PXDesign.Config.default_config(; project_root=".")
+cfg = Protenix.Config.default_config(; project_root=".")
 cfg["input_json_path"] = "design_input.yaml"
 cfg["dump_dir"] = "./output"
 cfg["model_name"] = "pxdesign_v0.1.0"
 cfg["seeds"] = [101]
 cfg["gpu"] = true
-PXDesign.Config.set_nested!(cfg, "sample_diffusion.N_step", 200)
-PXDesign.Config.set_nested!(cfg, "sample_diffusion.N_sample", 5)
+Protenix.Config.set_nested!(cfg, "sample_diffusion.N_step", 200)
+Protenix.Config.set_nested!(cfg, "sample_diffusion.N_sample", 5)
 
-result = PXDesign.run_infer(cfg)
+result = Protenix.run_infer(cfg)
 # result["status"] == "ok_scaffold_model"
 ```
 
@@ -348,19 +348,19 @@ Attach MSA to an existing JSON file. Writes a new JSON with MSA fields added.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PXDESIGN_WEIGHTS_REPO_ID` | `MurrellLab/PXDesign.jl` | HuggingFace repo for weights |
-| `PXDESIGN_WEIGHTS_REVISION` | `main` | Git revision for weights |
-| `PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY` | `false` | Offline mode (cached only) |
-| `PXDESIGN_ESM_LOCAL_FILES_ONLY` | `false` | Offline mode for ESM weights |
-| `PXDESIGN_ESM_REPO_ID` | `facebook/esmfold_v1` | ESM2 weight source |
-| `PXDESIGN_ESM_ISM_REPO_ID` | *(from weights repo)* | ISM weight source |
+| `PROTENIX_WEIGHTS_REPO_ID` | `MurrellLab/PXDesign.jl` | HuggingFace repo for weights |
+| `PROTENIX_WEIGHTS_REVISION` | `main` | Git revision for weights |
+| `PROTENIX_WEIGHTS_LOCAL_FILES_ONLY` | `false` | Offline mode (cached only) |
+| `PROTENIX_ESM_LOCAL_FILES_ONLY` | `false` | Offline mode for ESM weights |
+| `PROTENIX_ESM_REPO_ID` | `facebook/esmfold_v1` | ESM2 weight source |
+| `PROTENIX_ESM_ISM_REPO_ID` | *(from weights repo)* | ISM weight source |
 | `PROTENIX_DATA_ROOT_DIR` | *(auto)* | Override data cache directory |
 
 ---
 
 ## CLI
 
-All commands via `PXDesign.main(args)`:
+All commands via `Protenix.main(args)`:
 
 | Command | Description |
 |---------|-------------|

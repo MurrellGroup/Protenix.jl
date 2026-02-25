@@ -9,9 +9,9 @@
 # but built entirely from Julia without touching a JSON file.
 #
 # Usage:
-#   julia --project=PXDesign.jl examples/rbd_glycosylated_repl.jl
+#   julia --project=Protenix.jl examples/rbd_glycosylated_repl.jl
 
-using PXDesign
+using Protenix
 
 # ── 1. RBD sequence (SARS-CoV-2, residues 333–526) ──────────────────────────
 const RBD_SEQ = "RVQPTESIVRFPNITNLCPFGEVFNATRFASVYAWNRKRISNCVADYSVLYNSASFSTFK" *

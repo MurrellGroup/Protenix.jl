@@ -163,9 +163,9 @@ end
 
 function resolve_weight_source(model_name::AbstractString)
     layout_spec = _lookup_model_layout(model_name)
-    repo_id = get(ENV, "PXDESIGN_WEIGHTS_REPO_ID", _DEFAULT_REPO_ID)
-    revision = get(ENV, "PXDESIGN_WEIGHTS_REVISION", _DEFAULT_REVISION)
-    local_files_only = _env_bool("PXDESIGN_WEIGHTS_LOCAL_FILES_ONLY", false)
+    repo_id = get(ENV, "PROTENIX_WEIGHTS_REPO_ID", _DEFAULT_REPO_ID)
+    revision = get(ENV, "PROTENIX_WEIGHTS_REVISION", _DEFAULT_REVISION)
+    local_files_only = _env_bool("PROTENIX_WEIGHTS_LOCAL_FILES_ONLY", false)
     return (
         model_name = _normalized_model_key(model_name),
         layout = layout_spec.layout,
