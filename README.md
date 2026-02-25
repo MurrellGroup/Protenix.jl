@@ -1,6 +1,6 @@
-# PXDesign.jl
+# Protenix.jl
 
-Pure Julia implementation of [Protenix](https://github.com/bytedance/Protenix) structure prediction and [PXDesign](https://github.com/bytedance/PXDesign) protein binder design. Supports all Protenix v0.5 and v1.0 folding models plus the PXDesign diffusion design model.
+Unofficial pure Julia implementation of [Protenix](https://github.com/bytedance/Protenix) structure prediction and [PXDesign](https://github.com/bytedance/PXDesign) protein binder design. Supports all Protenix v0.5 and v1.0 folding models plus the PXDesign diffusion design model.
 
 ## Installation
 
