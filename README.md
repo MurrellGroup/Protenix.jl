@@ -6,16 +6,11 @@ Unofficial pure Julia implementation of [Protenix](https://github.com/bytedance/
 
 ```julia
 using Pkg
-Pkg.develop(path="path/to/Protenix.jl")
-```
-
-If shared dependencies aren't resolved automatically:
-
-```julia
-Pkg.develop(path="path/to/Onion.jl")
-Pkg.develop(path="path/to/ProtInterop.jl")
-Pkg.develop(path="path/to/Protenix.jl")
-Pkg.instantiate()
+Pkg.add(url="https://github.com/MurrellGroup/Onion.jl", rev="proteins")
+Pkg.add(url="https://github.com/MurrellGroup/ONIONop.jl")
+Pkg.add(url="https://github.com/MurrellGroup/ProtInterop.jl")
+Pkg.add(url="https://github.com/MurrellGroup/ESMFold.jl")
+Pkg.add(url="https://github.com/MurrellGroup/Protenix.jl")
 ```
 
 CUDA GPU support requires `CUDA.jl` and `cuDNN.jl` in your environment. SMILES ligand support requires `MoleculeFlow.jl`.
