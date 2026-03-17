@@ -2,8 +2,8 @@
 
 Unofficial pure Julia implementation of [Protenix](https://github.com/bytedance/Protenix) structure prediction and [PXDesign](https://github.com/bytedance/PXDesign) protein binder design. Supports all Protenix v0.5 and v1.0 folding models plus the PXDesign diffusion design model.
 
-[!IMPORTANT]
-This package is massive, complicated, new, and insufficiently tested. It seems to mostly work, but do not rely on it to be equivlent to the python version.
+>[!IMPORTANT]
+>This package is massive, complicated, new, and insufficiently tested. It seems to mostly work, but do not rely on it to be equivlent to the python version.
 
 ## Installation
 
