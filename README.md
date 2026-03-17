@@ -6,8 +6,9 @@ Unofficial pure Julia implementation of [Protenix](https://github.com/bytedance/
 
 ```julia
 using Pkg
+Pkg.Registry.add(url="https://github.com/MurrellGroup/MurrellGroupRegistry")
+Pkg.add("ONIONop")
 Pkg.add(url="https://github.com/MurrellGroup/Onion.jl", rev="proteins")
-Pkg.add(url="https://github.com/MurrellGroup/ONIONop.jl")
 Pkg.add(url="https://github.com/MurrellGroup/ProtInterop.jl")
 Pkg.add(url="https://github.com/MurrellGroup/ESMFold.jl")
 Pkg.add(url="https://github.com/MurrellGroup/Protenix.jl")
